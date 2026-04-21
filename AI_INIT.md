@@ -12,6 +12,7 @@ KoalaSync is a specialized tool for **synchronized video playback** across multi
 ## 2. Repository Structure
 - `extension/`: Chrome Extension (Manifest V3). Contains background service worker, content scripts, and popup UI.
 - `server/`: Node.js Relay Server using Socket.IO (WebSocket-only).
+- `website/`: **Landing Page** (Marketing, Tutorials, and Downloads).
 - `shared/`: **Single Source of Truth** for protocol constants and event names.
 - `scripts/`: Utility scripts (e.g., `sync-constants.sh`).
 - `docker-compose.yml`: Root-level orchestration for the relay server.

@@ -8,6 +8,7 @@ KoalaSync is a Chrome Extension and Relay Server for synchronized video playback
 ## Repository Structure
 - `extension/`: Chrome Extension (Manifest V3).
 - `server/`: Node.js + Socket.IO Relay Server.
+- `website/`: Static marketing landing page & tutorials.
 - `shared/`: Shared protocol constants.
 
 ## Setup Instructions
