@@ -35,6 +35,11 @@
       ],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": ["https://koalasync.shik3i.net/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
     }
   ],
   "icons": {

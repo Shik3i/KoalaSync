@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+/* KoalaSync Design System - Privacy-Focused (No External Assets) */
 
 :root {
     --bg: #0f172a;
@@ -12,6 +12,36 @@
     --glass-border: rgba(255, 255, 255, 0.05);
 }
 
+.invite-banner {
+    background: var(--accent);
+    color: white;
+    padding: 0.75rem 0;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+    position: relative;
+    z-index: 2000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.btn-banner {
+    background: white;
+    color: var(--accent);
+    padding: 4px 12px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-left: 12px;
+    cursor: pointer;
+    border: none;
+    transition: transform 0.2s;
+}
+
+.btn-banner:hover {
+    transform: scale(1.05);
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -19,7 +49,7 @@
 }
 
 body {
-    font-family: 'Outfit', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
     background-color: var(--bg);
     color: var(--text);
     line-height: 1.6;
@@ -285,6 +315,64 @@ footer {
     transform: translateY(0);
 }
 
+/* --- Legal Pages --- */
+.legal-content {
+    max-width: 800px;
+    margin: 8rem auto 4rem auto;
+    padding: 0 2rem;
+}
+
+.legal-card {
+    background: var(--card);
+    padding: 3rem;
+    border-radius: 24px;
+    border: 1px solid var(--glass-border);
+}
+
+.legal-card h1 {
+    font-size: 2.5rem;
+    margin-bottom: 2rem;
+    text-align: center;
+}
+
+.legal-card h2 {
+    font-size: 1.25rem;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+}
+
+.legal-card p {
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+}
+
+/* Reset global section padding for legal sections specifically */
+.legal-card section {
+    padding: 0 !important;
+    margin-bottom: 0.75rem;
+}
+
+/* --- Join Page Specifics --- */
+.join-card {
+    max-width: 450px;
+    margin: 6rem auto;
+    text-align: center;
+}
+
+.room-badge {
+    display: inline-block;
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--accent);
+    padding: 0.5rem 1rem;
+    border-radius: 99px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
 @media (max-width: 768px) {
     .hero-grid, .step {
         grid-template-columns: 1fr;
@@ -298,5 +386,8 @@ footer {
     }
     .nav-links {
         display: none;
+    }
+    .legal-card {
+        padding: 1.5rem;
     }
 }

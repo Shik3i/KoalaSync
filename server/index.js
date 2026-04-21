@@ -42,8 +42,46 @@ function log(type, message, details = '') {
     console.log(`[${timestamp}] [${type}] ${message}`, details);
 }
 
-// Rate Limiting Storage
+// Rate Limiting & Security
 const connectionCounts = new Map(); // ip -> { count, resetTime }
+const failedAuthAttempts = new Map(); // Map<IP+RoomID, {count, lastAttempt}>
+
+function checkAuthRate(ip, roomId) {
+    const key = `${ip}:${roomId}`;
+    const now = Date.now();
+    const record = failedAuthAttempts.get(key) || { count: 0, lastAttempt: 0 };
+    
+    // Block for 15 mins if 5 fails in 2 mins
+    if (record.count >= 5 && (now - record.lastAttempt) < 15 * 60 * 1000) {
+        return false;
+    }
+    
+    // Reset if last attempt was long ago
+    if ((now - record.lastAttempt) > 2 * 60 * 1000) {
+        record.count = 0;
+    }
+    
+    return true;
+}
+
+function recordAuthFailure(ip, roomId) {
+    const key = `${ip}:${roomId}`;
+    const record = failedAuthAttempts.get(key) || { count: 0, lastAttempt: 0 };
+    record.count++;
+    record.lastAttempt = Date.now();
+    failedAuthAttempts.set(key, record);
+}
+
+// Periodically clean up old auth failure records (every hour)
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of failedAuthAttempts.entries()) {
+        if (now - record.lastAttempt > 60 * 60 * 1000) {
+            failedAuthAttempts.delete(key);
+        }
+    }
+}, 60 * 60 * 1000);
+
 const eventCounts = new Map(); // socketId -> { count, resetTime }
 
 function checkConnectionRate(ip) {
@@ -121,6 +159,12 @@ io.on('connection', (socket) => {
                 }
             }
 
+            const ip = socket.handshake.address;
+            if (!checkAuthRate(ip, roomId)) {
+                socket.emit(EVENTS.ERROR, { message: "Too many failed attempts. Try again later." });
+                return;
+            }
+
             let room = rooms.get(roomId);
 
             if (!room) {
@@ -141,6 +185,7 @@ io.on('connection', (socket) => {
             } else {
                 if (room.passwordHash) {
                     if (!password || !(await bcrypt.compare(password, room.passwordHash))) {
+                        recordAuthFailure(ip, roomId);
                         socket.emit(EVENTS.ERROR, { message: "Invalid password" });
                         return;
                     }
@@ -190,6 +235,14 @@ io.on('connection', (socket) => {
                 socket.to(mapping.roomId).emit(eventName, { ...data, senderId: mapping.peerId });
             }
         });
+    });
+
+    socket.on(EVENTS.GET_ROOMS, () => {
+        const list = Array.from(rooms.entries()).map(([id, r]) => ({
+            id,
+            peerCount: r.peers.size
+        }));
+        socket.emit(EVENTS.ROOM_LIST, { rooms: list });
     });
 
     socket.on(EVENTS.LEAVE_ROOM, () => {

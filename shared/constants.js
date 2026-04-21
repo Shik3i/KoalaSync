@@ -6,7 +6,8 @@ export const PROTOCOL_VERSION = "1.0.0";
 export const APP_VERSION = "1.0.0";
 
 export const OFFICIAL_SERVER_URL = 'wss://sync.shik3i.net';
-export const OFFICIAL_SERVER_TOKEN = '39ce48b42aa442a34b80cfe2d7314177d4c725c4316b1f83aa3a1e2f0f5c5bfd';
+export const OFFICIAL_LANDING_PAGE_URL = 'https://koalasync.shik3i.net';
+export const OFFICIAL_SERVER_TOKEN = 'koala_secure_access_2026';
 
 export const EVENTS = {
     // Connection & Room
@@ -24,7 +25,9 @@ export const EVENTS = {
     PEER_STATUS: "peer_status", // Heartbeat from peers
     FORCE_SYNC_PREPARE: "force_sync_prepare",
     FORCE_SYNC_ACK: "force_sync_ack",
-    FORCE_SYNC_EXECUTE: "force_sync_execute"
+    FORCE_SYNC_EXECUTE: "force_sync_execute",
+    GET_ROOMS: "get_rooms",
+    ROOM_LIST: "room_list"
 };
 
 export const HEARTBEAT_INTERVAL = 15000; // 15s

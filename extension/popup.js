@@ -1,4 +1,4 @@
-import { EVENTS } from './shared/constants.js';
+import { EVENTS, OFFICIAL_LANDING_PAGE_URL } from './shared/constants.js';
 import { BLACKLIST_DOMAINS } from './shared/blacklist.js';
 
 const elements = {
@@ -23,7 +23,11 @@ const elements = {
     inviteLink: document.getElementById('inviteLink'),
     filterNoise: document.getElementById('filterNoise'),
     historyList: document.getElementById('historyList'),
-    copyLogs: document.getElementById('copyLogs')
+    copyLogs: document.getElementById('copyLogs'),
+    createRoomBtn: document.getElementById('createRoomBtn'),
+    publicRooms: document.getElementById('publicRooms'),
+    refreshRooms: document.getElementById('refreshRooms'),
+    roomError: document.getElementById('roomError')
 };
 
 // --- Initialization ---
@@ -55,6 +59,12 @@ async function init() {
             updatePeerList(res.peers);
         }
     });
+
+    // Check for invite link on landing page
+    checkInviteLink();
+
+    // Initial room list fetch
+    chrome.runtime.sendMessage({ type: 'GET_ROOM_LIST' });
 }
 
 // --- UI Logic ---
@@ -62,7 +72,8 @@ function updateUI(roomId, password) {
     const inRoom = !!roomId;
     elements.roomInfo.style.display = inRoom ? 'block' : 'none';
     if (inRoom) {
-        elements.inviteLink.value = `${roomId}${password ? '#' + password : ''}`;
+        const invite = `${OFFICIAL_LANDING_PAGE_URL}/join.html#join:${roomId}:${password}`;
+        elements.inviteLink.value = invite;
     }
 }
 
@@ -168,6 +179,43 @@ function refreshHistory() {
     });
 }
 
+function updateRoomList(rooms) {
+    if (!rooms || rooms.length === 0) {
+        elements.publicRooms.innerHTML = '<div style="text-align:center; padding: 10px; color:var(--text-muted);">No active rooms</div>';
+        return;
+    }
+    elements.publicRooms.innerHTML = rooms.map(r => `
+        <div class="room-item" style="display:flex; justify-content:space-between; align-items:center; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor:pointer;" data-id="${r.id}">
+            <span style="font-weight:600;">${r.id}</span>
+            <span style="font-size:11px; color:var(--accent)">${r.peerCount} peers</span>
+        </div>
+    `).join('');
+
+    elements.publicRooms.querySelectorAll('.room-item').forEach(item => {
+        item.addEventListener('click', () => {
+            elements.roomId.value = item.dataset.id;
+            elements.password.value = '';
+            elements.password.focus();
+        });
+    });
+}
+
+function checkInviteLink() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs[0];
+        if (tab && tab.url && tab.url.includes(OFFICIAL_LANDING_PAGE_URL) && tab.url.includes('#join:')) {
+            const parts = tab.url.split('#join:')[1].split(':');
+            if (parts.length >= 2) {
+                elements.roomId.value = parts[0];
+                elements.password.value = parts[1];
+                // Visual feedback
+                elements.joinBtn.style.boxShadow = '0 0 15px var(--accent)';
+                setTimeout(() => elements.joinBtn.style.boxShadow = '', 2000);
+            }
+        }
+    });
+}
+
 function setServerMode(custom) {
     elements.serverOfficial.classList.toggle('active', !custom);
     elements.serverCustom.classList.toggle('active', custom);
@@ -194,6 +242,28 @@ elements.tabs.forEach(btn => {
     });
 });
 
+function showError(msg) {
+    if (!elements.roomError) return;
+    elements.roomError.textContent = msg;
+    elements.roomError.style.display = 'block';
+    elements.roomId.style.borderColor = 'var(--error)';
+    elements.password.style.borderColor = 'var(--error)';
+    
+    // Shake effect
+    document.getElementById('tab-room').animate([
+        { transform: 'translateX(0)' },
+        { transform: 'translateX(-5px)' },
+        { transform: 'translateX(5px)' },
+        { transform: 'translateX(0)' }
+    ], { duration: 200, iterations: 2 });
+
+    setTimeout(() => {
+        if (elements.roomError) elements.roomError.style.display = 'none';
+        elements.roomId.style.borderColor = '';
+        elements.password.style.borderColor = '';
+    }, 5000);
+}
+
 // --- Action Handlers ---
 elements.joinBtn.addEventListener('click', async () => {
     const serverUrl = elements.serverUrl.value;
@@ -214,6 +284,22 @@ elements.leaveBtn.addEventListener('click', async () => {
     elements.roomId.value = '';
     elements.password.value = '';
     updateUI(null, null);
+});
+
+elements.createRoomBtn.addEventListener('click', () => {
+    const animals = ['koala', 'panda', 'tiger', 'eagle', 'fox', 'bear'];
+    const adj = ['happy', 'cool', 'fast', 'smart', 'brave', 'calm'];
+    const id = `${adj[Math.floor(Math.random() * adj.length)]}-${animals[Math.floor(Math.random() * animals.length)]}-${Math.floor(Math.random() * 100)}`;
+    const pass = Math.random().toString(36).substring(2, 8);
+    
+    elements.roomId.value = id;
+    elements.password.value = pass;
+    elements.joinBtn.click();
+});
+
+elements.refreshRooms.addEventListener('click', () => {
+    elements.publicRooms.innerHTML = '<div style="text-align:center; padding: 10px; color:var(--text-muted);">Refreshing...</div>';
+    chrome.runtime.sendMessage({ type: 'GET_ROOM_LIST' });
 });
 
 elements.targetTab.addEventListener('change', async () => {
@@ -270,6 +356,10 @@ chrome.runtime.onMessage.addListener((msg) => {
         applyConnectionStatus(msg.status);
     } else if (msg.type === 'HISTORY_UPDATE') {
         updateHistory(msg.history);
+    } else if (msg.type === 'ROOM_LIST') {
+        updateRoomList(msg.rooms);
+    } else if (msg.type === 'LOG_UPDATE' && msg.log && msg.log.type === 'error') {
+        showError(msg.log.message);
     }
 });
 

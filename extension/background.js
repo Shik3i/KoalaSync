@@ -191,9 +191,30 @@ function handleServerEvent(event, data) {
             currentRoom = data;
             addLog(`Joined Room: ${data.roomId}`, 'success');
             chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: data.peers }).catch(() => {});
+            // Inform Website Bridge
+            chrome.tabs.query({}, (tabs) => {
+                tabs.forEach(tab => {
+                    chrome.tabs.sendMessage(tab.id, { type: 'JOIN_STATUS', success: true, message: 'Joined' }).catch(() => {});
+                });
+            });
+            break;
+        case EVENTS.ROOM_LIST:
+            chrome.runtime.sendMessage({ type: 'ROOM_LIST', rooms: data.rooms }).catch(() => {});
             break;
         case EVENTS.ERROR:
             addLog(`Server Error: ${data.message}`, 'error');
+            chrome.notifications.create({
+                type: 'basic',
+                iconUrl: 'icons/icon128.png',
+                title: 'KoalaSync Error',
+                message: data.message
+            });
+            // Inform Website Bridge
+            chrome.tabs.query({}, (tabs) => {
+                tabs.forEach(tab => {
+                    chrome.tabs.sendMessage(tab.id, { type: 'JOIN_STATUS', success: false, message: data.message }).catch(() => {});
+                });
+            });
             break;
         case EVENTS.PLAY:
         case EVENTS.PAUSE:
@@ -327,6 +348,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(logs);
     } else if (message.type === 'GET_HISTORY') {
         sendResponse(history);
+    } else if (message.type === 'GET_ROOM_LIST') {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(`42${JSON.stringify([EVENTS.GET_ROOMS])}`);
+        }
+    } else if (message.type === 'WEB_JOIN_REQUEST') {
+        const { roomId, password } = message;
+        chrome.storage.sync.set({ roomId, password }, () => {
+            connect();
+            // We wait for status update in handleServerEvent
+        });
     } else if (message.type === 'CONTENT_EVENT') {
         if (sender.tab) {
             currentTabId = sender.tab.id;

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Datenschutz | KoalaSync</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="assets/logo.png">
+</head>
+<body>
+    <div class="bg-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <nav>
+        <div class="container nav-content">
+            <a href="index.html" class="logo-area" style="text-decoration: none;">
+                <img src="assets/logo.png" alt="KoalaSync Logo">
+                <span>KoalaSync</span>
+            </a>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="https://github.com/shik3i/KoalaSync" target="_blank">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="legal-content">
+        <div class="legal-card" data-reveal style="padding: 2rem;">
+            <h1>Datenschutz</h1>
+            <p style="text-align: center; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; border-bottom: 1px solid var(--glass-border); padding-bottom: 1.5rem; margin-bottom: 2rem;">
+                Sicherheit & Privatsphäre
+            </p>
+
+            <section>
+                <h2>1. Hosting & Logfiles</h2>
+                <p>
+                    Diese Seite wird auf einem privaten Server gehostet. Zur Gewährleistung der Stabilität werden standardmäßige Server-Logs (IP, Browser, Zeit) erhoben, aber nicht mit Personen verknüpft und nach 7 Tagen automatisch gelöscht.
+                </p>
+            </section>
+
+            <section>
+                <h2>2. Keine Drittanbieter & Tracking</h2>
+                <p>
+                    KoalaSync verzichtet bewusst auf Analyse-Tools, Tracking-Cookies oder Werbenetzwerke. Wir laden keine Ressourcen von Drittanbietern (wie Google Fonts) nach, um Ihre Privatsphäre maximal zu schützen.
+                </p>
+            </section>
+
+            <section>
+                <h2>3. Relay-Server Architektur</h2>
+                <p>
+                    Unser Relay-Server arbeitet ausschließlich im Arbeitsspeicher (RAM). Nachrichten zwischen Teilnehmern werden nicht auf Festplatten gespeichert und sind flüchtig. Sobald ein Raum geschlossen wird, werden alle zugehörigen Metadaten sofort gelöscht.
+                </p>
+            </section>
+
+            <section>
+                <h2>4. Brute-Force Schutz</h2>
+                <p>
+                    Zur Sicherheit unserer Nutzer speichern wir fehlgeschlagene Login-Versuche (IP-Adresse und Raum-ID) für maximal 15 Minuten im RAM, um automatisierte Angriffe zu verhindern. Diese Daten werden danach rückstandslos gelöscht.
+                </p>
+            </section>
+
+            <section>
+                <h2>5. Ihre Rechte</h2>
+                <p>
+                    Sie haben das Recht auf Auskunft, Berichtigung oder Löschung Ihrer Daten. Da wir jedoch keine personenbezogenen Daten dauerhaft speichern, ist eine Zuordnung zu Ihrer Person in der Regel technisch nicht möglich.
+                </p>
+                <p>Kontakt bei Fragen: <span style="color: var(--accent); cursor: pointer; text-decoration: underline;" onclick="this.innerHTML='koalasync_datenschutz' + '@' + 'koalamail.rocks'">[E-Mail anzeigen]</span></p>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 KoalaSync. Open source under the MIT License.</p>
+            <p style="font-size: 0.8rem; margin-top: 0.5rem;">No data is stored on our servers. Pure RAM-based relay.</p>
+            <div style="margin-top: 1.5rem; font-size: 0.8rem; display: flex; justify-content: center; gap: 1.5rem;">
+                <a href="impressum.html" style="color: var(--text-muted); text-decoration: none;">Impressum</a>
+                <a href="datenschutz.html" style="color: var(--text-muted); text-decoration: none;">Datenschutz</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

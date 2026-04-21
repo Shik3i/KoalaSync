@@ -222,7 +222,17 @@
             <label>Password (Optional)</label>
             <input type="password" id="password" placeholder="Room password">
         </div>
-        <button id="joinBtn" class="primary">Join / Create Room</button>
+        <div id="roomError" style="display:none; color:var(--error); font-size:11px; margin-bottom:8px; text-align:center;"></div>
+        <button id="joinBtn" class="primary">Join Room</button>
+        <button id="createRoomBtn" class="secondary" style="border: 1px solid var(--accent); color: var(--accent);">Create Random Room</button>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; margin-bottom: 8px;">
+            <label style="margin:0;">Public Rooms</label>
+            <button id="refreshRooms" style="background:transparent; border:none; color:var(--accent); font-size:10px; cursor:pointer;">REFRESH</button>
+        </div>
+        <div id="publicRooms" class="info-card" style="max-height: 120px; overflow-y: auto; padding: 4px;">
+            <div style="text-align:center; color: var(--text-muted); font-size: 11px; padding: 10px;">Refreshing...</div>
+        </div>
         
         <div id="roomInfo" style="display:none; margin-top: 20px;">
             <label>Invite Link</label>

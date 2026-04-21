@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beitreten | KoalaSync</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="assets/logo.png">
+</head>
+<body>
+    <div class="bg-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <nav>
+        <div class="container nav-content">
+            <a href="index.html" class="logo-area" style="text-decoration: none;">
+                <img src="assets/logo.png" alt="KoalaSync Logo">
+                <span>KoalaSync</span>
+            </a>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="https://github.com/shik3i/KoalaSync" target="_blank">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="legal-content join-card">
+        <div class="legal-card" id="join-container" data-reveal style="padding: 2.5rem;">
+            <div class="room-badge">INVITATION DETECTED</div>
+            <h1 id="join-title" style="font-size: 2rem; margin-bottom: 1rem;">Ready to sync?</h1>
+            <p id="join-desc" style="text-align: center; color: var(--text-muted); margin-bottom: 2rem; font-size: 0.9rem;">
+                You've been invited to join a synchronized session.
+            </p>
+
+            <div id="room-info-box" style="background: rgba(255,255,255,0.03); padding: 2rem; border-radius: 20px; margin-bottom: 2rem; border: 1px solid var(--glass-border); text-align: center; position: relative; overflow: hidden;">
+                <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.2em; color: var(--accent); margin-bottom: 0.75rem; font-weight: 700;">Room ID</div>
+                <div id="display-room-id" style="font-size: 1.75rem; font-weight: 800; letter-spacing: 1px; color: white;">-------</div>
+            </div>
+
+            <div id="join-actions" style="display: flex; flex-direction: column; gap: 1rem;">
+                <div style="text-align: center; color: var(--text-muted); font-size: 0.8rem;">Detecting extension...</div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 KoalaSync. Open source under the MIT License.</p>
+            <p style="font-size: 0.8rem; margin-top: 0.5rem;">No data is stored on our servers. Pure RAM-based relay.</p>
+            <div style="margin-top: 1.5rem; font-size: 0.8rem; display: flex; justify-content: center; gap: 1.5rem;">
+                <a href="impressum.html" style="color: var(--text-muted); text-decoration: none;">Impressum</a>
+                <a href="datenschutz.html" style="color: var(--text-muted); text-decoration: none;">Datenschutz</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
