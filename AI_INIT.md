@@ -2,6 +2,9 @@
 
 Welcome to the KoalaSync project. This file is the primary entry point for any developer or AI agent working on this codebase. It defines the architecture, non-negotiables, and workflows required to maintain the stability and security of the system.
 
+> [!IMPORTANT]
+> **Privacy & Data Sovereignty**: KoalaSync follows a strict "Zero-External-Requests" policy. No fonts, scripts, or assets (images/icons) may be loaded from 3rd-party CDNs or external servers. Everything must be served locally or from the project's own infrastructure.
+
 ---
 
 ## 1. Project Overview
@@ -29,7 +32,7 @@ Before touching any code, you MUST read the following documents in order:
 
 ## 4. Design Guidelines
 The popup UI follows a strict design system. Do not modify these variables or the layout structure without explicit approval.
-- **Font**: 'Outfit' (Google Fonts).
+- **Font**: System font stack (e.g., `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`). **MANDATORY**: No external CDNs or Google Fonts to ensure 100% privacy.
 - **Popup Width**: Fixed at `320px`.
 - **Tab Structure**: Must maintain the **Room**, **Sync**, and **Dev** tabs.
 - **CSS Variables**:
