@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+server/.env
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS Metadata
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build / Derived Files
+dist/
+build/
+coverage/
+
+# KoalaSync Specific
+# We ignore the synced files in the extension folder to ensure 
+# the root 'shared/' remains the Single Source of Truth.
+extension/shared/

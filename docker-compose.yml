@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: koala-sync-server
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - server/.env
+    restart: always

@@ -1,0 +1,375 @@
+import { EVENTS, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, APP_VERSION } from './shared/constants.js';
+
+// --- State Management ---
+let socket = null;
+let reconnectDelay = 1000;
+const MAX_RECONNECT_DELAY = 30000;
+let isConnecting = false;
+let peerId = null; // initialized via getPeerId()
+let currentRoom = null;
+let currentTabId = null;
+let currentTabTitle = null; // New: for Smart Matching
+let logs = [];
+let history = []; // New: for Action History
+
+// Force Sync Coordination
+let isForceSyncInitiator = false;
+let forceSyncAcks = new Set();
+let forceSyncTimeout = null;
+
+// --- Storage Utils ---
+async function getPeerId() {
+    const data = await chrome.storage.local.get(['peerId']);
+    if (data.peerId) return data.peerId;
+    const newId = self.crypto.randomUUID().substring(0, 8);
+    await chrome.storage.local.set({ peerId: newId });
+    return newId;
+}
+
+async function getSettings() {
+    return new Promise(resolve => {
+        chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'targetTabId'], (data) => {
+            resolve({
+                serverUrl: data.serverUrl || '',
+                useCustomServer: data.useCustomServer || false,
+                roomId: data.roomId || '',
+                password: data.password || '',
+                targetTabId: data.targetTabId || null
+            });
+        });
+    });
+}
+
+function addLog(message, type = 'info') {
+    const log = {
+        timestamp: new Date().toISOString(),
+        message,
+        type
+    };
+    logs.unshift(log);
+    if (logs.length > 50) logs.pop();
+    chrome.runtime.sendMessage({ type: 'LOG_UPDATE', log }).catch(() => {});
+}
+
+// --- WebSocket Client ---
+async function connect() {
+    if (isConnecting || (socket && socket.readyState === WebSocket.OPEN)) return;
+    
+    if (!peerId) peerId = await getPeerId();
+    const settings = await getSettings();
+
+    isConnecting = true;
+    broadcastConnectionStatus('connecting');
+    const isCustomServer = settings.serverUrl && settings.useCustomServer;
+    const finalUrl = isCustomServer ? settings.serverUrl : OFFICIAL_SERVER_URL;
+
+    addLog(`Connecting to ${isCustomServer ? finalUrl : 'Official Server'}...`, 'info');
+
+    const url = new URL(finalUrl);
+    url.pathname = '/socket.io/';
+    url.searchParams.set('EIO', '4');
+    url.searchParams.set('transport', 'websocket');
+    url.searchParams.set('version', APP_VERSION);
+
+    if (!isCustomServer) {
+        url.searchParams.set('token', OFFICIAL_SERVER_TOKEN);
+    }
+
+    socket = new WebSocket(url.toString());
+
+    socket.onopen = () => {
+        isConnecting = false;
+        reconnectDelay = 1000;
+        addLog('WebSocket Connection Opened', 'success');
+        broadcastConnectionStatus('connected');
+        
+        // Socket.IO Handshake: Send "40" to join default namespace
+        socket.send('40');
+    };
+
+    socket.onmessage = (event) => {
+        const msg = event.data;
+        
+        // Engine.IO Ping/Pong
+        if (msg === '2') {
+            socket.send('3'); // Pong
+            return;
+        }
+
+        // Socket.IO Handshake / Packet parsing
+        if (msg.startsWith('0')) {
+            addLog(`Socket.IO Handshake: ${msg}`, 'info');
+        } else if (msg.startsWith('40')) {
+            addLog('Joined Namespace /', 'success');
+            // Auto-rejoin room if we have one in settings
+            if (settings.roomId) {
+                emit(EVENTS.JOIN_ROOM, { 
+                    roomId: settings.roomId, 
+                    password: settings.password,
+                    peerId,
+                    protocolVersion: PROTOCOL_VERSION
+                });
+            }
+        } else if (msg.startsWith('42')) {
+            // Event: 42["event", data]
+            try {
+                const payload = JSON.parse(msg.substring(2));
+                handleServerEvent(payload[0], payload[1]);
+            } catch (e) {
+                addLog(`Failed to parse message: ${msg}`, 'error');
+            }
+        }
+    };
+
+    socket.onclose = () => {
+        isConnecting = false;
+        if (currentRoom) {
+            currentRoom.peers = [];
+            chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
+        }
+        broadcastConnectionStatus('disconnected');
+        addLog(`Disconnected. Retrying in ${reconnectDelay / 1000}s...`, 'warn');
+        scheduleReconnect();
+    };
+
+    socket.onerror = (err) => {
+        broadcastConnectionStatus('disconnected');
+        addLog('WebSocket Error', 'error');
+        socket.close();
+    };
+}
+
+function broadcastConnectionStatus(status) {
+    chrome.runtime.sendMessage({ type: 'CONNECTION_STATUS', status }).catch(() => {});
+    updateBadgeStatus();
+}
+
+function updateBadgeStatus() {
+    if (currentTabId) {
+        chrome.action.setBadgeText({ text: 'ON' });
+        chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
+    } else {
+        chrome.action.setBadgeText({ text: '' });
+    }
+}
+
+function showNotification(senderName, action) {
+    const label = action === 'play' ? 'started playback' : 
+                  action === 'pause' ? 'paused playback' : 
+                  action === 'seek' ? 'seeked the video' :
+                  action === 'force_sync_execute' ? 'synchronized everyone' : action;
+    
+    chrome.notifications.create(`sync_${Date.now()}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'KoalaSync',
+        message: `${senderName || 'A peer'} ${label}.`,
+        priority: 1
+    });
+}
+
+function scheduleReconnect() {
+    setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+        connect();
+    }, reconnectDelay);
+}
+
+function emit(event, data) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        const msg = `42${JSON.stringify([event, data])}`;
+        socket.send(msg);
+    }
+}
+
+// --- Event Handlers ---
+function handleServerEvent(event, data) {
+    // console.log(`[RECV] ${event}`, data);
+    
+    switch (event) {
+        case EVENTS.ROOM_DATA:
+            currentRoom = data;
+            addLog(`Joined Room: ${data.roomId}`, 'success');
+            chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: data.peers }).catch(() => {});
+            break;
+        case EVENTS.ERROR:
+            addLog(`Server Error: ${data.message}`, 'error');
+            break;
+        case EVENTS.PLAY:
+        case EVENTS.PAUSE:
+        case EVENTS.SEEK:
+        case EVENTS.FORCE_SYNC_PREPARE:
+            routeToContent(event, data);
+            break;
+        case EVENTS.FORCE_SYNC_ACK:
+            if (isForceSyncInitiator) {
+                forceSyncAcks.add(data.senderId);
+                addLog(`Received ACK from ${data.senderId} (${forceSyncAcks.size})`, 'info');
+                // Check if all peers responded (minus ourselves)
+                const peerCount = currentRoom ? currentRoom.peers.length : 1;
+                if (forceSyncAcks.size >= peerCount - 1) {
+                    executeForceSync();
+                }
+            }
+            break;
+        case EVENTS.FORCE_SYNC_EXECUTE:
+            routeToContent(event, data);
+            break;
+        case EVENTS.PEER_STATUS:
+            if (currentRoom) {
+                if (data.status === 'joined') {
+                    if (!currentRoom.peers.find(p => (p.peerId || p) === data.peerId)) {
+                        currentRoom.peers.push({ peerId: data.peerId, tabTitle: data.tabTitle });
+                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                    }
+                } else if (data.status === 'left') {
+                    currentRoom.peers = currentRoom.peers.filter(p => (p.peerId || p) !== data.peerId);
+                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                } else {
+                    // Heartbeat/Update: Update tabTitle for matching
+                    const peer = currentRoom.peers.find(p => (p.peerId || p) === data.peerId);
+                    if (peer) {
+                        if (typeof peer === 'object') {
+                            peer.tabTitle = data.tabTitle;
+                        } else {
+                            // Migration: replace string with object
+                            const idx = currentRoom.peers.indexOf(peer);
+                            currentRoom.peers[idx] = { peerId: data.peerId, tabTitle: data.tabTitle };
+                        }
+                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                    }
+                }
+            }
+            break;
+        default:
+            // History Tracking
+            const historyEntry = {
+                action: event,
+                senderId: data.senderId || 'You',
+                timestamp: new Date().toISOString()
+            };
+            history.unshift(historyEntry);
+            if (history.length > 20) history.pop();
+            chrome.runtime.sendMessage({ type: 'HISTORY_UPDATE', history }).catch(() => {});
+
+            // Notification for remote actions
+            if (data.senderId) showNotification(data.senderId, event);
+            routeToContent(event, data);
+            break;
+    }
+}
+
+function executeForceSync() {
+    if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
+    isForceSyncInitiator = false;
+    emit(EVENTS.FORCE_SYNC_EXECUTE, {});
+    routeToContent(EVENTS.FORCE_SYNC_EXECUTE, {});
+    addLog('Force Sync Executed', 'success');
+}
+
+async function routeToContent(action, payload) {
+    if (!currentTabId) {
+        const settings = await getSettings();
+        currentTabId = settings.targetTabId;
+    }
+    if (!currentTabId) return;
+
+    const tabId = parseInt(currentTabId);
+    if (isNaN(tabId)) return;
+
+    chrome.tabs.sendMessage(tabId, { 
+        type: 'SERVER_COMMAND',
+        action,
+        payload
+    }).catch(err => {
+        // Auto-Reinject if content script is missing
+        if (err.message.includes('Receiving end does not exist')) {
+            chrome.scripting.executeScript({
+                target: { tabId },
+                files: ['content.js']
+            }).then(() => {
+                setTimeout(() => routeToContent(action, payload), 500);
+            });
+        } else {
+            addLog(`Content Script not responding in tab ${tabId}`, 'warn');
+            currentTabId = null;
+            updateBadgeStatus();
+        }
+    });
+}
+
+// --- Keep-Alive Mechanism ---
+chrome.alarms.create('keepAlive', { periodInMinutes: 0.25 }); // every 15s
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'keepAlive') {
+        // console.log('SW KeepAlive Heartbeat');
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            connect();
+        }
+    }
+});
+
+// --- Extension Message Listeners ---
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'CONNECT') {
+        connect();
+    } else if (message.type === 'GET_STATUS') {
+        const status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting ? 'connecting' : 'disconnected')) : 'disconnected';
+        sendResponse({ status, peers: currentRoom ? currentRoom.peers : [] });
+    } else if (message.type === 'LEAVE_ROOM') {
+        emit(EVENTS.LEAVE_ROOM, { peerId });
+        currentRoom = null;
+        addLog('Left Room', 'info');
+    } else if (message.type === 'CLEAR_LOGS') {
+        logs = [];
+        sendResponse({ status: 'ok' });
+    } else if (message.type === 'GET_LOGS') {
+        sendResponse(logs);
+    } else if (message.type === 'GET_HISTORY') {
+        sendResponse(history);
+    } else if (message.type === 'CONTENT_EVENT') {
+        if (sender.tab) {
+            currentTabId = sender.tab.id;
+            currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
+            updateBadgeStatus();
+        }
+        // Events coming from content script (manual play/pause)
+        if (message.action === EVENTS.FORCE_SYNC_PREPARE) {
+            isForceSyncInitiator = true;
+            forceSyncAcks.clear();
+            addLog('Initiating Force Sync...', 'info');
+            // Timeout if not everyone ACKs
+            forceSyncTimeout = setTimeout(() => {
+                if (isForceSyncInitiator) {
+                    addLog('Force Sync: Timeout waiting for ACKs, executing anyway...', 'warn');
+                    executeForceSync();
+                }
+            }, 5000);
+        }
+        emit(message.action, { ...message.payload, peerId });
+    } else if (message.type === 'FORCE_SYNC_ACK') {
+        emit(EVENTS.FORCE_SYNC_ACK, { peerId });
+    } else if (message.type === 'HEARTBEAT') {
+        if (sender.tab) {
+            currentTabId = sender.tab.id;
+            currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
+        }
+        // Peer status heartbeat from content script
+        emit(EVENTS.PEER_STATUS, { ...message.payload, peerId, tabTitle: currentTabTitle });
+    }
+    return true;
+});
+
+// Tab removal listener
+chrome.tabs.onRemoved.addListener((tabId) => {
+    if (tabId === currentTabId) {
+        currentTabId = null;
+        currentTabTitle = null;
+        chrome.storage.sync.set({ targetTabId: null });
+        updateBadgeStatus();
+        addLog('Target tab closed.', 'warn');
+    }
+});
+
+// Initial Connect
+connect();

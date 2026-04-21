@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>KoalaSync</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --success: #22c55e;
+            --error: #ef4444;
+            --radius: 12px;
+            --star: #fbbf24;
+        }
+
+        body {
+            width: 320px;
+            margin: 0;
+            padding: 16px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 0 16px 0;
+            color: var(--accent);
+            text-align: center;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--card);
+            padding: 4px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-weight: 600;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-weight: 700;
+        }
+
+        input, select {
+            width: 100%;
+            box-sizing: border-box;
+            background: var(--card);
+            border: 1px solid #334155;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            outline: none;
+            font-family: inherit;
+        }
+
+        input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        button.primary {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent);
+            border: none;
+            color: white;
+            font-weight: 700;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 8px;
+        }
+
+        button.primary:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        button.secondary {
+            width: 100%;
+            padding: 10px;
+            background: #334155;
+            border: none;
+            color: white;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+
+        /* Info Cards */
+        .info-card {
+            background: var(--card);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            border: 1px solid #334155;
+        }
+
+        .peer-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #334155;
+        }
+
+        .peer-item:last-child { border: 0; }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        .status-online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+        .status-offline { background: var(--error); }
+
+        /* Logs */
+        #logList {
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 10px;
+            font-family: monospace;
+            background: #000;
+            padding: 8px;
+            border-radius: 8px;
+            color: #ccc;
+        }
+
+        .log-entry { margin-bottom: 4px; }
+        .log-error { color: var(--error); }
+        .log-success { color: var(--success); }
+
+        /* Invite Link */
+        .invite-box {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .invite-box input { flex: 1; font-size: 11px; }
+        .invite-box button { width: 40px; padding: 0; }
+    </style>
+</head>
+<body>
+    <h1>KoalaSync</h1>
+
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-room">Room</button>
+        <button class="tab-btn" data-tab="tab-sync">Sync</button>
+        <button class="tab-btn" data-tab="tab-dev">Dev</button>
+    </div>
+
+    <!-- Room Tab -->
+    <div id="tab-room" class="tab-content active">
+        <div class="form-group">
+            <label>Server</label>
+            <div style="display:flex; gap:4px; margin-bottom:8px;">
+                <button id="serverOfficial" class="tab-btn active" style="flex:1; padding:6px; font-size:11px;">Official</button>
+                <button id="serverCustom" class="tab-btn" style="flex:1; padding:6px; font-size:11px;">Custom</button>
+            </div>
+            <input type="text" id="serverUrl" placeholder="wss://your-server:3000" style="display:none;">
+        </div>
+        <div class="form-group">
+            <label>Room ID</label>
+            <input type="text" id="roomId" placeholder="Leave empty to create">
+        </div>
+        <div class="form-group">
+            <label>Password (Optional)</label>
+            <input type="password" id="password" placeholder="Room password">
+        </div>
+        <button id="joinBtn" class="primary">Join / Create Room</button>
+        
+        <div id="roomInfo" style="display:none; margin-top: 20px;">
+            <label>Invite Link</label>
+            <div class="invite-box">
+                <input type="text" id="inviteLink" readonly>
+                <button id="copyInvite" class="secondary">📋</button>
+            </div>
+            <button id="leaveBtn" class="secondary" style="color: var(--error);">Leave Room</button>
+        </div>
+    </div>
+
+    <!-- Sync Tab -->
+    <div id="tab-sync" class="tab-content">
+        <div class="form-group">
+            <label>Target Tab (Video Source)</label>
+            <select id="targetTab">
+                <option value="">-- Select a Tab --</option>
+            </select>
+        </div>
+        
+        <button id="forceSyncBtn" class="primary" style="background: linear-gradient(135deg, #6366f1, #a855f7);">
+            ⚡ Force Sync Everyone
+        </button>
+
+        <div style="margin-top: 20px;">
+            <label>Peers in Room</label>
+            <div id="peerList" class="info-card">
+                <div style="text-align:center; color: var(--text-muted); font-size: 12px;">No peers connected</div>
+            </div>
+        </div>
+
+        <label>Recent Activity</label>
+        <div id="historyList" class="info-card" style="max-height: 120px; overflow-y: auto; font-size: 11px; color: var(--text-muted);">
+            <!-- History will be injected here -->
+        </div>
+    </div>
+
+    <!-- Dev Tab -->
+    <div id="tab-dev" class="tab-content">
+        <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; background: var(--card); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
+            <label style="margin-bottom: 0;">Filter Noise Tabs</label>
+            <input type="checkbox" id="filterNoise" style="width: auto;" checked>
+        </div>
+
+        <label>Connection Status</label>
+        <div id="connStatus" class="info-card" style="display:flex; align-items:center;">
+            <span id="connDot" class="status-dot status-offline"></span>
+            <span id="connText" style="flex:1;">Disconnected</span>
+            <button id="copyLogs" class="btn secondary" style="width: auto; padding: 4px 10px; font-size: 11px;">Copy Logs</button>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <label>Logs (Last 50)</label>
+            <button id="clearLogs" style="background:transparent; border:none; color:var(--accent); font-size:10px; cursor:pointer;">CLEAR</button>
+        </div>
+        <div id="logList"></div>
+    </div>
+
+    <script src="popup.js" type="module"></script>
+</body>
+</html>
