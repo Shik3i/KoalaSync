@@ -146,13 +146,13 @@
 
     // SPA Navigation Handler (MutationObserver)
     let mutationTimeout = null;
-    const observer = new MutationObserver((mutations) => {
+    const observer = new MutationObserver(() => {
         if (mutationTimeout) clearTimeout(mutationTimeout);
         mutationTimeout = setTimeout(() => {
             const video = findVideo();
-            if (video && !video.koalaSyncInitialized) {
+            if (video && !video.dataset.koalaAttached) {
                 console.log('KoalaSync: New video detected via navigation.');
-                setupVideoListeners(video);
+                setupListeners();
             }
         }, 1000); // 1s debounce
     });
@@ -182,8 +182,7 @@
         }
     }, 15000);
 
-    const observer = new MutationObserver(() => setupListeners());
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Initial Setup
     setupListeners();
 
 })();
