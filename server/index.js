@@ -333,7 +333,10 @@ io.on('connection', (socket) => {
                 return roomData && roomData.peerId === data.targetId;
             });
             if (targetSocket) {
-                targetSocket.emit(EVENTS.EVENT_ACK, { senderId: data.senderId });
+                targetSocket.emit(EVENTS.EVENT_ACK, { 
+                    senderId: data.senderId,
+                    actionTimestamp: data.actionTimestamp
+                });
             }
         });
 

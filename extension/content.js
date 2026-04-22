@@ -127,13 +127,13 @@
             
             if (action === EVENTS.PLAY) {
                 tryMediaAction(EVENTS.PLAY);
-                chrome.runtime.sendMessage({ type: 'CMD_ACK' });
+                chrome.runtime.sendMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp });
             } else if (action === EVENTS.PAUSE) {
                 tryMediaAction(EVENTS.PAUSE);
-                chrome.runtime.sendMessage({ type: 'CMD_ACK' });
+                chrome.runtime.sendMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp });
             } else if (action === EVENTS.SEEK) {
                 tryMediaAction(EVENTS.SEEK, payload);
-                chrome.runtime.sendMessage({ type: 'CMD_ACK' });
+                chrome.runtime.sendMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp });
             } else if (action === EVENTS.FORCE_SYNC_PREPARE) {
                 if (!payload || payload.targetTime === undefined) return;
                 const video = findVideo();
@@ -147,7 +147,7 @@
                 }
             } else if (action === EVENTS.FORCE_SYNC_EXECUTE) {
                 tryMediaAction(EVENTS.PLAY);
-                chrome.runtime.sendMessage({ type: 'CMD_ACK' });
+                chrome.runtime.sendMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp });
             }
         }
 

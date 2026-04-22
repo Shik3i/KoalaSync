@@ -411,10 +411,13 @@ function handleServerEvent(event, data) {
             break;
         case EVENTS.EVENT_ACK:
             if (lastActionState && lastActionState.action && data.senderId) {
-                if (!lastActionState.acks.includes(data.senderId)) {
-                    lastActionState.acks.push(data.senderId);
-                    if (storageInitialized) chrome.storage.session.set({ lastActionState });
-                    chrome.runtime.sendMessage({ type: 'ACTION_UPDATE', state: lastActionState }).catch(() => {});
+                // Correlation Check: Only accept ACK if it matches our current action's timestamp
+                if (data.actionTimestamp === lastActionState.timestamp) {
+                    if (!lastActionState.acks.includes(data.senderId)) {
+                        lastActionState.acks.push(data.senderId);
+                        if (storageInitialized) chrome.storage.session.set({ lastActionState });
+                        chrome.runtime.sendMessage({ type: 'ACTION_UPDATE', state: lastActionState }).catch(() => {});
+                    }
                 }
             }
             break;
@@ -462,11 +465,11 @@ function executeForceSync() {
     addLog('Force Sync Executed', 'success');
 }
 
-function updateLastAction(action, senderId) {
+function updateLastAction(action, senderId, timestamp = Date.now()) {
     lastActionState = {
         action,
         senderId,
-        timestamp: Date.now(),
+        timestamp,
         acks: []
     };
     if (storageInitialized) chrome.storage.session.set({ lastActionState });
@@ -484,11 +487,13 @@ async function routeToContent(action, payload) {
     if (isNaN(tabId)) return;
 
     currentCommandSenderId = payload.senderId || null;
+    const actionTimestamp = payload.actionTimestamp || Date.now();
 
     chrome.tabs.sendMessage(tabId, { 
         type: 'SERVER_COMMAND',
         action,
-        payload
+        payload,
+        actionTimestamp
     }).catch(err => {
         // Auto-Reinject if content script is missing or extension was reloaded
         if (err.message.includes('Receiving end does not exist') || err.message.includes('Extension context invalidated')) {
@@ -642,7 +647,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         
         // Update local state as initiator
-        updateLastAction(message.action, 'You');
+        const timestamp = Date.now();
+        updateLastAction(message.action, 'You', timestamp);
+        message.payload.actionTimestamp = timestamp;
         
         // Events coming from content script or popup
         if (message.action === EVENTS.FORCE_SYNC_PREPARE) {
@@ -677,7 +684,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'CMD_ACK') {
         // Content script successfully ran a command. Send ACK back to the initiator.
         if (currentCommandSenderId && currentCommandSenderId !== peerId) {
-            emit(EVENTS.EVENT_ACK, { senderId: peerId, targetId: currentCommandSenderId });
+            emit(EVENTS.EVENT_ACK, { 
+                senderId: peerId, 
+                targetId: currentCommandSenderId,
+                actionTimestamp: message.actionTimestamp 
+            });
         }
     } else if (message.type === 'HEARTBEAT') {
         if (sender.tab) {
