@@ -848,8 +848,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
     } else if (message.type === 'LOG') {
         addLog(`[Content] ${message.message}`, message.level || 'info');
     }
-    return true; // Keep channel open for async responses
-});
+}
 
 // Tab removal listener
 chrome.tabs.onRemoved.addListener((tabId) => {
