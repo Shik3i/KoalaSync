@@ -1,9 +1,9 @@
-# KoalaSync Protocol Synchronization Guide (SYNC_GUIDE.md)
+# KoalaSync Protocol Synchronization Guide
 
 ## Why do we need to sync?
-KoalaSync uses a "Single Source of Truth" for its communication protocol constants located in the `shared/` directory. However, Chrome Extensions (Manifest V3) are strictly sandboxed and **cannot load or import files from outside their root directory**.
+KoalaSync uses a "Single Source of Truth" for its communication protocol constants located in the root `shared/` directory. However, Chrome Extensions (Manifest V3) are strictly sandboxed and **cannot load or import files from outside their root directory**.
 
-To ensure that the extension and the relay server are always using the exact same event names and protocol versions, we must maintain a mirrored copy of the shared files within the extension folder.
+To ensure that the extension and the relay server are always using the exact same event names and protocol versions, we maintain a mirrored copy of the shared files within the `extension/shared/` folder.
 
 ## When should you run the sync script?
 You MUST run the synchronization script in any of the following scenarios:
@@ -31,6 +31,12 @@ The script performs the following actions:
 1. Ensures the `extension/shared/` directory exists.
 2. Copies `shared/constants.js` to `extension/shared/constants.js`.
 3. Copies `shared/blacklist.js` to `extension/shared/blacklist.js`.
+
+## Protocol Versioning
+As of v1.0.0-RC5, the system enforces a strict `protocolVersion` check during the `JOIN_ROOM` handshake. 
+- The version is defined in `shared/constants.js`.
+- If the extension and server versions mismatch, the server will reject the connection with an `Incompatible protocol version` error.
+- **Always run the sync script** after bumping the version number to ensure both components are updated.
 
 > [!CAUTION]
 > **NEVER** edit the files inside `extension/shared/` directly. They will be overwritten the next time the sync script is run. Always edit the files in the root `shared/` directory and then run the sync script.
