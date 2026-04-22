@@ -319,17 +319,17 @@
 
     <!-- Dev Tab -->
     <div id="tab-dev" class="tab-content">
-        <label>Video Debug Info</label>
-        <div id="videoDebug" class="info-card" style="font-size: 10px; font-family: monospace; color: var(--text-muted); min-height: 60px; line-height: 1.4;">
-            No tab selected or video detected.
-        </div>
-
         <label>Connection Status</label>
         <div id="connStatus" class="info-card" style="display:flex; align-items:center; gap: 10px;">
             <span id="connDot" class="status-dot status-offline"></span>
             <span id="connText" style="flex:1;">Disconnected</span>
             <button id="retryBtn" class="secondary" style="display:none; width: auto; padding: 4px 8px; font-size: 10px; margin: 0;">RETRY</button>
             <button id="copyLogs" class="btn secondary" style="width: auto; padding: 4px 10px; font-size: 11px;">Copy Logs</button>
+        </div>
+
+        <label>Video Debug Info</label>
+        <div id="videoDebug" class="info-card" style="font-size: 10px; font-family: monospace; color: var(--text-muted); min-height: 60px; line-height: 1.4;">
+            No tab selected or video detected.
         </div>
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
