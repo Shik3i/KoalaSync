@@ -35,7 +35,8 @@ const elements = {
     createRoomBtn: document.getElementById('createRoomBtn'),
     publicRooms: document.getElementById('publicRooms'),
     refreshRooms: document.getElementById('refreshRooms'),
-    roomError: document.getElementById('roomError')
+    roomError: document.getElementById('roomError'),
+    retryBtn: document.getElementById('retryBtn')
 };
 
 let localPeerId = null;
@@ -183,8 +184,17 @@ async function populateTabs(providedPeers = null) {
 function applyConnectionStatus(status) {
     const connected = status === 'connected';
     const connecting = status === 'connecting';
-    elements.connDot.className = 'status-dot ' + (connected ? 'status-online' : 'status-offline');
-    elements.connText.textContent = connected ? 'Connected' : (connecting ? 'Connecting...' : 'Disconnected');
+    const failed = status === 'reconnect_failed';
+
+    elements.connDot.className = 'status-dot ' + (connected ? 'status-online' : (failed ? 'status-offline' : (connecting ? 'status-online' : 'status-offline')));
+    
+    // Custom colors for states
+    if (connecting) elements.connDot.style.background = '#fbbf24';
+    else if (failed) elements.connDot.style.background = '#ef4444';
+    else elements.connDot.style.background = '';
+
+    elements.connText.textContent = connected ? 'Connected' : (connecting ? 'Connecting...' : (failed ? 'Failed' : 'Disconnected'));
+    elements.retryBtn.style.display = failed ? 'block' : 'none';
 }
 
 function updateHistory(history) {
@@ -347,6 +357,10 @@ elements.createRoomBtn.addEventListener('click', () => {
 elements.refreshRooms.addEventListener('click', () => {
     elements.publicRooms.innerHTML = '<div style="text-align:center; padding: 10px; color:var(--text-muted);">Refreshing...</div>';
     chrome.runtime.sendMessage({ type: 'GET_ROOM_LIST' });
+});
+
+elements.retryBtn.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'RETRY_CONNECT' });
 });
 
 elements.targetTab.addEventListener('change', async () => {

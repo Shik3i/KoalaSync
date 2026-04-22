@@ -12,6 +12,8 @@ let currentTabTitle = null; // New: for Smart Matching
 let logs = [];
 let history = []; // New: for Action History
 let reconnectTimer = null;
+let reconnectStartTime = null; // New: track when reconnection started
+let reconnectFailed = false; // New: true if we hit the 5-min cap
 
 // Force Sync Coordination
 let isForceSyncInitiator = false;
@@ -58,8 +60,11 @@ async function connect() {
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
     if (!navigator.onLine) {
         addLog('Browser is offline. Waiting...', 'warn');
+        broadcastConnectionStatus('offline');
         return;
     }
+
+    if (reconnectFailed) return; // Wait for manual retry
     
     if (!peerId) peerId = await getPeerId();
     const settings = await getSettings();
@@ -110,6 +115,8 @@ async function connect() {
             reconnectDelay = 1000;
             addLog('WebSocket Connection Opened', 'success');
             broadcastConnectionStatus('connected');
+            reconnectStartTime = null;
+            reconnectFailed = false;
             
             // Socket.IO Handshake: Send "40" to join default namespace
             socket.send('40');
@@ -180,7 +187,15 @@ function broadcastConnectionStatus(status) {
 }
 
 function updateBadgeStatus() {
-    if (currentTabId) {
+    const status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting || socket.readyState === WebSocket.CONNECTING ? 'connecting' : 'disconnected')) : 'disconnected';
+
+    if (reconnectFailed) {
+        chrome.action.setBadgeText({ text: 'ERR' });
+        chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+    } else if (status === 'connecting') {
+        chrome.action.setBadgeText({ text: '...' });
+        chrome.action.setBadgeBackgroundColor({ color: '#fbbf24' });
+    } else if (currentTabId) {
         chrome.action.setBadgeText({ text: 'ON' });
         chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
     } else {
@@ -204,7 +219,17 @@ function showNotification(senderName, action) {
 }
 
 function scheduleReconnect() {
-    if (reconnectTimer) return; // Already scheduled
+    if (reconnectTimer || reconnectFailed) return;
+    
+    if (!reconnectStartTime) reconnectStartTime = Date.now();
+
+    // Check 5 minute cap (300,000ms)
+    if (Date.now() - reconnectStartTime > 300000) {
+        reconnectFailed = true;
+        addLog('Reconnection failed after 5 minutes. Please try again manually.', 'error');
+        broadcastConnectionStatus('reconnect_failed');
+        return;
+    }
     
     reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
@@ -378,9 +403,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // --- Extension Message Listeners ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'CONNECT') {
+        reconnectFailed = false;
+        reconnectStartTime = null;
+        connect();
+    } else if (message.type === 'RETRY_CONNECT') {
+        reconnectFailed = false;
+        reconnectStartTime = null;
+        reconnectDelay = 1000;
         connect();
     } else if (message.type === 'GET_STATUS') {
-        const status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting || socket.readyState === WebSocket.CONNECTING ? 'connecting' : 'disconnected')) : 'disconnected';
+        let status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting || socket.readyState === WebSocket.CONNECTING ? 'connecting' : 'disconnected')) : 'disconnected';
+        if (reconnectFailed) status = 'reconnect_failed';
         sendResponse({ status, peerId, peers: currentRoom ? currentRoom.peers : [] });
         // Global return true at the end handles this
     } else if (message.type === 'LEAVE_ROOM') {
