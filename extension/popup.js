@@ -41,6 +41,8 @@ const elements = {
     sectionActive: document.getElementById('section-active'),
     activeRoomId: document.getElementById('activeRoomId'),
     activeServer: document.getElementById('activeServer'),
+    peerList: document.getElementById('peerList'),
+    peerListSync: document.getElementById('peerListSync'),
     playBtn: document.getElementById('playBtn'),
     pauseBtn: document.getElementById('pauseBtn')
 };
@@ -110,14 +112,14 @@ function updateUI(roomId, password, useCustomServer = false, serverUrl = '') {
 }
 
 function updatePeerList(peers) {
-    if (!peers || !elements.peerList) return;
+    if (!peers) return;
     
     // UI Throttle: Only re-render if the peer state actually changed
     const currentPeersJson = JSON.stringify(peers);
     if (currentPeersJson === lastPeersJson) return;
     lastPeersJson = currentPeersJson;
 
-    elements.peerList.innerHTML = peers.map(p => {
+    const html = peers.map(p => {
         const id = escapeHtml(typeof p === 'object' ? p.peerId : p);
         const titleText = (typeof p === 'object' && p.tabTitle) ? escapeHtml(p.tabTitle) : '';
         const title = titleText ? `<div style="font-size:10px; color:var(--text-muted);">${titleText}</div>` : '';
@@ -131,6 +133,12 @@ function updatePeerList(peers) {
             </div>
         `;
     }).join('');
+
+    const emptyHtml = '<div style="text-align:center; color: var(--text-muted); font-size: 12px;">No peers connected</div>';
+    
+    if (elements.peerList) elements.peerList.innerHTML = html || emptyHtml;
+    if (elements.peerListSync) elements.peerListSync.innerHTML = html || emptyHtml;
+
     // Re-populate tabs to update Star Matching when peers change
     populateTabs(peers);
 }

@@ -228,6 +228,7 @@ io.on('connection', (socket) => {
                         room.peers.delete(sid);
                         room.peerIds.delete(sid);
                         room.peerData.delete(sid);
+                        socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId: data.peerId, status: 'left' });
                         log('ROOM', `Deduplicated peer ${peerId} from room ${roomId}`);
                     }
                 }
