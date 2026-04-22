@@ -268,7 +268,13 @@ function checkInviteLink() {
                 let serverUrl = '';
 
                 // Smart Link: Parse Server Config if present
-                if (parts.length >= 3 && (parts[parts.length - 2] === '0' || parts[parts.length - 2] === '1')) {
+                const last = parts[parts.length - 1];
+                const secondToLast = parts[parts.length - 2];
+                const decodedLast = decodeURIComponent(last || '');
+                const isCustom = secondToLast === '1' && (decodedLast.startsWith('ws://') || decodedLast.startsWith('wss://'));
+                const isOfficial = secondToLast === '0' && last === '';
+
+                if (parts.length >= 3 && (isCustom || isOfficial)) {
                     serverUrl = decodeURIComponent(parts.pop());
                     useCustomServer = parts.pop() === '1';
                 }

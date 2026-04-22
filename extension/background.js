@@ -280,6 +280,10 @@ function emit(event, data) {
         socket.send(msg);
     } else {
         eventQueue.push({ event, data });
+        if (eventQueue.length > 50) {
+            eventQueue.shift();
+            addLog('Event queue cap reached, dropping oldest event', 'warn');
+        }
     }
 }
 
@@ -433,7 +437,16 @@ async function routeToContent(action, payload) {
 }
 
 // --- Keep-Alive Mechanism ---
-chrome.alarms.clearAll();
+chrome.alarms.create('keepAlive', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'keepAlive') {
+        chrome.storage.session.get('keepAlive', () => {});
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            connect();
+        }
+    }
+});
+
 setInterval(() => {
     // Calling a chrome API keeps the SW alive in MV3 (Chrome 110+)
     chrome.storage.session.get('keepAlive', () => {});

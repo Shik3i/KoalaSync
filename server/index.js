@@ -148,6 +148,11 @@ io.on('connection', (socket) => {
     log('CONN', `New connection: ${socket.id} from ${clientIp}`);
 
     socket.on(EVENTS.JOIN_ROOM, async (payload) => {
+        if (!checkEventRate(socket.id)) {
+            log('SECURITY', `Event rate limit exceeded for socket (JOIN): ${socket.id}`);
+            socket.disconnect(true);
+            return;
+        }
         if (!payload || typeof payload.roomId !== 'string') return;
         const { roomId, password, peerId, protocolVersion } = payload;
         try {

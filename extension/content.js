@@ -8,6 +8,17 @@
     window.koalaSyncInjected = true;
 
     let lastTargetState = null;
+    let targetStateTimeout = null;
+
+    function setTargetState(state) {
+        lastTargetState = state;
+        if (targetStateTimeout) clearTimeout(targetStateTimeout);
+        if (state !== null) {
+            targetStateTimeout = setTimeout(() => {
+                lastTargetState = null;
+            }, 1500);
+        }
+    }
 
     // --- Helper: find the best video element on the page ---
     function findVideo() {
@@ -30,7 +41,7 @@
                 if (ytButton) {
                     const isCurrentlyPlaying = !video.paused;
                     if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
-                        lastTargetState = action === 'play' ? 'playing' : 'paused';
+                        setTargetState(action === 'play' ? 'playing' : 'paused');
                         ytButton.click();
                     }
                     if (action === 'seek') video.currentTime = data.targetTime;
@@ -43,7 +54,7 @@
                 if (twitchButton) {
                     const isCurrentlyPlaying = !video.paused;
                     if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
-                        lastTargetState = action === 'play' ? 'playing' : 'paused';
+                        setTargetState(action === 'play' ? 'playing' : 'paused');
                         twitchButton.click();
                     }
                     if (action === 'seek') video.currentTime = data.targetTime;
@@ -53,10 +64,13 @@
 
             // Fallback for native HTML5
             if (action === 'play') {
-                lastTargetState = 'playing';
-                video.play().catch(() => {});
+                setTargetState('playing');
+                video.play().catch((e) => {
+                    console.warn('KoalaSync playback prevented:', e);
+                    setTargetState(null);
+                });
             } else if (action === 'pause') {
-                lastTargetState = 'paused';
+                setTargetState('paused');
                 video.pause();
             } else if (action === 'seek') {
                 video.currentTime = data.targetTime;
@@ -110,7 +124,7 @@
                 if (!payload || payload.targetTime === undefined) return;
                 const video = findVideo();
                 if (video) {
-                    lastTargetState = 'paused';
+                    setTargetState('paused');
                     video.pause();
                     video.currentTime = payload.targetTime;
                     pollSeekReady(payload.targetTime).then(() => {
@@ -131,11 +145,11 @@
         const eventState = action === 'play' ? 'playing' : (action === 'pause' ? 'paused' : null);
         
         if (eventState && lastTargetState === eventState) {
-            lastTargetState = null; // Consume the match
+            setTargetState(null); // Consume the match
             return; // Ignore event caused by our programmatic action
         }
         if (action !== 'seek') {
-            lastTargetState = null; // Reset on mismatch
+            setTargetState(null); // Reset on mismatch
         }
 
         chrome.runtime.sendMessage({
