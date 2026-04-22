@@ -78,9 +78,24 @@ document.addEventListener('DOMContentLoaded', () => {
                                 `;
                             } else {
                                 actions.innerHTML = `
-                                    <button class="primary" id="webJoinBtn" style="padding: 1.2rem; width:100%; cursor: pointer;">JOIN ROOM NOW</button>
-                                    <p style="text-align:center; font-size:0.8rem; color:var(--success); margin-top: 0.8rem; font-weight: 600;">✅ Extension detected and ready.</p>
+                                    <div class="joining-spinner" style="text-align:center; padding: 1rem;">
+                                        <div style="font-size: 1.2rem; margin-bottom: 0.5rem;">🚀</div>
+                                        <div style="font-weight: 600; color: var(--accent);">Joining room automatically...</div>
+                                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">Your extension is taking care of it.</p>
+                                    </div>
                                 `;
+                                
+                                // AUTO-TRIGGER JOIN
+                                setTimeout(() => {
+                                    window.dispatchEvent(new CustomEvent('KOALASYNC_JOIN_REQUEST', {
+                                        detail: { 
+                                            roomId, 
+                                            password,
+                                            useCustomServer: serverFlag === '1',
+                                            serverUrl: serverUrl
+                                        }
+                                    }));
+                                }, 500);
                             }
                         }
                     } else {
@@ -134,9 +149,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (icon) icon.textContent = '✅';
                 title.textContent = 'Erfolgreich!';
                 
-                let count = 5;
+                let count = 3;
                 const updateCountdown = () => {
-                    desc.textContent = `Du bist dem Raum beigetreten. Dieser Tab schließt sich in ${count} Sekunden...`;
+                    desc.innerHTML = `Du bist dem Raum beigetreten. <br><span style="color:var(--accent); font-weight:bold;">Dieser Tab schließt sich in ${count} Sekunden...</span>`;
                     if (count <= 0) {
                         window.close();
                         desc.textContent = 'Beitritt erfolgreich! Du kannst diesen Tab jetzt manuell schließen.';

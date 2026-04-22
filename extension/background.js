@@ -596,6 +596,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             useCustomServer: !!useCustomServer,
             serverUrl: serverUrl || ''
         }, () => {
+            broadcastConnectionStatus('connecting');
             if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
                 // FORCE TRANSITION: Emit Join Room directly if already connected
                 getSettings().then(settings => {
@@ -612,7 +613,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             } else {
                 connect();
             }
+            sendResponse({ status: 'ok' });
         });
+        return true; // Keep channel open for async getSettings
     } else if (message.type === 'REGENERATE_ID') {
         const newId = self.crypto.randomUUID().substring(0, 8);
         chrome.storage.local.set({ peerId: newId }, () => {

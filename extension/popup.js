@@ -286,6 +286,15 @@ function applyConnectionStatus(status) {
 
     elements.connText.textContent = connected ? 'Connected' : (connecting ? 'Connecting...' : (failed ? 'Failed' : 'Disconnected'));
     elements.retryBtn.style.display = failed ? 'block' : 'none';
+
+    // Update Join Button during auto-transition
+    if (connecting) {
+        elements.joinBtn.disabled = true;
+        elements.joinBtn.textContent = 'Connecting...';
+    } else if (!connected) {
+        elements.joinBtn.disabled = false;
+        elements.joinBtn.textContent = 'Join Room';
+    }
 }
 
 function updateHistory(history) {
