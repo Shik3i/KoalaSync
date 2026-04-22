@@ -39,6 +39,8 @@ const elements = {
     retryBtn: document.getElementById('retryBtn'),
     sectionJoin: document.getElementById('section-join'),
     sectionActive: document.getElementById('section-active'),
+    activeRoomId: document.getElementById('activeRoomId'),
+    activeServer: document.getElementById('activeServer'),
     playBtn: document.getElementById('playBtn'),
     pauseBtn: document.getElementById('pauseBtn')
 };
@@ -99,6 +101,11 @@ function updateUI(roomId, password, useCustomServer = false, serverUrl = '') {
         const encodedUrl = encodeURIComponent(serverUrl || '');
         const invite = `${OFFICIAL_LANDING_PAGE_URL}/join.html#join:${roomId}:${password}:${serverFlag}:${encodedUrl}`;
         elements.inviteLink.value = invite;
+        if (elements.activeRoomId) elements.activeRoomId.textContent = roomId;
+        if (elements.activeServer) {
+            elements.activeServer.textContent = useCustomServer ? (serverUrl || 'Custom Server') : 'Official Server';
+            elements.activeServer.title = useCustomServer ? (serverUrl || '') : 'sync.shik3i.net';
+        }
     }
 }
 

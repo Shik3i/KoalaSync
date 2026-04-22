@@ -238,6 +238,14 @@
 
         <!-- ACTIVE SECTION: Visible when in a room -->
         <div id="section-active" style="display:none;">
+            <div class="info-card" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--accent);">
+                <div>
+                    <label style="margin-bottom: 0;">Active Room</label>
+                    <div id="activeRoomId" style="font-weight: 700; color: var(--accent); font-size: 16px; letter-spacing: 1px;">NONE</div>
+                </div>
+                <div id="activeServer" style="font-size: 10px; color: var(--text-muted); text-align: right; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Official Server</div>
+            </div>
+
             <div class="info-card" style="margin-bottom: 20px;">
                 <label>Invite Link</label>
                 <div class="invite-box">
