@@ -206,8 +206,6 @@
             return; // Ignore event caused by our programmatic action
         }
         
-        setTargetState(null); // Reset on mismatch or unhandled event
-
         chrome.runtime.sendMessage({
             type: 'CONTENT_EVENT',
             action,

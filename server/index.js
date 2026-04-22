@@ -341,7 +341,7 @@ io.on('connection', (socket) => {
             // Security: Only relay ACK if both peers are in the same room
             if (senderMapping && targetMapping && senderMapping.roomId === targetMapping.roomId) {
                 io.to(targetSocketId).emit(EVENTS.EVENT_ACK, { 
-                    senderId: data.senderId,
+                    senderId: senderMapping.peerId,
                     actionTimestamp: data.actionTimestamp
                 });
             } else {
