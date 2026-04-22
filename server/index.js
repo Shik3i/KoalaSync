@@ -222,8 +222,10 @@ io.on('connection', (socket) => {
                     if (data.peerId === peerId && sid !== socket.id) {
                         const oldSocket = io.sockets.sockets.get(sid);
                         if (oldSocket) {
+                            oldSocket.emit(EVENTS.ERROR, { message: 'Deduplication: Another session with this ID joined. Disconnecting...' });
                             oldSocket.leave(roomId);
-                            socketToRoom.delete(sid);
+                            oldSocket.disconnect(true);
+                            log('DEDUPE', `Kicked old session for peer ${peerId}`);
                         }
                         room.peers.delete(sid);
                         room.peerIds.delete(sid);

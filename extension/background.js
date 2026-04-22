@@ -409,10 +409,12 @@ function handleServerEvent(event, data) {
                 if (data.status === 'joined') {
                     if (!currentRoom.peers.find(p => (p.peerId || p) === data.peerId)) {
                         currentRoom.peers.push({ peerId: data.peerId, username: data.username, tabTitle: data.tabTitle });
+                        if (storageInitialized) chrome.storage.session.set({ currentRoom });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                     }
                 } else if (data.status === 'left') {
                     currentRoom.peers = currentRoom.peers.filter(p => (p.peerId || p) !== data.peerId);
+                    if (storageInitialized) chrome.storage.session.set({ currentRoom });
                     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                 } else {
                     // Heartbeat/Update: Update tabTitle for matching
@@ -426,6 +428,7 @@ function handleServerEvent(event, data) {
                             const idx = currentRoom.peers.indexOf(peer);
                             currentRoom.peers[idx] = { peerId: data.peerId, username: data.username, tabTitle: data.tabTitle };
                         }
+                        if (storageInitialized) chrome.storage.session.set({ currentRoom });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                     }
                 }
@@ -556,9 +559,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             useCustomServer: !!useCustomServer,
             serverUrl: serverUrl || ''
         }, () => {
-            connect();
-            // We wait for status update in handleServerEvent
+            if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
+                // FORCE TRANSITION: Emit Join Room directly if already connected
+                emit(EVENTS.JOIN_ROOM, { 
+                    roomId, 
+                    password,
+                    peerId,
+                    username: message.username || '', // Use username if provided by bridge
+                    protocolVersion: PROTOCOL_VERSION
+                });
+                addLog(`Joining room via link: ${roomId}`, 'info');
+            } else {
+                connect();
+            }
         });
+    } else if (message.type === 'REGENERATE_ID') {
+        const newId = self.crypto.randomUUID().substring(0, 8);
+        chrome.storage.local.set({ peerId: newId }, () => {
+            peerId = newId;
+            addLog(`Identity regenerated: ${newId}`, 'success');
+            if (socket) socket.close(); // Force reconnect with new ID
+            sendResponse({ peerId: newId });
+        });
+        return true;
     } else if (message.type === 'GET_VIDEO_STATE') {
         const { tabId } = message;
         if (!tabId) {
