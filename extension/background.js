@@ -18,9 +18,10 @@ let eventQueue = [];
 let isNamespaceJoined = false;
 
 // Restore state from session storage
-chrome.storage.session.get(['logs', 'history'], (data) => {
+chrome.storage.session.get(['logs', 'history', 'currentRoom'], (data) => {
     if (data.logs) logs = data.logs;
     if (data.history) history = data.history;
+    if (data.currentRoom) currentRoom = data.currentRoom;
     storageInitialized = true;
     
     if (pendingLogs.length > 0) {
@@ -314,6 +315,7 @@ function handleServerEvent(event, data) {
     switch (event) {
         case EVENTS.ROOM_DATA:
             currentRoom = data;
+            if (storageInitialized) chrome.storage.session.set({ currentRoom });
             addLog(`Joined Room: ${data.roomId}`, 'success');
             chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: data.peers }).catch(() => {});
             // Inform Website Bridge
@@ -466,7 +468,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'CONNECT') {
         reconnectFailed = false;
         reconnectStartTime = null;
-        connect();
+        if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
+            // Already connected, but maybe room changed or we need to refresh room state
+            getSettings().then(settings => {
+                if (settings.roomId) {
+                    emit(EVENTS.JOIN_ROOM, { 
+                        roomId: settings.roomId, 
+                        password: settings.password,
+                        peerId,
+                        protocolVersion: PROTOCOL_VERSION
+                    });
+                }
+            });
+        } else {
+            connect();
+        }
     } else if (message.type === 'RETRY_CONNECT') {
         reconnectFailed = false;
         reconnectStartTime = null;
@@ -481,6 +497,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'LEAVE_ROOM') {
         emit(EVENTS.LEAVE_ROOM, { peerId });
         currentRoom = null;
+        if (storageInitialized) chrome.storage.session.set({ currentRoom: null });
         addLog('Left Room', 'info');
     } else if (message.type === 'CLEAR_LOGS') {
         logs = [];

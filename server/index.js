@@ -216,6 +216,21 @@ io.on('connection', (socket) => {
                     socket.emit(EVENTS.ERROR, { message: "Room full" });
                     return;
                 }
+
+                // Peer Deduplication: Remove existing socket for the same peerId
+                for (const [sid, data] of room.peerData.entries()) {
+                    if (data.peerId === peerId && sid !== socket.id) {
+                        const oldSocket = io.sockets.sockets.get(sid);
+                        if (oldSocket) {
+                            oldSocket.leave(roomId);
+                            socketToRoom.delete(sid);
+                        }
+                        room.peers.delete(sid);
+                        room.peerIds.delete(sid);
+                        room.peerData.delete(sid);
+                        log('ROOM', `Deduplicated peer ${peerId} from room ${roomId}`);
+                    }
+                }
             }
 
             socket.join(roomId);
