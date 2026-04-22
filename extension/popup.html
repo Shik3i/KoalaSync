@@ -205,41 +205,59 @@
 
     <!-- Room Tab -->
     <div id="tab-room" class="tab-content active">
-        <div class="form-group">
-            <label>Server</label>
-            <div style="display:flex; gap:4px; margin-bottom:8px;">
-                <button id="serverOfficial" class="tab-btn active" style="flex:1; padding:6px; font-size:11px;">Official</button>
-                <button id="serverCustom" class="tab-btn" style="flex:1; padding:6px; font-size:11px;">Custom</button>
+        <!-- JOIN SECTION: Visible when not in a room -->
+        <div id="section-join">
+            <div class="form-group">
+                <label>Server</label>
+                <div style="display:flex; gap:4px; margin-bottom:8px;">
+                    <button id="serverOfficial" class="tab-btn active" style="flex:1; padding:6px; font-size:11px;">Official</button>
+                    <button id="serverCustom" class="tab-btn" style="flex:1; padding:6px; font-size:11px;">Custom</button>
+                </div>
+                <input type="text" id="serverUrl" placeholder="wss://your-server:3000" style="display:none;">
             </div>
-            <input type="text" id="serverUrl" placeholder="wss://your-server:3000" style="display:none;">
-        </div>
-        <div class="form-group">
-            <label>Room ID</label>
-            <input type="text" id="roomId" placeholder="Leave empty to create">
-        </div>
-        <div class="form-group">
-            <label>Password (Optional)</label>
-            <input type="password" id="password" placeholder="Room password">
-        </div>
-        <div id="roomError" style="display:none; color:var(--error); font-size:11px; margin-bottom:8px; text-align:center;"></div>
-        <button id="joinBtn" class="primary">Join Room</button>
-        <button id="createRoomBtn" class="secondary" style="border: 1px solid var(--accent); color: var(--accent);">Create Random Room</button>
-        
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; margin-bottom: 8px;">
-            <label style="margin:0;">Public Rooms</label>
-            <button id="refreshRooms" style="background:transparent; border:none; color:var(--accent); font-size:10px; cursor:pointer;">REFRESH</button>
-        </div>
-        <div id="publicRooms" class="info-card" style="max-height: 120px; overflow-y: auto; padding: 4px;">
-            <div style="text-align:center; color: var(--text-muted); font-size: 11px; padding: 10px;">Refreshing...</div>
-        </div>
-        
-        <div id="roomInfo" style="display:none; margin-top: 20px;">
-            <label>Invite Link</label>
-            <div class="invite-box">
-                <input type="text" id="inviteLink" readonly>
-                <button id="copyInvite" class="secondary">📋</button>
+            <div class="form-group">
+                <label>Room ID</label>
+                <input type="text" id="roomId" placeholder="Leave empty to create">
             </div>
-            <button id="leaveBtn" class="secondary" style="color: var(--error);">Leave Room</button>
+            <div class="form-group">
+                <label>Password (Optional)</label>
+                <input type="password" id="password" placeholder="Room password">
+            </div>
+            <div id="roomError" style="display:none; color:var(--error); font-size:11px; margin-bottom:8px; text-align:center;"></div>
+            <button id="joinBtn" class="primary">Join Room</button>
+            <button id="createRoomBtn" class="secondary" style="border: 1px solid var(--accent); color: var(--accent);">Create Random Room</button>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; margin-bottom: 8px;">
+                <label style="margin:0;">Public Rooms</label>
+                <button id="refreshRooms" style="background:transparent; border:none; color:var(--accent); font-size:10px; cursor:pointer;">REFRESH</button>
+            </div>
+            <div id="publicRooms" class="info-card" style="max-height: 120px; overflow-y: auto; padding: 4px;">
+                <div style="text-align:center; color: var(--text-muted); font-size: 11px; padding: 10px;">Refreshing...</div>
+            </div>
+        </div>
+
+        <!-- ACTIVE SECTION: Visible when in a room -->
+        <div id="section-active" style="display:none;">
+            <div class="info-card" style="margin-bottom: 20px;">
+                <label>Invite Link</label>
+                <div class="invite-box">
+                    <input type="text" id="inviteLink" readonly>
+                    <button id="copyInvite" class="secondary">📋</button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <label>Peers in Room</label>
+                <div id="peerList" class="info-card">
+                    <div style="text-align:center; color: var(--text-muted); font-size: 12px;">No peers connected</div>
+                </div>
+            </div>
+
+            <button id="forceSyncBtn" class="primary" style="background: linear-gradient(135deg, #6366f1, #a855f7); margin-bottom: 12px;">
+                ⚡ Force Sync Everyone
+            </button>
+
+            <button id="leaveBtn" class="secondary" style="color: var(--error); border-color: var(--error);">Leave Room</button>
         </div>
     </div>
 

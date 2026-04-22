@@ -36,7 +36,9 @@ const elements = {
     publicRooms: document.getElementById('publicRooms'),
     refreshRooms: document.getElementById('refreshRooms'),
     roomError: document.getElementById('roomError'),
-    retryBtn: document.getElementById('retryBtn')
+    retryBtn: document.getElementById('retryBtn'),
+    sectionJoin: document.getElementById('section-join'),
+    sectionActive: document.getElementById('section-active')
 };
 
 let localPeerId = null;
@@ -60,7 +62,8 @@ async function init() {
     // Populate Tabs
     await populateTabs();
 
-    updateUI(data.roomId, data.password);
+    toggleUIState(!!data.roomId);
+    updateUI(data.roomId, data.password, data.useCustomServer, data.serverUrl);
     refreshLogs();
     refreshHistory();
 
@@ -81,11 +84,18 @@ async function init() {
 }
 
 // --- UI Logic ---
-function updateUI(roomId, password) {
+function toggleUIState(inRoom) {
+    if (elements.sectionJoin) elements.sectionJoin.style.display = inRoom ? 'none' : 'block';
+    if (elements.sectionActive) elements.sectionActive.style.display = inRoom ? 'block' : 'none';
+}
+
+function updateUI(roomId, password, useCustomServer = false, serverUrl = '') {
     const inRoom = !!roomId;
-    elements.roomInfo.style.display = inRoom ? 'block' : 'none';
+    toggleUIState(inRoom);
     if (inRoom) {
-        const invite = `${OFFICIAL_LANDING_PAGE_URL}/join.html#join:${roomId}:${password}`;
+        const serverFlag = useCustomServer ? '1' : '0';
+        const encodedUrl = encodeURIComponent(serverUrl || '');
+        const invite = `${OFFICIAL_LANDING_PAGE_URL}/join.html#join:${roomId}:${password}:${serverFlag}:${encodedUrl}`;
         elements.inviteLink.value = invite;
     }
 }
@@ -250,8 +260,26 @@ function checkInviteLink() {
         if (tab && tab.url && tab.url.includes(OFFICIAL_LANDING_PAGE_URL) && tab.url.includes('#join:')) {
             const parts = tab.url.split('#join:')[1].split(':');
             if (parts.length >= 2) {
-                elements.roomId.value = parts[0];
-                elements.password.value = parts[1];
+                const roomId = parts[0];
+                const password = parts[1];
+                let useCustomServer = false;
+                let serverUrl = '';
+
+                // Smart Link: Parse Server Config if present
+                if (parts.length >= 4) {
+                    useCustomServer = parts[2] === '1';
+                    serverUrl = decodeURIComponent(parts[3]);
+                }
+
+                elements.roomId.value = roomId;
+                elements.password.value = password;
+                
+                if (parts.length >= 4) {
+                    elements.serverUrl.value = serverUrl;
+                    setServerMode(useCustomServer);
+                    chrome.storage.sync.set({ serverUrl, useCustomServer });
+                }
+
                 // Visual feedback
                 elements.joinBtn.style.boxShadow = '0 0 15px var(--accent)';
                 setTimeout(() => elements.joinBtn.style.boxShadow = '', 2000);
@@ -332,7 +360,10 @@ elements.joinBtn.addEventListener('click', async () => {
 
     // Tell background to connect
     chrome.runtime.sendMessage({ type: 'CONNECT' });
-    updateUI(roomId, password);
+    
+    // UI Feedback: Immediately switch state for better responsiveness
+    const data = await chrome.storage.sync.get(['useCustomServer']);
+    updateUI(roomId, password, data.useCustomServer, serverUrl);
 });
 
 elements.leaveBtn.addEventListener('click', async () => {
@@ -421,6 +452,11 @@ chrome.runtime.onMessage.addListener((msg) => {
         updateRoomList(msg.rooms);
     } else if (msg.type === 'LOG_UPDATE' && msg.log && msg.log.type === 'error') {
         showError(msg.log.message);
+    } else if (msg.type === 'JOIN_STATUS' && msg.success) {
+        // Final confirmation of join from background
+        chrome.storage.sync.get(['roomId', 'password', 'useCustomServer', 'serverUrl'], (data) => {
+            updateUI(data.roomId, data.password, data.useCustomServer, data.serverUrl);
+        });
     }
 });
 
