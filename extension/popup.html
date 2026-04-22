@@ -277,26 +277,19 @@
         </div>
         
         <label>Remote Control</label>
-        <div style="display: flex; gap: 8px; margin-bottom: 20px;">
-            <button id="playBtn" class="primary" style="flex: 1; background: var(--success);">▶ Play</button>
-            <button id="pauseBtn" class="primary" style="flex: 1; background: var(--error);">⏸ Pause</button>
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button id="playBtn" class="primary" style="flex:1;">Play</button>
+            <button id="pauseBtn" class="primary" style="flex:1;">Pause</button>
+            <button id="forceSyncBtn" class="secondary" style="flex:1; border-color:var(--accent); color:var(--accent);">Force Sync</button>
         </div>
 
-        <button id="forceSyncBtn" class="primary" style="background: linear-gradient(135deg, #6366f1, #a855f7); margin-bottom: 20px;">
-            ⚡ Force Sync Everyone
-        </button>
-
-        <div style="margin-bottom: 20px;">
-            <label>Peers in Room</label>
-            <div id="peerListSync" class="info-card">
-                <div style="text-align:center; color: var(--text-muted); font-size: 12px;">No peers connected</div>
-            </div>
+        <!-- NEW: Last Action Status Card -->
+        <label>Last Activity Status</label>
+        <div id="lastActionCard" class="info-card" style="margin-bottom: 15px; min-height: 70px;">
+            <div style="text-align:center; color: var(--text-muted); font-size: 11px; padding-top: 20px;">No recent commands</div>
         </div>
 
-        <label>Recent Activity</label>
-        <div id="historyList" class="info-card" style="max-height: 120px; overflow-y: auto; font-size: 11px; color: var(--text-muted);">
-            <!-- History will be injected here -->
-        </div>
+        <div id="peerListSync" class="info-card" style="display:none;"></div>
     </div>
     
     <!-- Settings Tab -->
@@ -336,6 +329,13 @@
         <label>Video Debug Info</label>
         <div id="videoDebug" class="info-card" style="font-size: 10px; font-family: monospace; color: var(--text-muted); min-height: 60px; line-height: 1.4;">
             No tab selected or video detected.
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <label>Full Action History</label>
+        </div>
+        <div id="historyList" class="info-card" style="max-height: 120px; overflow-y: auto; font-size: 10px; margin-bottom: 15px;">
+            <div style="text-align:center; color: var(--text-muted); font-size: 11px;">No activity yet</div>
         </div>
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">

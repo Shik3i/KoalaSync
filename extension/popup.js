@@ -32,6 +32,7 @@ const elements = {
     inviteLink: document.getElementById('inviteLink'),
     filterNoise: document.getElementById('filterNoise'),
     regenId: document.getElementById('regenId'),
+    lastActionCard: document.getElementById('lastActionCard'),
     historyList: document.getElementById('historyList'),
     copyLogs: document.getElementById('copyLogs'),
     createRoomBtn: document.getElementById('createRoomBtn'),
@@ -82,6 +83,7 @@ async function init() {
             localPeerId = res.peerId;
             applyConnectionStatus(res.status);
             updatePeerList(res.peers);
+            if (res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
         }
     });
 
@@ -117,6 +119,56 @@ function updateUI(roomId, password, useCustomServer = false, serverUrl = '') {
     } else {
         updatePeerList([]);
     }
+}
+
+function updateLastActionUI(state, peers) {
+    if (!state || !state.action) {
+        elements.lastActionCard.innerHTML = '<div style="text-align:center; color: var(--text-muted); font-size: 11px; padding-top: 20px;">No recent commands</div>';
+        return;
+    }
+
+    const actionNames = {
+        'play': 'PLAY',
+        'pause': 'PAUSE',
+        'seek': 'SEEK',
+        'force_sync_prepare': 'SYNCING...',
+        'force_sync_execute': 'FORCE PLAY'
+    };
+
+    let senderName = state.senderId === 'You' ? 'You' : state.senderId;
+    const senderPeer = peers.find(p => (p.peerId || p) === state.senderId);
+    if (senderPeer && senderPeer.username) senderName = senderPeer.username;
+
+    const timeStr = new Date(state.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    let html = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:baseline;">
+            <span style="font-weight:700; color:var(--accent); font-size:13px;">${actionNames[state.action] || state.action.toUpperCase()}</span>
+            <span style="font-size:10px; color:var(--text-muted);">${senderName} @ ${timeStr}</span>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px;">
+    `;
+
+    // Filter out "You" if we are the sender, but show status of other peers
+    peers.forEach(peer => {
+        const pId = typeof peer === 'object' ? peer.peerId : peer;
+        const pName = (typeof peer === 'object' && peer.username) ? peer.username : pId.substring(0, 4);
+        const isAcked = state.acks.includes(pId) || pId === state.senderId;
+        const color = isAcked ? 'var(--success)' : '#475569';
+        const icon = isAcked ? '✓' : '...';
+        
+        html += `
+            <div title="${pName}" style="display:flex; flex-direction:column; align-items:center; opacity: ${isAcked ? 1 : 0.6};">
+                <div style="width:20px; height:20px; border-radius:50%; background:${color}; color:white; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; margin-bottom:2px;">
+                    ${icon}
+                </div>
+                <span style="font-size:8px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40px;">${pName}</span>
+            </div>
+        `;
+    });
+
+    html += `</div>`;
+    elements.lastActionCard.innerHTML = html;
 }
 
 function updatePeerList(peers) {
@@ -542,10 +594,20 @@ async function refreshLogs() {
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'LOG_UPDATE') {
         refreshLogs();
+    } else if (msg.type === 'ACTION_UPDATE') {
+        chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+            if (res && res.peers) updateLastActionUI(msg.state, res.peers);
+        });
     } else if (msg.type === 'PEER_UPDATE') {
         updatePeerList(msg.peers);
     } else if (msg.type === 'CONNECTION_STATUS') {
         applyConnectionStatus(msg.status);
+        if (msg.status === 'connected') {
+            chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+                if (res && res.peers) updatePeerList(res.peers);
+                if (res && res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
+            });
+        }
         if (msg.status === 'disconnected' || msg.status === 'reconnect_failed') {
             elements.joinBtn.disabled = false;
             elements.joinBtn.textContent = 'Join / Create Room';

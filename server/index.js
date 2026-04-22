@@ -326,6 +326,17 @@ io.on('connection', (socket) => {
         }
     });
 
+        socket.on(EVENTS.EVENT_ACK, (data) => {
+            if (!data.targetId) return;
+            const targetSocket = Array.from(io.sockets.sockets.values()).find(s => {
+                const roomData = socketToRoom.get(s.id);
+                return roomData && roomData.peerId === data.targetId;
+            });
+            if (targetSocket) {
+                targetSocket.emit(EVENTS.EVENT_ACK, { senderId: data.senderId });
+            }
+        });
+
     socket.on('disconnect', () => {
         eventCounts.delete(socket.id);
         const mapping = socketToRoom.get(socket.id);

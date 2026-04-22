@@ -26,6 +26,7 @@ export const EVENTS = {
     FORCE_SYNC_PREPARE: "force_sync_prepare",
     FORCE_SYNC_ACK: "force_sync_ack",
     FORCE_SYNC_EXECUTE: "force_sync_execute",
+    EVENT_ACK: "event_ack",
     GET_ROOMS: "get_rooms",
     ROOM_LIST: "room_list"
 };

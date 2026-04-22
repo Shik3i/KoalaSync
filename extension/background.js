@@ -18,12 +18,15 @@ let pendingLogs = [];
 let pendingHistory = [];
 let eventQueue = [];
 let isNamespaceJoined = false;
+let lastActionState = { action: null, senderId: null, timestamp: 0, acks: [] };
+let currentCommandSenderId = null; // Track who sent the last command we are executing
 
 // Restore state from session storage
-chrome.storage.session.get(['logs', 'history', 'currentRoom'], (data) => {
+chrome.storage.session.get(['logs', 'history', 'currentRoom', 'lastActionState'], (data) => {
     if (data.logs) logs = data.logs;
     if (data.history) history = data.history;
     if (data.currentRoom) currentRoom = data.currentRoom;
+    if (data.lastActionState) lastActionState = data.lastActionState;
     storageInitialized = true;
     
     if (pendingLogs.length > 0) {
@@ -383,7 +386,8 @@ function handleServerEvent(event, data) {
         case EVENTS.FORCE_SYNC_PREPARE:
             if (data.senderId) {
                 addToHistory(event, data.senderId);
-                showNotification(data.senderId, event);
+                showNotification(event, data.senderId);
+                updateLastAction(event, data.senderId);
             }
             routeToContent(event, data);
             break;
@@ -404,6 +408,15 @@ function handleServerEvent(event, data) {
                 showNotification(data.senderId, event);
             }
             routeToContent(event, data);
+            break;
+        case EVENTS.EVENT_ACK:
+            if (lastActionState && lastActionState.action && data.senderId) {
+                if (!lastActionState.acks.includes(data.senderId)) {
+                    lastActionState.acks.push(data.senderId);
+                    if (storageInitialized) chrome.storage.session.set({ lastActionState });
+                    chrome.runtime.sendMessage({ type: 'ACTION_UPDATE', state: lastActionState }).catch(() => {});
+                }
+            }
             break;
         case EVENTS.PEER_STATUS:
             if (currentRoom) {
@@ -449,6 +462,17 @@ function executeForceSync() {
     addLog('Force Sync Executed', 'success');
 }
 
+function updateLastAction(action, senderId) {
+    lastActionState = {
+        action,
+        senderId,
+        timestamp: Date.now(),
+        acks: []
+    };
+    if (storageInitialized) chrome.storage.session.set({ lastActionState });
+    chrome.runtime.sendMessage({ type: 'ACTION_UPDATE', state: lastActionState }).catch(() => {});
+}
+
 async function routeToContent(action, payload) {
     if (!currentTabId) {
         const settings = await getSettings();
@@ -458,6 +482,8 @@ async function routeToContent(action, payload) {
 
     const tabId = parseInt(currentTabId);
     if (isNaN(tabId)) return;
+
+    currentCommandSenderId = payload.senderId || null;
 
     chrome.tabs.sendMessage(tabId, { 
         type: 'SERVER_COMMAND',
@@ -530,7 +556,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const isConnected = socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined;
         let status = isConnected ? 'connected' : (isConnecting || (socket && socket.readyState === WebSocket.CONNECTING) ? 'connecting' : 'disconnected');
         if (reconnectFailed) status = 'reconnect_failed';
-        sendResponse({ status, peerId, peers: currentRoom ? currentRoom.peers : [] });
+        sendResponse({ 
+            status, 
+            peerId, 
+            peers: currentRoom ? currentRoom.peers : [],
+            lastActionState
+        });
         // Global return true at the end handles this
     } else if (message.type === 'LEAVE_ROOM') {
         emit(EVENTS.LEAVE_ROOM, { peerId });
@@ -610,6 +641,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             routeToContent(message.action, message.payload);
         }
         
+        // Update local state as initiator
+        updateLastAction(message.action, 'You');
+        
         // Events coming from content script or popup
         if (message.action === EVENTS.FORCE_SYNC_PREPARE) {
             isForceSyncInitiator = true;
@@ -639,6 +673,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
         } else {
             emit(EVENTS.FORCE_SYNC_ACK, { peerId });
+        }
+    } else if (message.type === 'CMD_ACK') {
+        // Content script successfully ran a command. Send ACK back to the initiator.
+        if (currentCommandSenderId && currentCommandSenderId !== peerId) {
+            emit(EVENTS.EVENT_ACK, { senderId: peerId, targetId: currentCommandSenderId });
         }
     } else if (message.type === 'HEARTBEAT') {
         if (sender.tab) {
