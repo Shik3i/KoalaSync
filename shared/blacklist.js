@@ -64,11 +64,23 @@ export const BLACKLIST_DOMAINS = [
     'aliexpress.com',
     'etsy.com',
 
+    // Media Information & Reviews
+    'rottentomatoes.com',
+    'imdb.com',
+    'thetvdb.com',
+    'themoviedb.org',
+    'letterboxd.com',
+    'metacritic.com',
+    'myanimelist.net',
+
     // Development & Utilities
     'timer.shik3i.net',
     'localhost',
     'zoom.us',
     'teams.microsoft.com',
     'meet.google.com',
-    'chrome.google.com'
+    'chrome.google.com',
+
+    // Specific Noise
+    'milkywayidle.com'
 ];
