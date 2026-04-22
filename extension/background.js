@@ -75,6 +75,14 @@ async function connect() {
         if (!finalUrl.includes('://')) {
             finalUrl = 'ws://' + finalUrl;
         }
+
+        // Strict WSS Enforcement
+        const urlObj = new URL(finalUrl);
+        const isLocal = urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1';
+        if (!isLocal && urlObj.protocol === 'ws:') {
+            finalUrl = finalUrl.replace('ws://', 'wss://');
+            addLog('Security: Upgraded to wss:// for remote host.', 'warn');
+        }
     }
 
     addLog(`Connecting to ${isCustomServer ? finalUrl : 'Official Server'}...`, 'info');

@@ -144,6 +144,20 @@
         }
     }
 
+    // SPA Navigation Handler (MutationObserver)
+    let mutationTimeout = null;
+    const observer = new MutationObserver((mutations) => {
+        if (mutationTimeout) clearTimeout(mutationTimeout);
+        mutationTimeout = setTimeout(() => {
+            const video = findVideo();
+            if (video && !video.koalaSyncInitialized) {
+                console.log('KoalaSync: New video detected via navigation.');
+                setupVideoListeners(video);
+            }
+        }, 1000); // 1s debounce
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
     // Heartbeat
     let heartbeatErrorCount = 0;
     const heartbeatInterval = setInterval(() => {
@@ -162,6 +176,7 @@
                         console.warn('KoalaSync: Extension reloaded. Please refresh the page if sync stops working.');
                     }
                     clearInterval(heartbeatInterval);
+                    observer.disconnect();
                 }
             });
         }

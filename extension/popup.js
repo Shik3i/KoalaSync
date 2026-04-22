@@ -39,6 +39,7 @@ const elements = {
 };
 
 let localPeerId = null;
+let lastPeersJson = null;
 
 // --- Initialization ---
 async function init() {
@@ -90,6 +91,12 @@ function updateUI(roomId, password) {
 
 function updatePeerList(peers) {
     if (!peers || !elements.peerList) return;
+    
+    // UI Throttle: Only re-render if the peer state actually changed
+    const currentPeersJson = JSON.stringify(peers);
+    if (currentPeersJson === lastPeersJson) return;
+    lastPeersJson = currentPeersJson;
+
     elements.peerList.innerHTML = peers.map(p => {
         const id = escapeHtml(typeof p === 'object' ? p.peerId : p);
         const titleText = (typeof p === 'object' && p.tabTitle) ? escapeHtml(p.tabTitle) : '';
