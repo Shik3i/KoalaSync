@@ -605,8 +605,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             currentTabId = sender.tab.id;
             currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
             updateBadgeStatus();
+        } else {
+            // Event coming from POPUP: We must also route it to our OWN content script
+            routeToContent(message.action, message.payload);
         }
-        // Events coming from content script (manual play/pause)
+        
+        // Events coming from content script or popup
         if (message.action === EVENTS.FORCE_SYNC_PREPARE) {
             isForceSyncInitiator = true;
             forceSyncAcks.clear();
