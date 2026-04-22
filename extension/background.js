@@ -431,6 +431,8 @@ async function routeToContent(action, payload) {
                 files: ['content.js']
             }).then(() => {
                 setTimeout(() => routeToContent(action, payload), 500);
+            }).catch(err => {
+                addLog(`Auto-reinject failed for tab ${tabId}`, 'warn');
             });
         } else {
             addLog(`Content Script not responding in tab ${tabId}`, 'warn');

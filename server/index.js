@@ -174,6 +174,7 @@ io.on('connection', (socket) => {
                 if (oldRoom) {
                     oldRoom.peers.delete(socket.id);
                     oldRoom.peerIds.delete(socket.id);
+                    oldRoom.peerData.delete(socket.id);
                     socket.to(oldMapping.roomId).emit(EVENTS.PEER_STATUS, { peerId: oldMapping.peerId, status: 'left' });
                     if (oldRoom.peers.size === 0) rooms.delete(oldMapping.roomId);
                 }
