@@ -81,6 +81,22 @@ export const BLACKLIST_DOMAINS = [
     'meet.google.com',
     'chrome.google.com',
 
-    // Specific Noise
-    'milkywayidle.com'
+    // Games & Idle Sites
+    'milkywayidle.com',
+    'melvoridle.com',
+    'cookieclicker.',
+    'clickerheroes.com',
+    'kongregate.com',
+    'armorgames.com',
+    'crazygames.com',
+    'poki.com',
+    'newgrounds.com',
+    'krunker.io',
+    'slither.io',
+    'agar.io',
+    'diep.io',
+    'geoguessr.com',
+    'chess.com',
+    'lichess.org',
+    'skribbl.io'
 ];
