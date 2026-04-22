@@ -101,13 +101,17 @@
             } else if (action === 'seek') {
                 tryMediaAction('seek', payload);
             } else if (action === 'force_sync_prepare') {
+                isProcessingCommand = true;
                 const video = findVideo();
                 if (video) {
                     video.pause();
                     video.currentTime = payload.targetTime;
                     pollSeekReady(payload.targetTime).then(() => {
                         chrome.runtime.sendMessage({ type: 'FORCE_SYNC_ACK' });
+                        setTimeout(() => { isProcessingCommand = false; }, 1000);
                     });
+                } else {
+                    isProcessingCommand = false;
                 }
             } else if (action === 'force_sync_execute') {
                 tryMediaAction('play');
