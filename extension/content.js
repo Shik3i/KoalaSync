@@ -146,6 +146,24 @@
                 tryMediaAction(EVENTS.PLAY);
             }
         }
+
+        if (message.type === 'GET_VIDEO_STATE') {
+            const video = findVideo();
+            if (video) {
+                sendResponse({
+                    paused: video.paused,
+                    currentTime: video.currentTime,
+                    duration: video.duration || 0,
+                    readyState: video.readyState,
+                    muted: video.muted,
+                    playbackRate: video.playbackRate,
+                    url: window.location.href,
+                    id: video.id || 'none'
+                });
+            } else {
+                sendResponse({ error: 'No video found' });
+            }
+        }
     });
 
     // Detect native events

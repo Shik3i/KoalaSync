@@ -200,15 +200,12 @@
     <div class="tabs">
         <button class="tab-btn active" data-tab="tab-room">Room</button>
         <button class="tab-btn" data-tab="tab-sync">Sync</button>
+        <button class="tab-btn" data-tab="tab-settings">Settings</button>
         <button class="tab-btn" data-tab="tab-dev">Dev</button>
     </div>
 
     <!-- Room Tab -->
     <div id="tab-room" class="tab-content active">
-        <div class="form-group">
-            <label>Your Username</label>
-            <input type="text" id="username" placeholder="Anonymous Koala" maxlength="20">
-        </div>
 
         <!-- JOIN SECTION: Visible when not in a room -->
         <div id="section-join">
@@ -301,12 +298,30 @@
             <!-- History will be injected here -->
         </div>
     </div>
+    
+    <!-- Settings Tab -->
+    <div id="tab-settings" class="tab-content">
+        <div class="form-group">
+            <label>Your Username</label>
+            <input type="text" id="username" placeholder="Anonymous Koala" maxlength="20">
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; background: var(--card); padding: 10px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #334155;">
+            <label style="margin-bottom: 0;">Filter Noise Tabs</label>
+            <input type="checkbox" id="filterNoise" style="width: auto;" checked>
+        </div>
+        
+        <div style="font-size: 11px; color: var(--text-muted); padding: 8px;">
+            <p>• Username helps others identify you.</p>
+            <p>• Noise filtering hides tabs without videos.</p>
+        </div>
+    </div>
 
     <!-- Dev Tab -->
     <div id="tab-dev" class="tab-content">
-        <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; background: var(--card); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
-            <label style="margin-bottom: 0;">Filter Noise Tabs</label>
-            <input type="checkbox" id="filterNoise" style="width: auto;" checked>
+        <label>Video Debug Info</label>
+        <div id="videoDebug" class="info-card" style="font-size: 10px; font-family: monospace; color: var(--text-muted); min-height: 60px; line-height: 1.4;">
+            No tab selected or video detected.
         </div>
 
         <label>Connection Status</label>

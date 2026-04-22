@@ -531,6 +531,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             connect();
             // We wait for status update in handleServerEvent
         });
+    } else if (message.type === 'GET_VIDEO_STATE') {
+        const { tabId } = message;
+        if (!tabId) {
+            sendResponse({ error: 'No tabId provided' });
+            return;
+        }
+        chrome.tabs.sendMessage(tabId, { type: 'GET_VIDEO_STATE' }, (res) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse(res);
+            }
+        });
+        return true; // Keep channel open
     } else if (message.type === 'CONTENT_EVENT') {
         if (sender.tab) {
             currentTabId = sender.tab.id;

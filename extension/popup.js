@@ -44,6 +44,7 @@ const elements = {
     activeServer: document.getElementById('activeServer'),
     peerList: document.getElementById('peerList'),
     peerListSync: document.getElementById('peerListSync'),
+    videoDebug: document.getElementById('videoDebug'),
     playBtn: document.getElementById('playBtn'),
     pauseBtn: document.getElementById('pauseBtn')
 };
@@ -89,6 +90,9 @@ async function init() {
 
     // Initial room list fetch
     chrome.runtime.sendMessage({ type: 'GET_ROOM_LIST' });
+
+    // Debug Info Refresh
+    setInterval(refreshDebugInfo, 2000);
 }
 
 // --- UI Logic ---
@@ -574,6 +578,37 @@ elements.copyLogs.addEventListener('click', () => {
         });
     });
 });
+
+function refreshDebugInfo() {
+    // Only refresh if Dev tab is visible
+    const devTab = document.getElementById('tab-dev');
+    if (!devTab || devTab.style.display === 'none') return;
+
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+        if (!res || !res.targetTabId) {
+            if (elements.videoDebug) elements.videoDebug.textContent = 'No target tab selected.';
+            return;
+        }
+
+        // Request direct state from the content script via background
+        chrome.runtime.sendMessage({ type: 'GET_VIDEO_STATE', tabId: res.targetTabId }, (state) => {
+            if (!state || state.error) {
+                if (elements.videoDebug) elements.videoDebug.textContent = 'Could not communicate with tab video.';
+                return;
+            }
+
+            if (elements.videoDebug) {
+                elements.videoDebug.innerHTML = `
+                    <div style="color:var(--accent); margin-bottom:4px;">VIDEO STATE: ${state.paused ? 'PAUSED' : 'PLAYING'}</div>
+                    <div style="font-size: 11px;">Time: ${state.currentTime.toFixed(2)}s / ${state.duration.toFixed(2)}s</div>
+                    <div style="font-size: 11px;">ReadyState: ${state.readyState}</div>
+                    <div style="font-size: 11px;">Muted: ${state.muted} | PlaybackRate: ${state.playbackRate}</div>
+                    <div style="font-size:9px; margin-top:4px; opacity:0.7;">URL: ${state.url.substring(0, 40)}...</div>
+                `;
+            }
+        });
+    });
+}
 
 init();
 setInterval(refreshLogs, 5000);
