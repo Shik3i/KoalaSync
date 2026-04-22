@@ -132,7 +132,7 @@ function updatePeerList(peers) {
         const username = (typeof p === 'object' && p.username) ? escapeHtml(p.username) : '';
         const titleText = (typeof p === 'object' && p.tabTitle) ? escapeHtml(p.tabTitle) : '';
         
-        const nameLabel = username ? `<span style="font-weight:600; color:white;">${username}</span> <span style="font-size:10px; opacity:0.5;">(${id})</span>` : `<span style="font-weight:600;">👤 ${id}</span>`;
+        const nameLabel = username ? `<span style="font-weight:600; color:white;">${username}</span> <span style="font-size:10px; opacity:0.6; font-style:italic;">(${id})</span>` : `<span style="font-weight:600;">👤 ${id}</span>`;
         const title = titleText ? `<div style="font-size:10px; color:var(--text-muted);">${titleText}</div>` : '';
         
         return `
