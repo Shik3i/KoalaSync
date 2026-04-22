@@ -347,11 +347,16 @@ function applyConnectionStatus(status) {
     // Update Join Button during auto-transition
     if (connecting) {
         elements.joinBtn.disabled = true;
-        elements.joinBtn.textContent = 'Connecting...';
+        elements.joinBtn.textContent = '🚀 Joining...';
     } else {
         elements.joinBtn.disabled = false;
         elements.joinBtn.textContent = 'Join Room';
     }
+
+    // Preserve icons for Remote Control buttons
+    elements.playBtn.textContent = '▶ Play';
+    elements.pauseBtn.textContent = '⏸ Pause';
+    elements.forceSyncBtn.textContent = '⚡ Force Sync Everyone';
 }
 
 function updateHistory(history) {

@@ -465,7 +465,7 @@ function handleServerEvent(event, data) {
         case EVENTS.FORCE_SYNC_PREPARE:
             if (data.senderId) {
                 addToHistory(event, data.senderId);
-                showNotification(data.senderId, event);
+                showNotification(event, data.senderId);
                 updateLastAction(event, data.senderId);
             }
             routeToContent(event, data);
@@ -621,8 +621,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         if (!socket || socket.readyState !== WebSocket.OPEN) {
             connect();
         } else if (currentRoom) {
-            // Heartbeat Logic migrated from setInterval
-            emit(EVENTS.PEER_STATUS, { peerId, status: 'heartbeat' });
+            // Heartbeat Logic: Always include identity metadata
+            const settings = await getSettings();
+            emit(EVENTS.PEER_STATUS, { 
+                peerId, 
+                status: 'heartbeat',
+                username: settings.username,
+                tabTitle: currentTabTitle
+            });
         }
     }
 });
@@ -635,7 +641,13 @@ setInterval(async () => {
         connect();
     } else if (currentRoom) {
         // Redundant heartbeat for active SW state
-        emit(EVENTS.PEER_STATUS, { peerId, status: 'heartbeat' });
+        const settings = await getSettings();
+        emit(EVENTS.PEER_STATUS, { 
+            peerId, 
+            status: 'heartbeat',
+            username: settings.username,
+            tabTitle: currentTabTitle 
+        });
     }
 }, 30000); // every 30s
 
