@@ -154,7 +154,7 @@ io.on('connection', (socket) => {
             return;
         }
         if (!payload || typeof payload.roomId !== 'string') return;
-        const { roomId, password, peerId, username, protocolVersion } = payload;
+        const { roomId, password, peerId, username, tabTitle, protocolVersion } = payload;
         try {
             // Protocol check
             if (protocolVersion !== '1.0.0') {
@@ -242,12 +242,12 @@ io.on('connection', (socket) => {
             room.peerData.set(socket.id, { 
                 peerId, 
                 username: username || null, 
-                tabTitle: null,
+                tabTitle: tabTitle || null,
                 lastSeen: Date.now() 
             });
             socketToRoom.set(socket.id, { roomId, peerId });
 
-            socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, status: 'joined' });
+            socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, tabTitle: tabTitle || null, status: 'joined' });
             socket.emit(EVENTS.ROOM_DATA, { 
                 roomId, 
                 peers: Array.from(room.peers).map(sid => room.peerData.get(sid)) 

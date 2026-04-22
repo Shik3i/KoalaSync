@@ -206,6 +206,7 @@ async function connect() {
                     password: settings.password,
                     peerId,
                     username: settings.username,
+                    tabTitle: currentTabTitle,
                     protocolVersion: PROTOCOL_VERSION
                 });
             }
@@ -561,14 +562,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }, () => {
             if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
                 // FORCE TRANSITION: Emit Join Room directly if already connected
-                emit(EVENTS.JOIN_ROOM, { 
-                    roomId, 
-                    password,
-                    peerId,
-                    username: message.username || '', // Use username if provided by bridge
-                    protocolVersion: PROTOCOL_VERSION
+                getSettings().then(settings => {
+                    emit(EVENTS.JOIN_ROOM, { 
+                        roomId, 
+                        password,
+                        peerId,
+                        username: settings.username, // Use local settings, not bridge
+                        tabTitle: currentTabTitle,
+                        protocolVersion: PROTOCOL_VERSION
+                    });
+                    addLog(`Joining room via link: ${roomId}`, 'info');
                 });
-                addLog(`Joining room via link: ${roomId}`, 'info');
             } else {
                 connect();
             }
