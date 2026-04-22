@@ -55,6 +55,15 @@
         const video = findVideo();
         if (!video) return;
 
+        if (action === EVENTS.SEEK) {
+            const target = data ? (data.targetTime !== undefined ? data.targetTime : data.currentTime) : undefined;
+            if (!Number.isFinite(target)) {
+                reportLog(`Media Action Error: Invalid seek payload - ${JSON.stringify(data)}`, 'error');
+                return;
+            }
+            data.targetTime = target;
+        }
+
         try {
             const host = window.location.hostname.toLowerCase();
             const isYouTube = host.includes('youtube.com');
@@ -162,6 +171,10 @@
                 if (!payload || payload.targetTime === undefined) return;
                 const video = findVideo();
                 if (video) {
+                    if (!Number.isFinite(payload.targetTime)) {
+                        reportLog(`Media Action Error: Invalid force sync payload - ${JSON.stringify(payload)}`, 'error');
+                        return;
+                    }
                     setTargetState('paused');
                     video.pause();
                     video.currentTime = payload.targetTime;
@@ -199,6 +212,9 @@
         const video = findVideo();
         if (!video) return;
 
+        const current = video.currentTime;
+        if (!Number.isFinite(current)) return;
+
         const eventState = action === EVENTS.PLAY ? 'playing' : (action === EVENTS.PAUSE ? 'paused' : (action === EVENTS.SEEK ? 'seek' : null));
         
         if (eventState && lastTargetState === eventState) {
@@ -210,7 +226,8 @@
             type: 'CONTENT_EVENT',
             action,
             payload: {
-                currentTime: video.currentTime,
+                currentTime: current,
+                targetTime: current,
                 timestamp: Date.now()
             }
         });
