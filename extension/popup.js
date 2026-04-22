@@ -38,7 +38,9 @@ const elements = {
     roomError: document.getElementById('roomError'),
     retryBtn: document.getElementById('retryBtn'),
     sectionJoin: document.getElementById('section-join'),
-    sectionActive: document.getElementById('section-active')
+    sectionActive: document.getElementById('section-active'),
+    playBtn: document.getElementById('playBtn'),
+    pauseBtn: document.getElementById('pauseBtn')
 };
 
 let localPeerId = null;
@@ -411,6 +413,22 @@ elements.forceSyncBtn.addEventListener('click', async () => {
                 payload: { targetTime: time }
             });
         }
+    });
+});
+
+elements.playBtn.addEventListener('click', () => {
+    chrome.runtime.sendMessage({
+        type: 'CONTENT_EVENT',
+        action: EVENTS.PLAY,
+        payload: {}
+    });
+});
+
+elements.pauseBtn.addEventListener('click', () => {
+    chrome.runtime.sendMessage({
+        type: 'CONTENT_EVENT',
+        action: EVENTS.PAUSE,
+        payload: {}
     });
 });
 

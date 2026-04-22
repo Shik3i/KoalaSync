@@ -253,10 +253,6 @@
                 </div>
             </div>
 
-            <button id="forceSyncBtn" class="primary" style="background: linear-gradient(135deg, #6366f1, #a855f7); margin-bottom: 12px;">
-                ⚡ Force Sync Everyone
-            </button>
-
             <button id="leaveBtn" class="secondary" style="color: var(--error); border-color: var(--error);">Leave Room</button>
         </div>
     </div>
@@ -270,11 +266,17 @@
             </select>
         </div>
         
-        <button id="forceSyncBtn" class="primary" style="background: linear-gradient(135deg, #6366f1, #a855f7);">
+        <label>Remote Control</label>
+        <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+            <button id="playBtn" class="primary" style="flex: 1; background: var(--success);">▶ Play</button>
+            <button id="pauseBtn" class="primary" style="flex: 1; background: var(--error);">⏸ Pause</button>
+        </div>
+
+        <button id="forceSyncBtn" class="primary" style="background: linear-gradient(135deg, #6366f1, #a855f7); margin-bottom: 20px;">
             ⚡ Force Sync Everyone
         </button>
 
-        <div style="margin-top: 20px;">
+        <div style="margin-bottom: 20px;">
             <label>Peers in Room</label>
             <div id="peerList" class="info-card">
                 <div style="text-align:center; color: var(--text-muted); font-size: 12px;">No peers connected</div>
