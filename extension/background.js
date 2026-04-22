@@ -7,6 +7,8 @@ const MAX_RECONNECT_DELAY = 30000;
 let isConnecting = false;
 let peerId = null; // initialized via getPeerId()
 let currentRoom = null;
+let lastPeersJson = null;
+let heartbeatInterval = null;
 let currentTabId = null;
 let currentTabTitle = null; // New: for Smart Matching
 let logs = [];
@@ -48,6 +50,24 @@ let forceSyncAcks = new Set();
 let forceSyncTimeout = null;
 
 // --- Storage Utils ---
+function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatInterval = setInterval(() => {
+        if (currentRoom) {
+            emit(EVENTS.PEER_STATUS, { peerId, status: 'heartbeat' });
+        } else {
+            stopHeartbeat();
+        }
+    }, 30000);
+}
+
+function stopHeartbeat() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+}
+
 async function getPeerId() {
     const data = await chrome.storage.local.get(['peerId']);
     if (data.peerId) return data.peerId;
@@ -327,6 +347,10 @@ function handleServerEvent(event, data) {
             if (storageInitialized) chrome.storage.session.set({ currentRoom });
             addLog(`Joined Room: ${data.roomId}`, 'success');
             chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: data.peers }).catch(() => {});
+            
+            // Start background heartbeat
+            startHeartbeat();
+            
             // Inform Website Bridge
             chrome.tabs.query({}, (tabs) => {
                 tabs.forEach(tab => {
@@ -507,6 +531,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'LEAVE_ROOM') {
         emit(EVENTS.LEAVE_ROOM, { peerId });
         currentRoom = null;
+        stopHeartbeat();
         if (storageInitialized) chrome.storage.session.set({ currentRoom: null });
         addLog('Left Room', 'info');
         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});

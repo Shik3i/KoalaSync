@@ -237,7 +237,12 @@ io.on('connection', (socket) => {
             socket.join(roomId);
             room.peers.add(socket.id);
             room.peerIds.set(socket.id, peerId);
-            room.peerData.set(socket.id, { peerId, username: username || null, tabTitle: null });
+            room.peerData.set(socket.id, { 
+                peerId, 
+                username: username || null, 
+                tabTitle: null,
+                lastSeen: Date.now() 
+            });
             socketToRoom.set(socket.id, { roomId, peerId });
 
             socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, status: 'joined' });
@@ -274,17 +279,18 @@ io.on('connection', (socket) => {
                 const room = rooms.get(mapping.roomId);
                 if (room) {
                     room.lastActivity = Date.now();
-                    // Update metadata if it's a peer_status (heartbeat)
-                    if (eventName === EVENTS.PEER_STATUS && (data.tabTitle || data.username)) {
-                        const existing = room.peerData.get(socket.id) || { peerId: mapping.peerId };
-                        room.peerData.set(socket.id, { 
-                            ...existing,
-                            username: data.username || existing.username,
-                            tabTitle: data.tabTitle || existing.tabTitle 
-                        });
-                    }
+                    
+                    // Update peer metadata and lastSeen
+                    const existing = room.peerData.get(socket.id) || { peerId: mapping.peerId };
+                    room.peerData.set(socket.id, { 
+                        ...existing,
+                        username: data.username || existing.username,
+                        tabTitle: data.tabTitle || existing.tabTitle,
+                        lastSeen: Date.now()
+                    });
+
+                    socket.to(mapping.roomId).emit(eventName, { ...data, senderId: mapping.peerId });
                 }
-                socket.to(mapping.roomId).emit(eventName, { ...data, senderId: mapping.peerId });
             }
         });
     });
@@ -339,17 +345,37 @@ io.on('connection', (socket) => {
     });
 });
 
-// Inactive Room Cleanup (Every 30m)
+// Active Room & Dead Peer Cleanup (Every 2m)
 setInterval(() => {
-    const cutoff = Date.now() - (2 * 60 * 60 * 1000); // 2 hours
+    const now = Date.now();
+    const roomCutoff = now - (2 * 60 * 60 * 1000); // 2 hours
+    const peerCutoff = now - (5 * 60 * 1000);      // 5 minutes
+    
     for (const [roomId, room] of rooms) {
-        if (room.lastActivity < cutoff) {
-            io.to(roomId).emit(EVENTS.ERROR, { message: 'Room closed due to inactivity' });
+        // 1. Prune dead peers
+        for (const [sid, data] of room.peerData.entries()) {
+            if (data.lastSeen && data.lastSeen < peerCutoff) {
+                const socket = io.sockets.sockets.get(sid);
+                if (socket) socket.leave(roomId);
+                
+                room.peers.delete(sid);
+                room.peerIds.delete(sid);
+                room.peerData.delete(sid);
+                socketToRoom.delete(sid);
+                
+                io.to(roomId).emit(EVENTS.PEER_STATUS, { peerId: data.peerId, status: 'left' });
+                log('CLEANUP', `Pruned dead peer ${data.peerId} from room ${roomId}`);
+            }
+        }
+
+        // 2. Prune empty or inactive rooms
+        if (room.peers.size === 0 || room.lastActivity < roomCutoff) {
+            io.to(roomId).emit(EVENTS.ERROR, { message: 'Room closed' });
             rooms.delete(roomId);
-            log('CLEANUP', `Deleted inactive room: ${roomId.substring(0, 3)}***`);
+            log('CLEANUP', `Deleted room ${roomId.substring(0, 3)}*** (Empty/Inactive)`);
         }
     }
-}, 30 * 60 * 1000);
+}, 2 * 60 * 1000);
 
 httpServer.listen(PORT, () => {
     log('SERVER', `KoalaSync Relay running on port ${PORT}`);
