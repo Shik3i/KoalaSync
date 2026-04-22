@@ -337,12 +337,15 @@ function showError(msg) {
     elements.password.style.borderColor = 'var(--error)';
     
     // Shake effect
-    document.getElementById('tab-room').animate([
-        { transform: 'translateX(0)' },
-        { transform: 'translateX(-5px)' },
-        { transform: 'translateX(5px)' },
-        { transform: 'translateX(0)' }
-    ], { duration: 200, iterations: 2 });
+    const activeTab = document.querySelector('.tab-content.active');
+    if (activeTab) {
+        activeTab.animate([
+            { transform: 'translateX(0)' },
+            { transform: 'translateX(-5px)' },
+            { transform: 'translateX(5px)' },
+            { transform: 'translateX(0)' }
+        ], { duration: 200, iterations: 2 });
+    }
 
     setTimeout(() => {
         if (elements.roomError) elements.roomError.style.display = 'none';

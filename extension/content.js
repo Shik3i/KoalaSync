@@ -7,7 +7,7 @@
     if (window.koalaSyncInjected) return;
     window.koalaSyncInjected = true;
 
-    let isProcessingCommand = false;
+    let processingCommandUntil = 0;
 
     // --- Helper: find the best video element on the page ---
     function findVideo() {
@@ -20,7 +20,7 @@
         const video = findVideo();
         if (!video) return;
 
-        isProcessingCommand = true;
+        processingCommandUntil = Date.now() + 1000;
         try {
             const host = window.location.hostname.toLowerCase();
             const isYouTube = host.includes('youtube.com');
@@ -60,9 +60,6 @@
             }
         } catch (e) {
             console.error('KoalaSync Media Action Error:', e);
-        } finally {
-            // Guarantee reset even on early returns in YouTube/Twitch blocks
-            setTimeout(() => { isProcessingCommand = false; }, 1000);
         }
     }
 
@@ -91,6 +88,12 @@
 
     // Listen for commands from background.js
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.action === 'get_current_time') {
+            const video = findVideo();
+            sendResponse({ currentTime: video ? video.currentTime : undefined });
+            return true;
+        }
+
         if (message.type === 'SERVER_COMMAND') {
             const { action, payload } = message;
             
@@ -101,17 +104,17 @@
             } else if (action === 'seek') {
                 tryMediaAction('seek', payload);
             } else if (action === 'force_sync_prepare') {
-                isProcessingCommand = true;
+                processingCommandUntil = Date.now() + 10000;
                 const video = findVideo();
                 if (video) {
                     video.pause();
                     video.currentTime = payload.targetTime;
                     pollSeekReady(payload.targetTime).then(() => {
                         chrome.runtime.sendMessage({ type: 'FORCE_SYNC_ACK' });
-                        setTimeout(() => { isProcessingCommand = false; }, 1000);
+                        processingCommandUntil = Date.now() + 1000;
                     });
                 } else {
-                    isProcessingCommand = false;
+                    processingCommandUntil = 0;
                 }
             } else if (action === 'force_sync_execute') {
                 tryMediaAction('play');
@@ -121,7 +124,7 @@
 
     // Detect native events
     function reportEvent(action) {
-        if (isProcessingCommand) return;
+        if (Date.now() < processingCommandUntil) return;
         const video = findVideo();
         if (!video) return;
 
@@ -147,15 +150,24 @@
 
     // SPA Navigation Handler (MutationObserver)
     let lastMutate = 0;
+    let observerTimeout = null;
+
+    function checkVideo() {
+        lastMutate = Date.now();
+        const video = findVideo();
+        if (video && !video.dataset.koalaAttached) {
+            console.log('KoalaSync: New video detected via navigation.');
+            setupListeners();
+        }
+    }
+
     const observer = new MutationObserver(() => {
         const now = Date.now();
         if (now - lastMutate >= 1000) {
-            lastMutate = now;
-            const video = findVideo();
-            if (video && !video.dataset.koalaAttached) {
-                console.log('KoalaSync: New video detected via navigation.');
-                setupListeners();
-            }
+            checkVideo();
+        } else {
+            if (observerTimeout) clearTimeout(observerTimeout);
+            observerTimeout = setTimeout(checkVideo, 1000 - (now - lastMutate));
         }
     });
     observer.observe(document.body, { childList: true, subtree: true });

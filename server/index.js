@@ -84,6 +84,16 @@ setInterval(() => {
 
 const eventCounts = new Map(); // socketId -> { count, resetTime }
 
+// Clean up connection counts to prevent memory leak
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of connectionCounts.entries()) {
+        if (now > entry.resetTime) {
+            connectionCounts.delete(ip);
+        }
+    }
+}, 60000);
+
 function checkConnectionRate(ip) {
     const now = Date.now();
     const entry = connectionCounts.get(ip) || { count: 0, resetTime: now + 60000 };
@@ -150,6 +160,9 @@ io.on('connection', (socket) => {
 
             // Cleanup old room if re-joining
             const oldMapping = socketToRoom.get(socket.id);
+            if (oldMapping && oldMapping.roomId === roomId) {
+                return; // Already in this room, ignore to prevent spam
+            }
             if (oldMapping && oldMapping.roomId !== roomId) {
                 socket.leave(oldMapping.roomId);
                 const oldRoom = rooms.get(oldMapping.roomId);
@@ -231,6 +244,8 @@ io.on('connection', (socket) => {
                 socket.disconnect(true);
                 return;
             }
+
+            if (!data || typeof data !== 'object') return; // Prevent null/invalid payload crash
 
             const mapping = socketToRoom.get(socket.id);
             if (mapping) {

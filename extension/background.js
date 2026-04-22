@@ -11,11 +11,28 @@ let currentTabId = null;
 let currentTabTitle = null; // New: for Smart Matching
 let logs = [];
 let history = []; // New: for Action History
+let storageInitialized = false;
+let pendingLogs = [];
+let pendingHistory = [];
 
 // Restore state from session storage
 chrome.storage.session.get(['logs', 'history'], (data) => {
     if (data.logs) logs = data.logs;
     if (data.history) history = data.history;
+    storageInitialized = true;
+    
+    if (pendingLogs.length > 0) {
+        logs.unshift(...pendingLogs);
+        if (logs.length > 50) logs = logs.slice(0, 50);
+        chrome.storage.session.set({ logs });
+        pendingLogs = [];
+    }
+    if (pendingHistory.length > 0) {
+        history.unshift(...pendingHistory);
+        if (history.length > 20) history = history.slice(0, 20);
+        chrome.storage.session.set({ history });
+        pendingHistory = [];
+    }
 });
 
 let reconnectTimer = null;
@@ -56,9 +73,13 @@ function addLog(message, type = 'info') {
         message,
         type
     };
-    logs.unshift(log);
-    if (logs.length > 50) logs.pop();
-    chrome.storage.session.set({ logs });
+    if (!storageInitialized) {
+        pendingLogs.unshift(log);
+    } else {
+        logs.unshift(log);
+        if (logs.length > 50) logs.pop();
+        chrome.storage.session.set({ logs });
+    }
     chrome.runtime.sendMessage({ type: 'LOG_UPDATE', log }).catch(() => {});
 }
 
@@ -260,9 +281,13 @@ function addToHistory(action, senderId) {
         senderId: senderId || 'You',
         timestamp: new Date().toISOString()
     };
-    history.unshift(historyEntry);
-    if (history.length > 20) history.pop();
-    chrome.storage.session.set({ history });
+    if (!storageInitialized) {
+        pendingHistory.unshift(historyEntry);
+    } else {
+        history.unshift(historyEntry);
+        if (history.length > 20) history.pop();
+        chrome.storage.session.set({ history });
+    }
     chrome.runtime.sendMessage({ type: 'HISTORY_UPDATE', history }).catch(() => {});
 }
 
