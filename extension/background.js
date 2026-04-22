@@ -58,7 +58,7 @@ async function getPeerId() {
 
 async function getSettings() {
     return new Promise(resolve => {
-        chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'targetTabId'], (data) => {
+        chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'targetTabId', 'username'], (data) => {
             resolve({
                 serverUrl: data.serverUrl || '',
                 useCustomServer: data.useCustomServer || false,
