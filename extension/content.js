@@ -29,8 +29,7 @@
             if (isYouTube) {
                 const ytButton = document.querySelector('.ytp-play-button');
                 if (ytButton) {
-                    const title = ytButton.getAttribute('aria-label') || '';
-                    const isCurrentlyPlaying = title.toLowerCase().includes('pause');
+                    const isCurrentlyPlaying = !video.paused;
                     if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
                         ytButton.click();
                     }
@@ -42,9 +41,7 @@
             if (isTwitch) {
                 const twitchButton = document.querySelector('[data-a-target="player-play-pause-button"]');
                 if (twitchButton) {
-                    const label = twitchButton.getAttribute('aria-label')?.toLowerCase() || '';
-                    // Check for common localized labels (pause, stoppen, arrête)
-                    const isCurrentlyPlaying = label.includes('pause') || label.includes('stoppen') || label.includes('arrête');
+                    const isCurrentlyPlaying = !video.paused;
                     if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
                         twitchButton.click();
                     }
@@ -145,16 +142,17 @@
     }
 
     // SPA Navigation Handler (MutationObserver)
-    let mutationTimeout = null;
+    let lastMutate = 0;
     const observer = new MutationObserver(() => {
-        if (mutationTimeout) clearTimeout(mutationTimeout);
-        mutationTimeout = setTimeout(() => {
+        const now = Date.now();
+        if (now - lastMutate >= 1000) {
+            lastMutate = now;
             const video = findVideo();
             if (video && !video.dataset.koalaAttached) {
                 console.log('KoalaSync: New video detected via navigation.');
                 setupListeners();
             }
-        }, 1000); // 1s debounce
+        }
     });
     observer.observe(document.body, { childList: true, subtree: true });
 

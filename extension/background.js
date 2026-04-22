@@ -11,6 +11,13 @@ let currentTabId = null;
 let currentTabTitle = null; // New: for Smart Matching
 let logs = [];
 let history = []; // New: for Action History
+
+// Restore state from session storage
+chrome.storage.session.get(['logs', 'history'], (data) => {
+    if (data.logs) logs = data.logs;
+    if (data.history) history = data.history;
+});
+
 let reconnectTimer = null;
 let reconnectStartTime = null; // New: track when reconnection started
 let reconnectFailed = false; // New: true if we hit the 5-min cap
@@ -51,6 +58,7 @@ function addLog(message, type = 'info') {
     };
     logs.unshift(log);
     if (logs.length > 50) logs.pop();
+    chrome.storage.session.set({ logs });
     chrome.runtime.sendMessage({ type: 'LOG_UPDATE', log }).catch(() => {});
 }
 
@@ -84,8 +92,9 @@ async function connect() {
         // Strict WSS Enforcement
         const urlObj = new URL(finalUrl);
         const isLocal = urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1';
-        if (!isLocal && urlObj.protocol === 'ws:') {
-            finalUrl = finalUrl.replace('ws://', 'wss://');
+        if (urlObj.protocol !== 'wss:' && !isLocal) {
+            urlObj.protocol = 'wss:';
+            finalUrl = urlObj.toString();
             addLog('Security: Upgraded to wss:// for remote host.', 'warn');
         }
     }
@@ -253,6 +262,7 @@ function addToHistory(action, senderId) {
     };
     history.unshift(historyEntry);
     if (history.length > 20) history.pop();
+    chrome.storage.session.set({ history });
     chrome.runtime.sendMessage({ type: 'HISTORY_UPDATE', history }).catch(() => {});
 }
 
@@ -304,9 +314,9 @@ function handleServerEvent(event, data) {
             if (isForceSyncInitiator) {
                 forceSyncAcks.add(data.senderId);
                 addLog(`Received ACK from ${data.senderId} (${forceSyncAcks.size})`, 'info');
-                // Check if all peers responded (minus ourselves)
+                // Check if all peers responded
                 const peerCount = currentRoom ? currentRoom.peers.length : 1;
-                if (forceSyncAcks.size >= peerCount - 1) {
+                if (forceSyncAcks.size >= peerCount) {
                     executeForceSync();
                 }
             }
@@ -390,7 +400,7 @@ async function routeToContent(action, payload) {
 }
 
 // --- Keep-Alive Mechanism ---
-chrome.alarms.create('keepAlive', { periodInMinutes: 0.25 }); // every 15s
+chrome.alarms.create('keepAlive', { periodInMinutes: 1 }); // every 1m
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'keepAlive') {
         // console.log('SW KeepAlive Heartbeat');
@@ -448,6 +458,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             isForceSyncInitiator = true;
             forceSyncAcks.clear();
             addLog('Initiating Force Sync...', 'info');
+            
+            // Route to our own content script so we pause and seek
+            routeToContent(EVENTS.FORCE_SYNC_PREPARE, message.payload);
+
             // Timeout if not everyone ACKs
             forceSyncTimeout = setTimeout(() => {
                 if (isForceSyncInitiator) {
@@ -459,7 +473,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         addToHistory(message.action, 'You');
         emit(message.action, { ...message.payload, peerId });
     } else if (message.type === 'FORCE_SYNC_ACK') {
-        emit(EVENTS.FORCE_SYNC_ACK, { peerId });
+        if (isForceSyncInitiator) {
+            forceSyncAcks.add(peerId);
+            addLog(`Local ACK received (${forceSyncAcks.size})`, 'info');
+            const peerCount = currentRoom ? currentRoom.peers.length : 1;
+            if (forceSyncAcks.size >= peerCount) {
+                executeForceSync();
+            }
+        } else {
+            emit(EVENTS.FORCE_SYNC_ACK, { peerId });
+        }
     } else if (message.type === 'HEARTBEAT') {
         if (sender.tab) {
             currentTabId = sender.tab.id;

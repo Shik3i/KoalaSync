@@ -404,15 +404,35 @@ elements.forceSyncBtn.addEventListener('click', async () => {
     const settings = await chrome.storage.sync.get(['targetTabId']);
     if (!settings.targetTabId) return;
 
-    chrome.tabs.sendMessage(parseInt(settings.targetTabId), { action: 'get_current_time' }, (response) => {
-        if (response && response.currentTime !== undefined) {
-            const time = parseFloat(response.currentTime);
-            chrome.runtime.sendMessage({
-                type: 'CONTENT_EVENT',
-                action: EVENTS.FORCE_SYNC_PREPARE,
-                payload: { targetTime: time }
+    const tabId = parseInt(settings.targetTabId);
+
+    const sendForceSync = (time) => {
+        chrome.runtime.sendMessage({
+            type: 'CONTENT_EVENT',
+            action: EVENTS.FORCE_SYNC_PREPARE,
+            payload: { targetTime: parseFloat(time) }
+        });
+    };
+
+    chrome.tabs.sendMessage(tabId, { action: 'get_current_time' }, (response) => {
+        if (chrome.runtime.lastError || !response || response.currentTime === undefined) {
+            chrome.scripting.executeScript({
+                target: { tabId },
+                files: ['content.js']
+            }).then(() => {
+                setTimeout(() => {
+                    chrome.tabs.sendMessage(tabId, { action: 'get_current_time' }, (retryResponse) => {
+                        if (retryResponse && retryResponse.currentTime !== undefined) {
+                            sendForceSync(retryResponse.currentTime);
+                        }
+                    });
+                }, 500);
+            }).catch(() => {
+                showError('Could not connect to video tab.');
             });
+            return;
         }
+        sendForceSync(response.currentTime);
     });
 });
 
@@ -450,7 +470,7 @@ async function refreshLogs() {
         if (logs) {
             elements.logList.innerHTML = logs.map(log => `
                 <div class="log-entry log-${log.type}">
-                    [${log.timestamp.split('T')[1].split('.')[0]}] ${log.message}
+                    [${log.timestamp.split('T')[1].split('.')[0]}] ${escapeHtml(log.message)}
                 </div>
             `).join('');
         }

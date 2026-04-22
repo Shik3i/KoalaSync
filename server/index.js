@@ -138,6 +138,7 @@ io.on('connection', (socket) => {
     log('CONN', `New connection: ${socket.id} from ${clientIp}`);
 
     socket.on(EVENTS.JOIN_ROOM, async ({ roomId, password, peerId, protocolVersion }) => {
+        if (typeof roomId !== 'string') return;
         try {
             // Protocol check
             if (protocolVersion !== '1.0.0') {
