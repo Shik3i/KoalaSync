@@ -15,6 +15,7 @@ let storageInitialized = false;
 let pendingLogs = [];
 let pendingHistory = [];
 let eventQueue = [];
+let isNamespaceJoined = false;
 
 // Restore state from session storage
 chrome.storage.session.get(['logs', 'history'], (data) => {
@@ -148,6 +149,7 @@ async function connect() {
             broadcastConnectionStatus('connected');
             reconnectStartTime = null;
             reconnectFailed = false;
+            isNamespaceJoined = false;
             
             // Socket.IO Handshake: Send "40" to join default namespace
             socket.send('40');
@@ -173,6 +175,7 @@ async function connect() {
         if (msg.startsWith('0')) {
             addLog(`Socket.IO Handshake: ${msg}`, 'info');
         } else if (msg.startsWith('40')) {
+            isNamespaceJoined = true;
             addLog('Joined Namespace /', 'success');
             // Auto-rejoin room if we have one in settings
             if (settings.roomId) {
@@ -201,6 +204,7 @@ async function connect() {
 
     socket.onclose = () => {
         isConnecting = false;
+        isNamespaceJoined = false;
         if (currentRoom) {
             currentRoom.peers = [];
             chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
@@ -275,7 +279,7 @@ function scheduleReconnect() {
 }
 
 function emit(event, data) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
         const msg = `42${JSON.stringify([event, data])}`;
         socket.send(msg);
     } else {
