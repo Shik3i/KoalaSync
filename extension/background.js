@@ -518,7 +518,12 @@ function handleServerEvent(event, data) {
                 if (!Array.isArray(currentRoom.peers)) currentRoom.peers = [];
                 if (data.status === 'joined') {
                     if (!currentRoom.peers.find(p => (p.peerId || p) === data.peerId)) {
-                        currentRoom.peers.push({ peerId: data.peerId, username: data.username, tabTitle: data.tabTitle });
+                        currentRoom.peers.push({ 
+                            peerId: data.peerId, 
+                            username: data.username, 
+                            tabTitle: data.tabTitle,
+                            mediaTitle: data.mediaTitle || null
+                        });
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                     }
@@ -533,10 +538,16 @@ function handleServerEvent(event, data) {
                         if (typeof peer === 'object') {
                             peer.tabTitle = data.tabTitle;
                             peer.username = data.username;
+                            peer.mediaTitle = data.mediaTitle !== undefined ? data.mediaTitle : peer.mediaTitle;
                         } else {
                             // Migration: replace string with object
                             const idx = currentRoom.peers.indexOf(peer);
-                            currentRoom.peers[idx] = { peerId: data.peerId, username: data.username, tabTitle: data.tabTitle };
+                            currentRoom.peers[idx] = { 
+                                peerId: data.peerId, 
+                                username: data.username, 
+                                tabTitle: data.tabTitle,
+                                mediaTitle: data.mediaTitle || null
+                            };
                         }
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
@@ -676,14 +687,15 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     protocolVersion: PROTOCOL_VERSION
                 });
             }
-        } else {
             connect();
         }
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'RETRY_CONNECT') {
         reconnectFailed = false;
         reconnectStartTime = null;
         reconnectDelay = 1000;
         connect();
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'GET_STATUS') {
         const isConnected = socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined;
         let status = isConnected ? 'connected' : (isConnecting || (socket && socket.readyState === WebSocket.CONNECTING) ? 'connecting' : 'disconnected');
@@ -714,6 +726,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         });
         addLog('Left Room', 'info');
         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'CLEAR_LOGS') {
         logs = [];
         sendResponse({ status: 'ok' });
@@ -725,6 +738,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(`42${JSON.stringify([EVENTS.GET_ROOMS])}`);
         }
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'WEB_JOIN_REQUEST') {
         const { roomId, password, useCustomServer, serverUrl } = message;
         chrome.storage.sync.set({ 
@@ -751,7 +765,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
             sendResponse({ status: 'ok' });
         });
-        return true; // Keep channel open for async getSettings
     } else if (message.type === 'REGENERATE_ID') {
         const newId = self.crypto.randomUUID().substring(0, 8);
         chrome.storage.local.set({ peerId: newId }, () => {
@@ -760,7 +773,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             if (socket) socket.close(); // Force reconnect with new ID
             sendResponse({ peerId: newId });
         });
-        return true;
     } else if (message.type === 'GET_VIDEO_STATE') {
         const { tabId } = message;
         if (!tabId) {
@@ -774,7 +786,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 sendResponse(res);
             }
         });
-        return true; // Keep channel open
     } else if (message.type === 'CONTENT_EVENT') {
         if (sender.tab) {
             currentTabId = sender.tab.id;
@@ -815,6 +826,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         addToHistory(message.action, 'You');
         emit(message.action, { ...message.payload, peerId });
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'FORCE_SYNC_ACK') {
         if (isForceSyncInitiator) {
             forceSyncAcks.add(peerId);
@@ -827,6 +839,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         } else {
             emit(EVENTS.FORCE_SYNC_ACK, { peerId });
         }
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'CMD_ACK') {
         // Content script successfully ran a command. Send ACK back to the initiator.
         if (currentCommandSenderId && currentCommandSenderId !== peerId) {
@@ -836,6 +849,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 actionTimestamp: message.actionTimestamp 
             });
         }
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'HEARTBEAT') {
         if (sender.tab) {
             currentTabId = sender.tab.id;
@@ -843,10 +857,27 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         // Peer status heartbeat from content script
         getSettings().then(settings => {
-            emit(EVENTS.PEER_STATUS, { ...message.payload, peerId, username: settings.username, tabTitle: currentTabTitle });
+            const statusPayload = { ...message.payload, peerId, username: settings.username, tabTitle: currentTabTitle };
+            emit(EVENTS.PEER_STATUS, statusPayload);
+
+            // Locally update our own metadata so the popup sees it for "YOU"
+            if (currentRoom && currentRoom.peers) {
+                const me = currentRoom.peers.find(p => (p.peerId || p) === peerId);
+                if (me && typeof me === 'object') {
+                    me.tabTitle = currentTabTitle;
+                    me.username = settings.username;
+                    me.mediaTitle = message.payload.mediaTitle;
+                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                }
+            }
         });
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'LOG') {
         addLog(`[Content] ${message.message}`, message.level || 'info');
+        sendResponse({ status: 'ok' });
+    } else {
+        // Final fallback to prevent channel hanging
+        sendResponse({ error: 'unhandled_message' });
     }
 }
 

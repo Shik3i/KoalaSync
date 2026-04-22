@@ -94,6 +94,7 @@ async function init() {
 function toggleUIState(inRoom) {
     if (elements.sectionJoin) elements.sectionJoin.style.display = inRoom ? 'none' : 'block';
     if (elements.sectionActive) elements.sectionActive.style.display = inRoom ? 'block' : 'none';
+    if (elements.peerListSync) elements.peerListSync.style.display = inRoom ? 'block' : 'none';
 }
 
 function updateUI(roomId, password, useCustomServer = false, serverUrl = '') {
