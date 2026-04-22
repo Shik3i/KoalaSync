@@ -236,6 +236,8 @@
         const current = video.currentTime;
         if (!Number.isFinite(current)) return;
 
+        const mediaTitle = (navigator.mediaSession && navigator.mediaSession.metadata) ? navigator.mediaSession.metadata.title : null;
+
         const eventState = action === EVENTS.PLAY ? 'playing' : (action === EVENTS.PAUSE ? 'paused' : (action === EVENTS.SEEK ? 'seek' : null));
         
         if (eventState && lastTargetState === eventState) {
@@ -249,6 +251,7 @@
             payload: {
                 currentTime: current,
                 targetTime: current,
+                mediaTitle: mediaTitle,
                 timestamp: Date.now()
             }
         });
@@ -307,11 +310,13 @@
     const heartbeatInterval = setInterval(() => {
         const video = findVideo();
         if (video) {
+            const mediaTitle = (navigator.mediaSession && navigator.mediaSession.metadata) ? navigator.mediaSession.metadata.title : null;
             chrome.runtime.sendMessage({
                 type: 'HEARTBEAT',
                 payload: {
                     playbackState: video.paused ? 'paused' : 'playing',
-                    currentTime: video.currentTime
+                    currentTime: video.currentTime,
+                    mediaTitle: mediaTitle
                 }
             }).catch(err => {
                 if (err.message.includes('Extension context invalidated')) {

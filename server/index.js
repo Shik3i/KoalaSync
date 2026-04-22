@@ -155,7 +155,7 @@ io.on('connection', (socket) => {
             return;
         }
         if (!payload || typeof payload.roomId !== 'string') return;
-        const { roomId, password, peerId, username, tabTitle, protocolVersion } = payload;
+        const { roomId, password, peerId, username, tabTitle, mediaTitle, protocolVersion } = payload;
         try {
             // Protocol check
             if (protocolVersion !== '1.0.0') {
@@ -244,12 +244,13 @@ io.on('connection', (socket) => {
                 peerId, 
                 username: username || null, 
                 tabTitle: tabTitle || null,
+                mediaTitle: mediaTitle || null,
                 lastSeen: Date.now() 
             });
             socketToRoom.set(socket.id, { roomId, peerId });
             peerToSocket.set(peerId, socket.id);
 
-            socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, tabTitle: tabTitle || null, status: 'joined' });
+            socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, tabTitle: tabTitle || null, mediaTitle: mediaTitle || null, status: 'joined' });
             socket.emit(EVENTS.ROOM_DATA, { 
                 roomId, 
                 peers: Array.from(room.peers).map(sid => room.peerData.get(sid)) 
@@ -288,8 +289,9 @@ io.on('connection', (socket) => {
                     const existing = room.peerData.get(socket.id) || { peerId: mapping.peerId };
                     room.peerData.set(socket.id, { 
                         ...existing,
-                        username: data.username || existing.username,
-                        tabTitle: data.tabTitle || existing.tabTitle,
+                        username: data.username !== undefined ? data.username : existing.username,
+                        tabTitle: data.tabTitle !== undefined ? data.tabTitle : existing.tabTitle,
+                        mediaTitle: data.mediaTitle !== undefined ? data.mediaTitle : existing.mediaTitle,
                         lastSeen: Date.now()
                     });
 

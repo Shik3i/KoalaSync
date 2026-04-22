@@ -241,10 +241,17 @@ function updatePeerList(peers) {
 
             peerItem.appendChild(header);
 
+            if (p.mediaTitle) {
+                const mediaDiv = document.createElement('div');
+                mediaDiv.style.cssText = 'font-size:11px; color:var(--star); font-weight: 600; margin-top: 2px;';
+                mediaDiv.textContent = `🎬 ${p.mediaTitle}`;
+                peerItem.appendChild(mediaDiv);
+            }
+
             if (pTabTitle) {
                 const titleDiv = document.createElement('div');
-                titleDiv.style.cssText = 'font-size:10px; color:var(--text-muted);';
-                titleDiv.textContent = pTabTitle;
+                titleDiv.style.cssText = 'font-size:10px; color:var(--text-muted); opacity: 0.8;';
+                titleDiv.textContent = p.mediaTitle ? `via ${pTabTitle}` : pTabTitle;
                 peerItem.appendChild(titleDiv);
             }
 
