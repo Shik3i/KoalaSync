@@ -159,6 +159,7 @@ function updateLastActionUI(state, peers) {
 
     peers.forEach(peer => {
         const pId = typeof peer === 'object' ? peer.peerId : peer;
+        if (pId === localPeerId) return; // Exclude local user from acknowledgment list
         const pName = (typeof peer === 'object' && peer.username) ? peer.username : pId.substring(0, 4);
         const isAcked = state.acks.includes(pId) || pId === state.senderId;
         const color = isAcked ? 'var(--success)' : '#475569';
