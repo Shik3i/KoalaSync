@@ -178,6 +178,7 @@ io.on('connection', (socket) => {
                     passwordHash,
                     peers: new Set(),
                     peerIds: new Map(),
+                    peerData: new Map(), // socketId -> { peerId, tabTitle }
                     lastActivity: Date.now()
                 };
                 rooms.set(roomId, room);
@@ -199,12 +200,13 @@ io.on('connection', (socket) => {
             socket.join(roomId);
             room.peers.add(socket.id);
             room.peerIds.set(socket.id, peerId);
+            room.peerData.set(socket.id, { peerId, tabTitle: null });
             socketToRoom.set(socket.id, { roomId, peerId });
 
             socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'joined' });
             socket.emit(EVENTS.ROOM_DATA, { 
                 roomId, 
-                peers: Array.from(room.peers).map(sid => room.peerIds.get(sid)) 
+                peers: Array.from(room.peers).map(sid => room.peerData.get(sid)) 
             });
             log('ROOM', `Peer ${peerId} joined: ${roomId}`);
         } catch (err) {
@@ -231,7 +233,13 @@ io.on('connection', (socket) => {
             const mapping = socketToRoom.get(socket.id);
             if (mapping) {
                 const room = rooms.get(mapping.roomId);
-                if (room) room.lastActivity = Date.now();
+                if (room) {
+                    room.lastActivity = Date.now();
+                    // Update metadata if it's a peer_status (heartbeat)
+                    if (eventName === EVENTS.PEER_STATUS && data.tabTitle) {
+                        room.peerData.set(socket.id, { peerId: mapping.peerId, tabTitle: data.tabTitle });
+                    }
+                }
                 socket.to(mapping.roomId).emit(eventName, { ...data, senderId: mapping.peerId });
             }
         });
@@ -240,7 +248,8 @@ io.on('connection', (socket) => {
     socket.on(EVENTS.GET_ROOMS, () => {
         const list = Array.from(rooms.entries()).map(([id, r]) => ({
             id,
-            peerCount: r.peers.size
+            peerCount: r.peers.size,
+            hasPassword: !!r.passwordHash
         }));
         socket.emit(EVENTS.ROOM_LIST, { rooms: list });
     });
@@ -254,6 +263,7 @@ io.on('connection', (socket) => {
             if (room) {
                 room.peers.delete(socket.id);
                 room.peerIds.delete(socket.id);
+                room.peerData.delete(socket.id);
                 socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
                 if (room.peers.size === 0) {
                     rooms.delete(roomId);
@@ -273,6 +283,7 @@ io.on('connection', (socket) => {
             if (room) {
                 room.peers.delete(socket.id);
                 room.peerIds.delete(socket.id);
+                room.peerData.delete(socket.id);
                 socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
                 if (room.peers.size === 0) {
                     rooms.delete(roomId);

@@ -3,7 +3,8 @@
 Welcome to the KoalaSync project. This file is the primary entry point for any developer or AI agent working on this codebase. It defines the architecture, non-negotiables, and workflows required to maintain the stability and security of the system.
 
 > [!IMPORTANT]
-> **Privacy & Data Sovereignty**: KoalaSync follows a strict "Zero-External-Requests" policy. No fonts, scripts, or assets (images/icons) may be loaded from 3rd-party CDNs or external servers. Everything must be served locally or from the project's own infrastructure.
+> **Privacy & Data Sovereignty**: KoalaSync follows a strict **Zero-External-Requests Policy**: The extension and website must not make requests to any third-party domains (Google Fonts, CDNs, etc.). All assets (fonts, icons, scripts) must be self-hosted or use system defaults.
+> - **Font Stack**: Use a modern system font stack (e.g., -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif) to maintain a premium look without external dependencies. Prohibit the use of `@import` or `<link>` for external font services.
 
 ---
 

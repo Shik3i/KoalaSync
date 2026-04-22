@@ -11,6 +11,7 @@ let currentTabId = null;
 let currentTabTitle = null; // New: for Smart Matching
 let logs = [];
 let history = []; // New: for Action History
+let reconnectTimer = null;
 
 // Force Sync Coordination
 let isForceSyncInitiator = false;
@@ -53,7 +54,12 @@ function addLog(message, type = 'info') {
 
 // --- WebSocket Client ---
 async function connect() {
-    if (isConnecting || (socket && socket.readyState === WebSocket.OPEN)) return;
+    if (isConnecting) return;
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+    if (!navigator.onLine) {
+        addLog('Browser is offline. Waiting...', 'warn');
+        return;
+    }
     
     if (!peerId) peerId = await getPeerId();
     const settings = await getSettings();
@@ -61,31 +67,52 @@ async function connect() {
     isConnecting = true;
     broadcastConnectionStatus('connecting');
     const isCustomServer = settings.serverUrl && settings.useCustomServer;
-    const finalUrl = isCustomServer ? settings.serverUrl : OFFICIAL_SERVER_URL;
+    let finalUrl = isCustomServer ? settings.serverUrl : OFFICIAL_SERVER_URL;
+
+    // Robustness: Ensure finalUrl is not empty and has a protocol
+    if (isCustomServer) {
+        finalUrl = finalUrl.trim();
+        if (!finalUrl.includes('://')) {
+            finalUrl = 'ws://' + finalUrl;
+        }
+    }
 
     addLog(`Connecting to ${isCustomServer ? finalUrl : 'Official Server'}...`, 'info');
 
-    const url = new URL(finalUrl);
-    url.pathname = '/socket.io/';
-    url.searchParams.set('EIO', '4');
-    url.searchParams.set('transport', 'websocket');
-    url.searchParams.set('version', APP_VERSION);
+    try {
+        const url = new URL(finalUrl);
+        url.pathname = '/socket.io/';
+        url.searchParams.set('EIO', '4');
+        url.searchParams.set('transport', 'websocket');
+        url.searchParams.set('version', APP_VERSION);
 
-    if (!isCustomServer) {
-        url.searchParams.set('token', OFFICIAL_SERVER_TOKEN);
-    }
+        if (!isCustomServer) {
+            url.searchParams.set('token', OFFICIAL_SERVER_TOKEN);
+        } else {
+            // Self-hosted servers use the same official token by design.
+            // This allows users to run their own relay while still using
+            // the official extension — the token is public and not a secret.
+            url.searchParams.set('token', OFFICIAL_SERVER_TOKEN);
+        }
 
-    socket = new WebSocket(url.toString());
+        socket = new WebSocket(url.toString());
 
-    socket.onopen = () => {
+        socket.onopen = () => {
+            isConnecting = false;
+            reconnectDelay = 1000;
+            addLog('WebSocket Connection Opened', 'success');
+            broadcastConnectionStatus('connected');
+            
+            // Socket.IO Handshake: Send "40" to join default namespace
+            socket.send('40');
+        };
+    } catch (e) {
         isConnecting = false;
-        reconnectDelay = 1000;
-        addLog('WebSocket Connection Opened', 'success');
-        broadcastConnectionStatus('connected');
-        
-        // Socket.IO Handshake: Send "40" to join default namespace
-        socket.send('40');
-    };
+        addLog(`Invalid Server URL: ${finalUrl}`, 'error');
+        broadcastConnectionStatus('disconnected');
+        scheduleReconnect();
+        return;
+    }
 
     socket.onmessage = (event) => {
         const msg = event.data;
@@ -169,7 +196,10 @@ function showNotification(senderName, action) {
 }
 
 function scheduleReconnect() {
-    setTimeout(() => {
+    if (reconnectTimer) return; // Already scheduled
+    
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
         reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
         connect();
     }, reconnectDelay);
@@ -180,6 +210,17 @@ function emit(event, data) {
         const msg = `42${JSON.stringify([event, data])}`;
         socket.send(msg);
     }
+}
+
+function addToHistory(action, senderId) {
+    const historyEntry = {
+        action,
+        senderId: senderId || 'You',
+        timestamp: new Date().toISOString()
+    };
+    history.unshift(historyEntry);
+    if (history.length > 20) history.pop();
+    chrome.runtime.sendMessage({ type: 'HISTORY_UPDATE', history }).catch(() => {});
 }
 
 // --- Event Handlers ---
@@ -203,7 +244,7 @@ function handleServerEvent(event, data) {
             break;
         case EVENTS.ERROR:
             addLog(`Server Error: ${data.message}`, 'error');
-            chrome.notifications.create({
+            chrome.notifications.create(`error_${Date.now()}`, {
                 type: 'basic',
                 iconUrl: 'icons/icon128.png',
                 title: 'KoalaSync Error',
@@ -220,6 +261,10 @@ function handleServerEvent(event, data) {
         case EVENTS.PAUSE:
         case EVENTS.SEEK:
         case EVENTS.FORCE_SYNC_PREPARE:
+            if (data.senderId) {
+                addToHistory(event, data.senderId);
+                showNotification(data.senderId, event);
+            }
             routeToContent(event, data);
             break;
         case EVENTS.FORCE_SYNC_ACK:
@@ -234,6 +279,10 @@ function handleServerEvent(event, data) {
             }
             break;
         case EVENTS.FORCE_SYNC_EXECUTE:
+            if (data.senderId) {
+                addToHistory(event, data.senderId);
+                showNotification(data.senderId, event);
+            }
             routeToContent(event, data);
             break;
         case EVENTS.PEER_STATUS:
@@ -263,19 +312,7 @@ function handleServerEvent(event, data) {
             }
             break;
         default:
-            // History Tracking
-            const historyEntry = {
-                action: event,
-                senderId: data.senderId || 'You',
-                timestamp: new Date().toISOString()
-            };
-            history.unshift(historyEntry);
-            if (history.length > 20) history.pop();
-            chrome.runtime.sendMessage({ type: 'HISTORY_UPDATE', history }).catch(() => {});
-
-            // Notification for remote actions
-            if (data.senderId) showNotification(data.senderId, event);
-            routeToContent(event, data);
+            addLog(`Received unknown event from server: ${event}`, 'warn');
             break;
     }
 }
@@ -303,8 +340,8 @@ async function routeToContent(action, payload) {
         action,
         payload
     }).catch(err => {
-        // Auto-Reinject if content script is missing
-        if (err.message.includes('Receiving end does not exist')) {
+        // Auto-Reinject if content script is missing or extension was reloaded
+        if (err.message.includes('Receiving end does not exist') || err.message.includes('Extension context invalidated')) {
             chrome.scripting.executeScript({
                 target: { tabId },
                 files: ['content.js']
@@ -335,8 +372,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'CONNECT') {
         connect();
     } else if (message.type === 'GET_STATUS') {
-        const status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting ? 'connecting' : 'disconnected')) : 'disconnected';
-        sendResponse({ status, peers: currentRoom ? currentRoom.peers : [] });
+        const status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting || socket.readyState === WebSocket.CONNECTING ? 'connecting' : 'disconnected')) : 'disconnected';
+        sendResponse({ status, peerId, peers: currentRoom ? currentRoom.peers : [] });
+        // Global return true at the end handles this
     } else if (message.type === 'LEAVE_ROOM') {
         emit(EVENTS.LEAVE_ROOM, { peerId });
         currentRoom = null;
@@ -377,6 +415,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
             }, 5000);
         }
+        addToHistory(message.action, 'You');
         emit(message.action, { ...message.payload, peerId });
     } else if (message.type === 'FORCE_SYNC_ACK') {
         emit(EVENTS.FORCE_SYNC_ACK, { peerId });
@@ -388,7 +427,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Peer status heartbeat from content script
         emit(EVENTS.PEER_STATUS, { ...message.payload, peerId, tabTitle: currentTabTitle });
     }
-    return true;
+    return true; // Keep channel open for async responses
 });
 
 // Tab removal listener

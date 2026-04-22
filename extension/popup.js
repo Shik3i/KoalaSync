@@ -1,8 +1,16 @@
 import { EVENTS, OFFICIAL_LANDING_PAGE_URL } from './shared/constants.js';
 import { BLACKLIST_DOMAINS } from './shared/blacklist.js';
 
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 const elements = {
-    tabs: document.querySelectorAll('.tab-btn'),
+    tabs: document.querySelectorAll('.tabs .tab-btn'),
     contents: document.querySelectorAll('.tab-content'),
     copyInvite: document.getElementById('copyInvite'),
     targetTab: document.getElementById('targetTab'),
@@ -30,6 +38,8 @@ const elements = {
     roomError: document.getElementById('roomError')
 };
 
+let localPeerId = null;
+
 // --- Initialization ---
 async function init() {
     // Load Settings
@@ -55,6 +65,7 @@ async function init() {
     // Initial Status Check
     chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
         if (res) {
+            localPeerId = res.peerId;
             applyConnectionStatus(res.status);
             updatePeerList(res.peers);
         }
@@ -78,24 +89,36 @@ function updateUI(roomId, password) {
 }
 
 function updatePeerList(peers) {
-    if (!peers) return;
-    elements.peerList.innerHTML = peers.map(id => `
-        <div class="peer-item">
-            <span>👤 ${id}</span>
-        </div>
-    `).join('');
+    if (!peers || !elements.peerList) return;
+    elements.peerList.innerHTML = peers.map(p => {
+        const id = escapeHtml(typeof p === 'object' ? p.peerId : p);
+        const titleText = (typeof p === 'object' && p.tabTitle) ? escapeHtml(p.tabTitle) : '';
+        const title = titleText ? `<div style="font-size:10px; color:var(--text-muted);">${titleText}</div>` : '';
+        return `
+            <div class="peer-item" style="display:block; padding: 6px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:600;">👤 ${id}</span>
+                    ${id === escapeHtml(localPeerId) ? '<span style="font-size:10px; color:var(--accent)">YOU</span>' : ''}
+                </div>
+                ${title}
+            </div>
+        `;
+    }).join('');
     // Re-populate tabs to update Star Matching when peers change
-    populateTabs();
+    populateTabs(peers);
 }
 
-async function populateTabs() {
+async function populateTabs(providedPeers = null) {
     const data = await chrome.storage.sync.get(['targetTabId', 'filterNoise']);
     const isFilterActive = data.filterNoise !== false;
     const currentTargetTabId = data.targetTabId;
-
-    // Get current peers from background to do matching
-    const status = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_STATUS' }, r));
-    const peerIds = status?.peers || [];
+ 
+    // Use provided peers or fetch if missing
+    let peerIds = providedPeers;
+    if (!peerIds) {
+        const status = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_STATUS' }, r));
+        peerIds = status?.peers || [];
+    }
 
     const tabs = await chrome.tabs.query({});
     
@@ -165,8 +188,9 @@ function updateHistory(history) {
     }
     elements.historyList.innerHTML = history.map(item => {
         const time = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const actionLabel = item.action.toUpperCase().replace('FORCE_SYNC_', '');
-        const sender = item.senderId === 'You' ? '<span style="color:var(--accent)">You</span>' : item.senderId;
+        const actionLabel = escapeHtml(item.action.toUpperCase().replace('FORCE_SYNC_', ''));
+        const senderIdEscaped = escapeHtml(item.senderId);
+        const sender = item.senderId === 'You' ? '<span style="color:var(--accent)">You</span>' : senderIdEscaped;
         return `<div style="margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px;">
             <span style="color:#64748b">[${time}]</span> <b>${actionLabel}</b> by ${sender}
         </div>`;
@@ -185,9 +209,12 @@ function updateRoomList(rooms) {
         return;
     }
     elements.publicRooms.innerHTML = rooms.map(r => `
-        <div class="room-item" style="display:flex; justify-content:space-between; align-items:center; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor:pointer;" data-id="${r.id}">
-            <span style="font-weight:600;">${r.id}</span>
-            <span style="font-size:11px; color:var(--accent)">${r.peerCount} peers</span>
+        <div class="room-item" style="display:flex; justify-content:space-between; align-items:center; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor:pointer;" data-id="${escapeHtml(r.id)}">
+            <div style="display:flex; align-items:center; gap: 6px;">
+                <span style="font-weight:600;">${escapeHtml(r.id)}</span>
+                ${r.hasPassword ? '<span title="Password Protected">🔒</span>' : ''}
+            </div>
+            <span style="font-size:11px; color:var(--accent)">${parseInt(r.peerCount)} peers</span>
         </div>
     `).join('');
 
@@ -230,6 +257,19 @@ elements.filterNoise.addEventListener('change', () => {
     chrome.storage.sync.set({ filterNoise: elements.filterNoise.checked }, () => {
         populateTabs();
     });
+});
+
+elements.serverUrl.addEventListener('input', () => {
+    chrome.storage.sync.set({ serverUrl: elements.serverUrl.value });
+});
+
+elements.serverUrl.addEventListener('change', () => {
+    let url = elements.serverUrl.value.trim();
+    if (url && !url.includes('://')) {
+        url = 'ws://' + url;
+        elements.serverUrl.value = url;
+        chrome.storage.sync.set({ serverUrl: url });
+    }
 });
 
 elements.tabs.forEach(btn => {

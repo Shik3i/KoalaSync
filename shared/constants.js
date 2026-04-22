@@ -7,7 +7,7 @@ export const APP_VERSION = "1.0.0";
 
 export const OFFICIAL_SERVER_URL = 'wss://sync.shik3i.net';
 export const OFFICIAL_LANDING_PAGE_URL = 'https://koalasync.shik3i.net';
-export const OFFICIAL_SERVER_TOKEN = 'koala_secure_access_2026';
+export const OFFICIAL_SERVER_TOKEN = '62170b705234c4f4807a9b22420bb93cf1a2aacfa4c5d3b47804482babb8eb50';
 
 export const EVENTS = {
     // Connection & Room

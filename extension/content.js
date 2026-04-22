@@ -145,7 +145,8 @@
     }
 
     // Heartbeat
-    setInterval(() => {
+    let heartbeatErrorCount = 0;
+    const heartbeatInterval = setInterval(() => {
         const video = findVideo();
         if (video) {
             chrome.runtime.sendMessage({
@@ -154,7 +155,15 @@
                     playbackState: video.paused ? 'paused' : 'playing',
                     currentTime: video.currentTime
                 }
-            }).catch(() => {});
+            }).catch(err => {
+                if (err.message.includes('Extension context invalidated')) {
+                    heartbeatErrorCount++;
+                    if (heartbeatErrorCount === 1) {
+                        console.warn('KoalaSync: Extension reloaded. Please refresh the page if sync stops working.');
+                    }
+                    clearInterval(heartbeatInterval);
+                }
+            });
         }
     }, 15000);
 
