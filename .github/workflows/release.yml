@@ -51,6 +51,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Sync Protocol Constants
+        run: |
+          chmod +x ./scripts/sync-constants.sh
+          ./scripts/sync-constants.sh
+
       - name: Create Extension Zip
         run: |
           zip -r koala-sync-extension.zip extension/ -x "*.DS_Store*"

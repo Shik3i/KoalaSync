@@ -7,10 +7,11 @@ To ensure that the extension and the relay server are always using the exact sam
 
 ## When should you run the sync script?
 You MUST run the synchronization script in any of the following scenarios:
-1. **After modifying** `shared/constants.js`.
-2. **After modifying** `shared/blacklist.js`.
-3. **Before committing** changes to the repository if any protocol-related files were touched.
-4. **Before deploying** the server or releasing the extension.
+1. **After a fresh `git clone` or `git pull`** (as the synced files are ignored by git).
+2. **After modifying** `shared/constants.js`.
+3. **After modifying** `shared/blacklist.js`.
+4. **Before committing** changes to the repository if any protocol-related files were touched.
+5. **Before deploying** the server or releasing the extension.
 
 ## How to sync
 

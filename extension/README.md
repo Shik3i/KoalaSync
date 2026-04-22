@@ -22,9 +22,10 @@ KoalaSync requires `<all_urls>` permission to detect and interact with video ele
 - **Zero Telemetry**: No analytics or external tracking scripts.
 
 ## Installation
-1. Open Chrome and go to `chrome://extensions/`.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select the `extension` folder from this repository.
+1. **Sync Protocol**: Run `./scripts/sync-constants.sh` (macOS/Linux) or `scripts\sync-constants.bat` (Windows) from the root.
+2. Open Chrome and go to `chrome://extensions/`.
+3. Enable **Developer mode** (top right).
+4. Click **Load unpacked** and select the `extension` folder.
 
 ## Development
 If you modify `shared/constants.js`, you must synchronize the changes across the extension and server:

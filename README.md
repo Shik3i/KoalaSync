@@ -37,10 +37,14 @@ docker-compose up -d --build
 The server will be available at `ws://localhost:3000`.
 
 ### 2. Chrome Extension
-1. Open Chrome and go to `chrome://extensions/`.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked**.
-4. Select the `extension/` folder.
+1. **Synchronize Protocol**: From the root directory, run the sync script to copy the master constants to the extension folder:
+   ```bash
+   ./scripts/sync-constants.sh
+   ```
+2. Open Chrome and go to `chrome://extensions/`.
+3. Enable **Developer mode** (top right).
+4. Click **Load unpacked**.
+5. Select the `extension/` folder.
 
 ## Usage
 1. Open the extension and go to the **Settings** tab to set your **Username**.
