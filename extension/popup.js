@@ -25,6 +25,7 @@ const elements = {
     serverCustom: document.getElementById('serverCustom'),
     roomId: document.getElementById('roomId'),
     password: document.getElementById('password'),
+    username: document.getElementById('username'),
     joinBtn: document.getElementById('joinBtn'),
     leaveBtn: document.getElementById('leaveBtn'),
     roomInfo: document.getElementById('roomInfo'),
@@ -53,10 +54,11 @@ let lastPeersJson = null;
 // --- Initialization ---
 async function init() {
     // Load Settings
-    const data = await chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'targetTabId', 'filterNoise']);
+    const data = await chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'targetTabId', 'filterNoise', 'username']);
     elements.serverUrl.value = data.serverUrl || '';
     elements.roomId.value = data.roomId || '';
     elements.password.value = data.password || '';
+    elements.username.value = data.username || '';
     elements.filterNoise.checked = data.filterNoise !== false;
 
     if (data.useCustomServer) {
@@ -121,12 +123,16 @@ function updatePeerList(peers) {
 
     const html = peers.map(p => {
         const id = escapeHtml(typeof p === 'object' ? p.peerId : p);
+        const username = (typeof p === 'object' && p.username) ? escapeHtml(p.username) : '';
         const titleText = (typeof p === 'object' && p.tabTitle) ? escapeHtml(p.tabTitle) : '';
+        
+        const nameLabel = username ? `<span style="font-weight:600; color:white;">${username}</span> <span style="font-size:10px; opacity:0.5;">(${id})</span>` : `<span style="font-weight:600;">👤 ${id}</span>`;
         const title = titleText ? `<div style="font-size:10px; color:var(--text-muted);">${titleText}</div>` : '';
+        
         return `
             <div class="peer-item" style="display:block; padding: 6px 0;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-weight:600;">👤 ${id}</span>
+                    <span>${nameLabel}</span>
                     ${id === escapeHtml(localPeerId) ? '<span style="font-size:10px; color:var(--accent)">YOU</span>' : ''}
                 </div>
                 ${title}
@@ -331,6 +337,10 @@ elements.filterNoise.addEventListener('change', () => {
 
 elements.serverUrl.addEventListener('input', () => {
     chrome.storage.sync.set({ serverUrl: elements.serverUrl.value });
+});
+
+elements.username.addEventListener('change', () => {
+    chrome.storage.sync.set({ username: elements.username.value });
 });
 
 elements.serverUrl.addEventListener('change', () => {

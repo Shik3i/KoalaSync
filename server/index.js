@@ -154,7 +154,7 @@ io.on('connection', (socket) => {
             return;
         }
         if (!payload || typeof payload.roomId !== 'string') return;
-        const { roomId, password, peerId, protocolVersion } = payload;
+        const { roomId, password, peerId, username, protocolVersion } = payload;
         try {
             // Protocol check
             if (protocolVersion !== '1.0.0') {
@@ -237,10 +237,10 @@ io.on('connection', (socket) => {
             socket.join(roomId);
             room.peers.add(socket.id);
             room.peerIds.set(socket.id, peerId);
-            room.peerData.set(socket.id, { peerId, tabTitle: null });
+            room.peerData.set(socket.id, { peerId, username: username || null, tabTitle: null });
             socketToRoom.set(socket.id, { roomId, peerId });
 
-            socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'joined' });
+            socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, status: 'joined' });
             socket.emit(EVENTS.ROOM_DATA, { 
                 roomId, 
                 peers: Array.from(room.peers).map(sid => room.peerData.get(sid)) 
@@ -275,8 +275,13 @@ io.on('connection', (socket) => {
                 if (room) {
                     room.lastActivity = Date.now();
                     // Update metadata if it's a peer_status (heartbeat)
-                    if (eventName === EVENTS.PEER_STATUS && data.tabTitle) {
-                        room.peerData.set(socket.id, { peerId: mapping.peerId, tabTitle: data.tabTitle });
+                    if (eventName === EVENTS.PEER_STATUS && (data.tabTitle || data.username)) {
+                        const existing = room.peerData.get(socket.id) || { peerId: mapping.peerId };
+                        room.peerData.set(socket.id, { 
+                            ...existing,
+                            username: data.username || existing.username,
+                            tabTitle: data.tabTitle || existing.tabTitle 
+                        });
                     }
                 }
                 socket.to(mapping.roomId).emit(eventName, { ...data, senderId: mapping.peerId });

@@ -64,7 +64,8 @@ async function getSettings() {
                 useCustomServer: data.useCustomServer || false,
                 roomId: data.roomId || '',
                 password: data.password || '',
-                targetTabId: data.targetTabId || null
+                targetTabId: data.targetTabId || null,
+                username: data.username || ''
             });
         });
     });
@@ -184,6 +185,7 @@ async function connect() {
                     roomId: settings.roomId, 
                     password: settings.password,
                     peerId,
+                    username: settings.username,
                     protocolVersion: PROTOCOL_VERSION
                 });
             }
@@ -251,11 +253,18 @@ function showNotification(senderName, action) {
                   action === 'seek' ? 'seeked the video' :
                   action === 'force_sync_execute' ? 'synchronized everyone' : action;
     
+    // Find username in current room if available
+    let displayName = senderName || 'A peer';
+    if (currentRoom && currentRoom.peers) {
+        const peer = currentRoom.peers.find(p => (p.peerId || p) === senderName);
+        if (peer && peer.username) displayName = peer.username;
+    }
+
     chrome.notifications.create(`sync_${Date.now()}`, {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: 'KoalaSync',
-        message: `${senderName || 'A peer'} ${label}.`,
+        message: `${displayName} ${label}.`,
         priority: 1
     });
 }
@@ -375,7 +384,7 @@ function handleServerEvent(event, data) {
             if (currentRoom) {
                 if (data.status === 'joined') {
                     if (!currentRoom.peers.find(p => (p.peerId || p) === data.peerId)) {
-                        currentRoom.peers.push({ peerId: data.peerId, tabTitle: data.tabTitle });
+                        currentRoom.peers.push({ peerId: data.peerId, username: data.username, tabTitle: data.tabTitle });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                     }
                 } else if (data.status === 'left') {
@@ -387,10 +396,11 @@ function handleServerEvent(event, data) {
                     if (peer) {
                         if (typeof peer === 'object') {
                             peer.tabTitle = data.tabTitle;
+                            peer.username = data.username;
                         } else {
                             // Migration: replace string with object
                             const idx = currentRoom.peers.indexOf(peer);
-                            currentRoom.peers[idx] = { peerId: data.peerId, tabTitle: data.tabTitle };
+                            currentRoom.peers[idx] = { peerId: data.peerId, username: data.username, tabTitle: data.tabTitle };
                         }
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                     }
@@ -511,8 +521,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             socket.send(`42${JSON.stringify([EVENTS.GET_ROOMS])}`);
         }
     } else if (message.type === 'WEB_JOIN_REQUEST') {
-        const { roomId, password } = message;
-        chrome.storage.sync.set({ roomId, password }, () => {
+        const { roomId, password, useCustomServer, serverUrl } = message;
+        chrome.storage.sync.set({ 
+            roomId, 
+            password,
+            useCustomServer: !!useCustomServer,
+            serverUrl: serverUrl || ''
+        }, () => {
             connect();
             // We wait for status update in handleServerEvent
         });
@@ -558,7 +573,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
         }
         // Peer status heartbeat from content script
-        emit(EVENTS.PEER_STATUS, { ...message.payload, peerId, tabTitle: currentTabTitle });
+        getSettings().then(settings => {
+            emit(EVENTS.PEER_STATUS, { ...message.payload, peerId, username: settings.username, tabTitle: currentTabTitle });
+        });
     }
     return true; // Keep channel open for async responses
 });

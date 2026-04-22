@@ -61,6 +61,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parts.length >= 3) {
                     const roomId = parts[1];
                     const password = parts[2];
+                    const serverFlag = parts[3] || '0';
+                    const serverUrl = parts[4] ? decodeURIComponent(parts[4]) : '';
                     
                     if (isJoinPage) {
                         const displayRoom = document.getElementById('display-room-id');
@@ -103,7 +105,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             e.target.textContent = 'JOINING...';
                             e.target.disabled = true;
                             window.dispatchEvent(new CustomEvent('KOALASYNC_JOIN_REQUEST', {
-                                detail: { roomId, password }
+                                detail: { 
+                                    roomId, 
+                                    password,
+                                    useCustomServer: serverFlag === '1',
+                                    serverUrl: serverUrl
+                                }
                             }));
                         }
                     });
