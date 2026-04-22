@@ -25,6 +25,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Lowercase Repository Owner
+        run: echo "OWNER_LC=${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -32,8 +35,8 @@ jobs:
           file: server/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/koala-sync-server:latest
-            ghcr.io/${{ github.repository_owner }}/koala-sync-server:${{ github.ref_name }}
+            ghcr.io/${{ env.OWNER_LC }}/koala-sync-server:latest
+            ghcr.io/${{ env.OWNER_LC }}/koala-sync-server:${{ github.ref_name }}
 
   release-extension:
     runs-on: ubuntu-latest
