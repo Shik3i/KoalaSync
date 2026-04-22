@@ -202,7 +202,7 @@ io.on('connection', (socket) => {
                     lastActivity: Date.now()
                 };
                 rooms.set(roomId, room);
-                log('ROOM', `Created room: ${roomId}`);
+                log('ROOM', `Created room: ${roomId.substring(0, 3)}***`);
             } else {
                 if (room.passwordHash) {
                     if (!password || !(await bcrypt.compare(password, room.passwordHash))) {
@@ -228,7 +228,7 @@ io.on('connection', (socket) => {
                 roomId, 
                 peers: Array.from(room.peers).map(sid => room.peerData.get(sid)) 
             });
-            log('ROOM', `Peer ${peerId} joined: ${roomId}`);
+            log('ROOM', `Peer ${peerId} joined: ${roomId.substring(0, 3)}***`);
         } catch (err) {
             log('ERROR', `Join error for ${socket.id}`, err);
             socket.emit(EVENTS.ERROR, { message: "Join error" });
@@ -289,7 +289,7 @@ io.on('connection', (socket) => {
                 socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
                 if (room.peers.size === 0) {
                     rooms.delete(roomId);
-                    log('ROOM', `Deleted empty room: ${roomId}`);
+                    log('ROOM', `Deleted empty room: ${roomId.substring(0, 3)}***`);
                 }
             }
             socketToRoom.delete(socket.id);
@@ -309,7 +309,7 @@ io.on('connection', (socket) => {
                 socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
                 if (room.peers.size === 0) {
                     rooms.delete(roomId);
-                    log('ROOM', `Deleted empty room (after disconnect): ${roomId}`);
+                    log('ROOM', `Deleted empty room (after disconnect): ${roomId.substring(0, 3)}***`);
                 }
             }
             socketToRoom.delete(socket.id);
@@ -324,7 +324,7 @@ setInterval(() => {
         if (room.lastActivity < cutoff) {
             io.to(roomId).emit(EVENTS.ERROR, { message: 'Room closed due to inactivity' });
             rooms.delete(roomId);
-            log('CLEANUP', `Deleted inactive room: ${roomId}`);
+            log('CLEANUP', `Deleted inactive room: ${roomId.substring(0, 3)}***`);
         }
     }
 }, 30 * 60 * 1000);

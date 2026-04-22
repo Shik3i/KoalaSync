@@ -146,7 +146,6 @@ async function connect() {
             isConnecting = false;
             reconnectDelay = 1000;
             addLog('WebSocket Connection Opened', 'success');
-            broadcastConnectionStatus('connected');
             reconnectStartTime = null;
             reconnectFailed = false;
             isNamespaceJoined = false;
@@ -176,6 +175,7 @@ async function connect() {
             addLog(`Socket.IO Handshake: ${msg}`, 'info');
         } else if (msg.startsWith('40')) {
             isNamespaceJoined = true;
+            broadcastConnectionStatus('connected');
             addLog('Joined Namespace /', 'success');
             // Auto-rejoin room if we have one in settings
             if (settings.roomId) {

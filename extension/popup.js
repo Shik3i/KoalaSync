@@ -364,6 +364,15 @@ function showError(msg) {
 
 // --- Action Handlers ---
 elements.joinBtn.addEventListener('click', async () => {
+    if (elements.joinBtn.disabled) return;
+    elements.joinBtn.disabled = true;
+    const originalText = elements.joinBtn.textContent;
+    elements.joinBtn.textContent = 'Joining...';
+    setTimeout(() => {
+        elements.joinBtn.disabled = false;
+        elements.joinBtn.textContent = originalText;
+    }, 1500);
+
     const serverUrl = elements.serverUrl.value;
     const roomId = elements.roomId.value || Math.random().toString(36).substring(2, 8).toUpperCase();
     const password = elements.password.value;
@@ -412,8 +421,19 @@ elements.targetTab.addEventListener('change', async () => {
 });
 
 elements.forceSyncBtn.addEventListener('click', async () => {
+    if (elements.forceSyncBtn.disabled) return;
+    
     const settings = await chrome.storage.sync.get(['targetTabId']);
     if (!settings.targetTabId) return;
+
+    // Lockout to prevent spamming
+    const originalText = elements.forceSyncBtn.textContent;
+    elements.forceSyncBtn.disabled = true;
+    elements.forceSyncBtn.textContent = 'Syncing...';
+    setTimeout(() => {
+        elements.forceSyncBtn.disabled = false;
+        elements.forceSyncBtn.textContent = originalText;
+    }, 5000);
 
     const tabId = parseInt(settings.targetTabId);
 
