@@ -25,8 +25,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lowercase Repository Owner
-        run: echo "OWNER_LC=${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -34,9 +40,8 @@ jobs:
           context: .
           file: server/Dockerfile
           push: true
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/koala-sync-server:latest
-            ghcr.io/${{ env.OWNER_LC }}/koala-sync-server:${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   release-extension:
     runs-on: ubuntu-latest
