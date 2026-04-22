@@ -162,13 +162,24 @@
         });
     }
 
+    const handlePlay = () => reportEvent('play');
+    const handlePause = () => reportEvent('pause');
+    const handleSeeked = () => reportEvent('seek');
+
+    let lastVideoSrc = null;
+
     function setupListeners() {
         const video = findVideo();
-        if (video && !video.dataset.koalaAttached) {
-            video.addEventListener('play', () => reportEvent('play'));
-            video.addEventListener('pause', () => reportEvent('pause'));
-            video.addEventListener('seeked', () => reportEvent('seek'));
+        if (video) {
+            video.removeEventListener('play', handlePlay);
+            video.removeEventListener('pause', handlePause);
+            video.removeEventListener('seeked', handleSeeked);
+
+            video.addEventListener('play', handlePlay);
+            video.addEventListener('pause', handlePause);
+            video.addEventListener('seeked', handleSeeked);
             video.dataset.koalaAttached = 'true';
+            lastVideoSrc = video.currentSrc || video.src;
         }
     }
 
@@ -179,8 +190,12 @@
     function checkVideo() {
         lastMutate = Date.now();
         const video = findVideo();
-        if (video && !video.dataset.koalaAttached) {
-            console.log('KoalaSync: New video detected via navigation.');
+        if (!video) return;
+
+        const currentSrc = video.currentSrc || video.src;
+
+        if (!video.dataset.koalaAttached || (lastVideoSrc && currentSrc && lastVideoSrc !== currentSrc)) {
+            console.log('KoalaSync: Video element attached or recycled.');
             setupListeners();
         }
     }
