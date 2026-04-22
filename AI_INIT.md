@@ -23,7 +23,9 @@ KoalaSync is a specialized tool for **synchronized video playback** across multi
 - `docker-compose.yml`: Root-level orchestration for the relay server.
 
 > [!IMPORTANT]
-> `shared/constants.js` and `shared/blacklist.js` must be synchronized to the `extension/shared/` directory after every modification by running `./scripts/sync-constants.sh` or `.\scripts\sync-constants.bat`.
+> **Single Source of Truth**: `shared/constants.js` and `shared/blacklist.js` are the master files. They must be synchronized to the `extension/shared/` directory using `.\scripts\sync-constants.bat` or `./scripts/sync-constants.sh`. 
+> - **Extension Modules** (`background.js`, `popup.js`) import directly from `./shared/constants.js`.
+> - **Content Scripts** (`content.js`) use a **manual synchronous mirror** to prevent race conditions during page load. Always verify parity after sync.
 
 ## 3. Mandatory Reading
 Before touching any code, you MUST read the following documents in order:
@@ -31,7 +33,13 @@ Before touching any code, you MUST read the following documents in order:
 2. [extension/README.md](extension/README.md) – Extension components, tab structure, and loading process.
 3. [SYNC_GUIDE.md](SYNC_GUIDE.md) – Protocol constants and synchronization requirements.
 
-## 4. Design Guidelines
+## 4. The "Vanilla JS Mirror" Pattern
+To avoid boot-time race conditions in Manifest V3 without a bundler, the following architectural trade-off is enforced:
+- **Synchronous Execution**: `content.js` MUST execute synchronously to catch early media events. 
+- **Manual Mirroring**: `content.js` maintains a manual mirror of the `EVENTS` constants from `shared/constants.js`.
+- **Maintenance**: Developers must ensure that any changes to `shared/constants.js` are manually reflected in `content.js` after running the sync scripts.
+
+## 5. Design Guidelines
 The popup UI follows a strict design system. Do not modify these variables or the layout structure without explicit approval.
 - **Font**: System font stack. **MANDATORY**: No external CDNs or Google Fonts to ensure 100% privacy.
 - **Popup Width**: Fixed at `320px`.

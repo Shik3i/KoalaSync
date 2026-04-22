@@ -278,10 +278,11 @@
         
         <label>Remote Control</label>
         <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-            <button id="playBtn" class="primary" style="flex:1;">Play</button>
-            <button id="pauseBtn" class="primary" style="flex:1;">Pause</button>
-            <button id="forceSyncBtn" class="secondary" style="flex:1; border-color:var(--accent); color:var(--accent);">Force Sync</button>
+            <button id="playBtn" class="primary" style="flex:1; background: var(--success);">▶ Play</button>
+            <button id="pauseBtn" class="primary" style="flex:1; background: var(--error);">⏸ Pause</button>
         </div>
+
+        <button id="forceSyncBtn" class="primary" style="background: linear-gradient(135deg, #6366f1, #a855f7); width: 100%; margin-bottom: 15px;">⚡ Force Sync Everyone</button>
 
         <!-- NEW: Last Action Status Card -->
         <label>Last Activity Status</label>

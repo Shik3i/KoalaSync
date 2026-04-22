@@ -4,7 +4,14 @@
  */
 
 (function() {
-    if (window.koalaSyncInjected) return;
+    // Injection Guard: Check if already injected AND context is valid
+    try {
+        if (window.koalaSyncInjected && chrome.runtime.id) {
+            return;
+        }
+    } catch (e) {
+        // Context invalidated, proceed with re-injection
+    }
     window.koalaSyncInjected = true;
 
     // Local Protocol Constants (Mirroring shared/constants.js)
@@ -25,10 +32,16 @@
         lastTargetState = state;
         if (targetStateTimeout) clearTimeout(targetStateTimeout);
         if (state !== null) {
+            // Seek events might take longer than play/pause, using 2s for safety
+            const timeout = state === 'seek' ? 2000 : 1500;
             targetStateTimeout = setTimeout(() => {
                 lastTargetState = null;
-            }, 1500);
+            }, timeout);
         }
+    }
+
+    function reportLog(message, level = 'info') {
+        chrome.runtime.sendMessage({ type: 'LOG', message, level }).catch(() => {});
     }
 
     // --- Helper: find the best video element on the page ---
@@ -55,7 +68,10 @@
                         setTargetState(action === EVENTS.PLAY ? 'playing' : 'paused');
                         ytButton.click();
                     }
-                    if (action === EVENTS.SEEK) video.currentTime = data.targetTime;
+                    if (action === EVENTS.SEEK) {
+                        setTargetState('seek');
+                        video.currentTime = data.targetTime;
+                    }
                     return;
                 }
             }
@@ -68,7 +84,10 @@
                         setTargetState(action === EVENTS.PLAY ? 'playing' : 'paused');
                         twitchButton.click();
                     }
-                    if (action === EVENTS.SEEK) video.currentTime = data.targetTime;
+                    if (action === EVENTS.SEEK) {
+                        setTargetState('seek');
+                        video.currentTime = data.targetTime;
+                    }
                     return;
                 }
             }
@@ -77,29 +96,34 @@
             if (action === EVENTS.PLAY) {
                 setTargetState('playing');
                 video.play().catch((e) => {
-                    console.warn('KoalaSync playback prevented:', e);
+                    reportLog(`Playback prevented: ${e.message}`, 'warn');
                     setTargetState(null);
                 });
             } else if (action === EVENTS.PAUSE) {
                 setTargetState('paused');
                 video.pause();
             } else if (action === EVENTS.SEEK) {
+                setTargetState('seek');
                 video.currentTime = data.targetTime;
             }
         } catch (e) {
-            console.error('KoalaSync Media Action Error:', e);
+            reportLog(`Media Action Error: ${e.message}`, 'error');
         }
     }
 
     // --- Helper: Wait until video is ready for playback (buffered & seeked) ---
     function pollSeekReady(targetTime, timeoutMs = 8000) {
         return new Promise((resolve) => {
-            const video = findVideo();
-            if (!video) { resolve(false); return; }
-
             const interval = 150;
             let elapsed = 0;
             const timer = setInterval(() => {
+                const video = findVideo(); // Re-query DOM on every iteration
+                if (!video) {
+                    clearInterval(timer);
+                    resolve(false);
+                    return;
+                }
+
                 elapsed += interval;
                 const timeDiff = Math.abs(video.currentTime - targetTime);
                 const ready = video.readyState >= 3 && timeDiff < 1.0;
@@ -175,15 +199,14 @@
         const video = findVideo();
         if (!video) return;
 
-        const eventState = action === EVENTS.PLAY ? 'playing' : (action === EVENTS.PAUSE ? 'paused' : null);
+        const eventState = action === EVENTS.PLAY ? 'playing' : (action === EVENTS.PAUSE ? 'paused' : (action === EVENTS.SEEK ? 'seek' : null));
         
         if (eventState && lastTargetState === eventState) {
             setTargetState(null); // Consume the match
             return; // Ignore event caused by our programmatic action
         }
-        if (action !== 'seek') {
-            setTargetState(null); // Reset on mismatch
-        }
+        
+        setTargetState(null); // Reset on mismatch or unhandled event
 
         chrome.runtime.sendMessage({
             type: 'CONTENT_EVENT',
@@ -258,7 +281,7 @@
                 if (err.message.includes('Extension context invalidated')) {
                     heartbeatErrorCount++;
                     if (heartbeatErrorCount === 1) {
-                        console.warn('KoalaSync: Extension reloaded. Please refresh the page if sync stops working.');
+                        reportLog('Extension reloaded. Please refresh the page if sync stops working.', 'warn');
                     }
                     clearInterval(heartbeatInterval);
                     observer.disconnect();

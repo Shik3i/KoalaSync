@@ -1,13 +1,6 @@
 import { EVENTS, OFFICIAL_LANDING_PAGE_URL } from './shared/constants.js';
 import { BLACKLIST_DOMAINS } from './shared/blacklist.js';
 
-function escapeHtml(str) {
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
 
 const elements = {
     tabs: document.querySelectorAll('.tabs .tab-btn'),
@@ -141,15 +134,29 @@ function updateLastActionUI(state, peers) {
 
     const timeStr = new Date(state.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    let html = `
-        <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:baseline;">
-            <span style="font-weight:700; color:var(--accent); font-size:13px;">${actionNames[state.action] || state.action.toUpperCase()}</span>
-            <span style="font-size:10px; color:var(--text-muted);">${senderName} @ ${timeStr}</span>
-        </div>
-        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px;">
-    `;
+    // Clear previous content
+    elements.lastActionCard.innerHTML = '';
 
-    // Filter out "You" if we are the sender, but show status of other peers
+    // Create Header
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex; justify-content:space-between; margin-bottom:10px; align-items:baseline;';
+    
+    const actionSpan = document.createElement('span');
+    actionSpan.style.cssText = 'font-weight:700; color:var(--accent); font-size:13px;';
+    actionSpan.textContent = actionNames[state.action] || state.action.toUpperCase();
+    
+    const infoSpan = document.createElement('span');
+    infoSpan.style.cssText = 'font-size:10px; color:var(--text-muted);';
+    infoSpan.textContent = `${senderName} @ ${timeStr}`;
+    
+    header.appendChild(actionSpan);
+    header.appendChild(infoSpan);
+    elements.lastActionCard.appendChild(header);
+
+    // Create Grid
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px;';
+
     peers.forEach(peer => {
         const pId = typeof peer === 'object' ? peer.peerId : peer;
         const pName = (typeof peer === 'object' && peer.username) ? peer.username : pId.substring(0, 4);
@@ -157,18 +164,24 @@ function updateLastActionUI(state, peers) {
         const color = isAcked ? 'var(--success)' : '#475569';
         const icon = isAcked ? '✓' : '...';
         
-        html += `
-            <div title="${pName}" style="display:flex; flex-direction:column; align-items:center; opacity: ${isAcked ? 1 : 0.6};">
-                <div style="width:20px; height:20px; border-radius:50%; background:${color}; color:white; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; margin-bottom:2px;">
-                    ${icon}
-                </div>
-                <span style="font-size:8px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40px;">${pName}</span>
-            </div>
-        `;
+        const peerItem = document.createElement('div');
+        peerItem.title = pName;
+        peerItem.style.cssText = `display:flex; flex-direction:column; align-items:center; opacity: ${isAcked ? 1 : 0.6};`;
+        
+        const dot = document.createElement('div');
+        dot.style.cssText = `width:20px; height:20px; border-radius:50%; background:${color}; color:white; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; margin-bottom:2px;`;
+        dot.textContent = icon;
+        
+        const nameSpan = document.createElement('span');
+        nameSpan.style.cssText = 'font-size:8px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40px;';
+        nameSpan.textContent = pName;
+        
+        peerItem.appendChild(dot);
+        peerItem.appendChild(nameSpan);
+        grid.appendChild(peerItem);
     });
 
-    html += `</div>`;
-    elements.lastActionCard.innerHTML = html;
+    elements.lastActionCard.appendChild(grid);
 }
 
 function updatePeerList(peers) {
@@ -179,29 +192,67 @@ function updatePeerList(peers) {
     if (currentPeersJson === lastPeersJson) return;
     lastPeersJson = currentPeersJson;
 
-    const html = peers.map(p => {
-        const id = escapeHtml(typeof p === 'object' ? p.peerId : p);
-        const username = (typeof p === 'object' && p.username) ? escapeHtml(p.username) : '';
-        const titleText = (typeof p === 'object' && p.tabTitle) ? escapeHtml(p.tabTitle) : '';
-        
-        const nameLabel = username ? `<span style="font-weight:600; color:white;">${username}</span> <span style="font-size:10px; opacity:0.6; font-style:italic;">(${id})</span>` : `<span style="font-weight:600;">👤 ${id}</span>`;
-        const title = titleText ? `<div style="font-size:10px; color:var(--text-muted);">${titleText}</div>` : '';
-        
-        return `
-            <div class="peer-item" style="display:block; padding: 6px 0;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>${nameLabel}</span>
-                    ${id === escapeHtml(localPeerId) ? '<span style="font-size:10px; color:var(--accent)">YOU</span>' : ''}
-                </div>
-                ${title}
-            </div>
-        `;
-    }).join('');
+    const renderPeers = (container) => {
+        container.innerHTML = '';
+        if (peers.length === 0) {
+            const empty = document.createElement('div');
+            empty.style.cssText = 'text-align:center; color: var(--text-muted); font-size: 12px;';
+            empty.textContent = 'No peers connected';
+            container.appendChild(empty);
+            return;
+        }
 
-    const emptyHtml = '<div style="text-align:center; color: var(--text-muted); font-size: 12px;">No peers connected</div>';
-    
-    if (elements.peerList) elements.peerList.innerHTML = html || emptyHtml;
-    if (elements.peerListSync) elements.peerListSync.innerHTML = html || emptyHtml;
+        peers.forEach(p => {
+            const pId = typeof p === 'object' ? p.peerId : p;
+            const pUsername = (typeof p === 'object' && p.username) ? p.username : '';
+            const pTabTitle = (typeof p === 'object' && p.tabTitle) ? p.tabTitle : '';
+
+            const peerItem = document.createElement('div');
+            peerItem.className = 'peer-item';
+            peerItem.style.cssText = 'display:block; padding: 6px 0;';
+
+            const header = document.createElement('div');
+            header.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+
+            const nameSpan = document.createElement('span');
+            if (pUsername) {
+                const u = document.createElement('span');
+                u.style.cssText = 'font-weight:600; color:white;';
+                u.textContent = pUsername;
+                const i = document.createElement('span');
+                i.style.cssText = 'font-size:10px; opacity:0.6; font-style:italic;';
+                i.textContent = ` (${pId})`;
+                nameSpan.appendChild(u);
+                nameSpan.appendChild(i);
+            } else {
+                nameSpan.style.fontWeight = '600';
+                nameSpan.textContent = `👤 ${pId}`;
+            }
+
+            header.appendChild(nameSpan);
+
+            if (pId === localPeerId) {
+                const you = document.createElement('span');
+                you.style.cssText = 'font-size:10px; color:var(--accent)';
+                you.textContent = 'YOU';
+                header.appendChild(you);
+            }
+
+            peerItem.appendChild(header);
+
+            if (pTabTitle) {
+                const titleDiv = document.createElement('div');
+                titleDiv.style.cssText = 'font-size:10px; color:var(--text-muted);';
+                titleDiv.textContent = pTabTitle;
+                peerItem.appendChild(titleDiv);
+            }
+
+            container.appendChild(peerItem);
+        });
+    };
+
+    if (elements.peerList) renderPeers(elements.peerList);
+    if (elements.peerListSync) renderPeers(elements.peerListSync);
 
     // Re-populate tabs to update Star Matching when peers change
     populateTabs(peers);
@@ -279,10 +330,16 @@ function applyConnectionStatus(status) {
 
     elements.connDot.className = 'status-dot ' + (connected ? 'status-online' : (failed ? 'status-offline' : (connecting ? 'status-online' : 'status-offline')));
     
-    // Custom colors for states
-    if (connecting) elements.connDot.style.background = '#fbbf24';
-    else if (failed) elements.connDot.style.background = '#ef4444';
-    else elements.connDot.style.background = '';
+    if (connecting) {
+        elements.connDot.style.background = '#fbbf24';
+        elements.connDot.style.boxShadow = '0 0 8px #fbbf24';
+    } else if (failed) {
+        elements.connDot.style.background = '#ef4444';
+        elements.connDot.style.boxShadow = 'none';
+    } else {
+        elements.connDot.style.background = '';
+        elements.connDot.style.boxShadow = '';
+    }
 
     elements.connText.textContent = connected ? 'Connected' : (connecting ? 'Connecting...' : (failed ? 'Failed' : 'Disconnected'));
     elements.retryBtn.style.display = failed ? 'block' : 'none';
@@ -291,7 +348,7 @@ function applyConnectionStatus(status) {
     if (connecting) {
         elements.joinBtn.disabled = true;
         elements.joinBtn.textContent = 'Connecting...';
-    } else if (!connected) {
+    } else {
         elements.joinBtn.disabled = false;
         elements.joinBtn.textContent = 'Join Room';
     }
@@ -299,19 +356,47 @@ function applyConnectionStatus(status) {
 
 function updateHistory(history) {
     if (!history || !elements.historyList) return;
+    elements.historyList.innerHTML = '';
+
     if (history.length === 0) {
-        elements.historyList.innerHTML = '<div style="text-align:center; padding: 10px;">No activity yet</div>';
+        const empty = document.createElement('div');
+        empty.style.cssText = 'text-align:center; padding: 10px;';
+        empty.textContent = 'No activity yet';
+        elements.historyList.appendChild(empty);
         return;
     }
-    elements.historyList.innerHTML = history.map(item => {
+
+    history.forEach(item => {
         const time = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const actionLabel = escapeHtml(item.action.toUpperCase().replace('FORCE_SYNC_', ''));
-        const senderIdEscaped = escapeHtml(item.senderId);
-        const sender = item.senderId === 'You' ? '<span style="color:var(--accent)">You</span>' : senderIdEscaped;
-        return `<div style="margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px;">
-            <span style="color:#64748b">[${time}]</span> <b>${actionLabel}</b> by ${sender}
-        </div>`;
-    }).join('');
+        const actionLabel = item.action.toUpperCase().replace('FORCE_SYNC_', '');
+        
+        const entry = document.createElement('div');
+        entry.style.cssText = 'margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px;';
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.style.color = '#64748b';
+        timeSpan.textContent = `[${time}] `;
+        
+        const actionBold = document.createElement('b');
+        actionBold.textContent = actionLabel;
+        
+        const textNode1 = document.createTextNode(' by ');
+        
+        const senderSpan = document.createElement('span');
+        if (item.senderId === 'You') {
+            senderSpan.style.color = 'var(--accent)';
+            senderSpan.textContent = 'You';
+        } else {
+            senderSpan.textContent = item.senderId;
+        }
+        
+        entry.appendChild(timeSpan);
+        entry.appendChild(actionBold);
+        entry.appendChild(textNode1);
+        entry.appendChild(senderSpan);
+        
+        elements.historyList.appendChild(entry);
+    });
 }
 
 function refreshHistory() {
@@ -321,26 +406,53 @@ function refreshHistory() {
 }
 
 function updateRoomList(rooms) {
+    if (!elements.publicRooms) return;
+    elements.publicRooms.innerHTML = '';
+
     if (!rooms || rooms.length === 0) {
-        elements.publicRooms.innerHTML = '<div style="text-align:center; padding: 10px; color:var(--text-muted);">No active rooms</div>';
+        const empty = document.createElement('div');
+        empty.style.cssText = 'text-align:center; padding: 10px; color:var(--text-muted);';
+        empty.textContent = 'No active rooms';
+        elements.publicRooms.appendChild(empty);
         return;
     }
-    elements.publicRooms.innerHTML = rooms.map(r => `
-        <div class="room-item" style="display:flex; justify-content:space-between; align-items:center; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor:pointer;" data-id="${escapeHtml(r.id)}">
-            <div style="display:flex; align-items:center; gap: 6px;">
-                <span style="font-weight:600;">${escapeHtml(r.id)}</span>
-                ${r.hasPassword ? '<span title="Password Protected">🔒</span>' : ''}
-            </div>
-            <span style="font-size:11px; color:var(--accent)">${parseInt(r.peerCount)} peers</span>
-        </div>
-    `).join('');
 
-    elements.publicRooms.querySelectorAll('.room-item').forEach(item => {
+    rooms.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'room-item';
+        item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor:pointer;';
+        item.dataset.id = r.id;
+
+        const leftSide = document.createElement('div');
+        leftSide.style.cssText = 'display:flex; align-items:center; gap: 6px;';
+
+        const idSpan = document.createElement('span');
+        idSpan.style.fontWeight = '600';
+        idSpan.textContent = r.id;
+
+        leftSide.appendChild(idSpan);
+
+        if (r.hasPassword) {
+            const lock = document.createElement('span');
+            lock.title = 'Password Protected';
+            lock.textContent = '🔒';
+            leftSide.appendChild(lock);
+        }
+
+        const peerCount = document.createElement('span');
+        peerCount.style.cssText = 'font-size:11px; color:var(--accent)';
+        peerCount.textContent = `${parseInt(r.peerCount)} peers`;
+
+        item.appendChild(leftSide);
+        item.appendChild(peerCount);
+
         item.addEventListener('click', () => {
-            elements.roomId.value = item.dataset.id;
+            elements.roomId.value = r.id;
             elements.password.value = '';
             elements.password.focus();
         });
+
+        elements.publicRooms.appendChild(item);
     });
 }
 
@@ -457,16 +569,29 @@ function showError(msg) {
 // --- Action Handlers ---
 elements.joinBtn.addEventListener('click', async () => {
     if (elements.joinBtn.disabled) return;
+    const roomIdInput = elements.roomId.value.trim();
+    const isCreating = !roomIdInput;
+    
     elements.joinBtn.disabled = true;
-    const originalText = elements.joinBtn.textContent;
-    elements.joinBtn.textContent = 'Joining...';
-    setTimeout(() => {
-        elements.joinBtn.disabled = false;
-        elements.joinBtn.textContent = originalText;
-    }, 1500);
+    elements.joinBtn.textContent = isCreating ? 'Creating Room...' : 'Joining...';
+    
+    const serverUrl = elements.serverUrl.value.trim();
+    const useCustom = elements.serverCustom.classList.contains('active');
 
-    const serverUrl = elements.serverUrl.value;
-    const roomId = elements.roomId.value || Math.random().toString(36).substring(2, 8).toUpperCase();
+    // Proactive URL Validation
+    if (useCustom && serverUrl) {
+        try {
+            const urlToCheck = serverUrl.includes('://') ? serverUrl : 'ws://' + serverUrl;
+            new URL(urlToCheck);
+        } catch (e) {
+            showError('Invalid Server URL format.');
+            elements.joinBtn.disabled = false;
+            elements.joinBtn.textContent = 'Join Room';
+            return;
+        }
+    }
+
+    const roomId = roomIdInput || Math.random().toString(36).substring(2, 8).toUpperCase();
     const password = elements.password.value;
 
     await chrome.storage.sync.set({ serverUrl, roomId, password });
@@ -476,8 +601,7 @@ elements.joinBtn.addEventListener('click', async () => {
     chrome.runtime.sendMessage({ type: 'CONNECT' });
     
     // UI Feedback: Immediately switch state for better responsiveness
-    const data = await chrome.storage.sync.get(['useCustomServer']);
-    updateUI(roomId, password, data.useCustomServer, serverUrl);
+    updateUI(roomId, password, useCustom, serverUrl);
 });
 
 elements.leaveBtn.addEventListener('click', async () => {
@@ -590,12 +714,15 @@ elements.copyInvite.addEventListener('click', () => {
 // --- Logs & Status ---
 async function refreshLogs() {
     chrome.runtime.sendMessage({ type: 'GET_LOGS' }, (logs) => {
-        if (logs) {
-            elements.logList.innerHTML = logs.map(log => `
-                <div class="log-entry log-${log.type}">
-                    [${log.timestamp.split('T')[1].split('.')[0]}] ${escapeHtml(log.message)}
-                </div>
-            `).join('');
+        if (logs && elements.logList) {
+            elements.logList.innerHTML = '';
+            logs.forEach(log => {
+                const entry = document.createElement('div');
+                entry.className = `log-entry log-${log.type}`;
+                const timeStr = log.timestamp.split('T')[1].split('.')[0];
+                entry.textContent = `[${timeStr}] ${log.message}`;
+                elements.logList.appendChild(entry);
+            });
         }
     });
 }
@@ -619,7 +746,7 @@ chrome.runtime.onMessage.addListener((msg) => {
         }
         if (msg.status === 'disconnected' || msg.status === 'reconnect_failed') {
             elements.joinBtn.disabled = false;
-            elements.joinBtn.textContent = 'Join / Create Room';
+            elements.joinBtn.textContent = 'Join Room';
         }
     } else if (msg.type === 'HISTORY_UPDATE') {
         updateHistory(msg.history);
@@ -671,13 +798,33 @@ function refreshDebugInfo() {
             }
 
             if (elements.videoDebug) {
-                elements.videoDebug.innerHTML = `
-                    <div style="color:var(--accent); margin-bottom:4px;">VIDEO STATE: ${state.paused ? 'PAUSED' : 'PLAYING'}</div>
-                    <div style="font-size: 11px;">Time: ${state.currentTime.toFixed(2)}s / ${state.duration.toFixed(2)}s</div>
-                    <div style="font-size: 11px;">ReadyState: ${state.readyState}</div>
-                    <div style="font-size: 11px;">Muted: ${state.muted} | PlaybackRate: ${state.playbackRate}</div>
-                    <div style="font-size:9px; margin-top:4px; opacity:0.7;">URL: ${state.url.substring(0, 40)}...</div>
-                `;
+                elements.videoDebug.innerHTML = '';
+                
+                const status = document.createElement('div');
+                status.style.cssText = 'color:var(--accent); margin-bottom:4px;';
+                status.textContent = `VIDEO STATE: ${state.paused ? 'PAUSED' : 'PLAYING'}`;
+                
+                const time = document.createElement('div');
+                time.style.fontSize = '11px';
+                time.textContent = `Time: ${state.currentTime.toFixed(2)}s / ${state.duration.toFixed(2)}s`;
+                
+                const readyState = document.createElement('div');
+                readyState.style.fontSize = '11px';
+                readyState.textContent = `ReadyState: ${state.readyState}`;
+                
+                const misc = document.createElement('div');
+                misc.style.fontSize = '11px';
+                misc.textContent = `Muted: ${state.muted} | PlaybackRate: ${state.playbackRate}`;
+                
+                const url = document.createElement('div');
+                url.style.cssText = 'font-size:9px; margin-top:4px; opacity:0.7;';
+                url.textContent = `URL: ${state.url.substring(0, 40)}...`;
+                
+                elements.videoDebug.appendChild(status);
+                elements.videoDebug.appendChild(time);
+                elements.videoDebug.appendChild(readyState);
+                elements.videoDebug.appendChild(misc);
+                elements.videoDebug.appendChild(url);
             }
         });
     });

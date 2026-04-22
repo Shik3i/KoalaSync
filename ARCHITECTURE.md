@@ -40,3 +40,10 @@ To maintain a clean room state and eliminate "Ghost Peers":
 - **Rate Limiting**: Server-side per-socket and per-IP rate limits to prevent sync-spamming or DoS.
 - **Noise Filtering**: Uses a curated blacklist of domains (Search Engines, Social Media) to declutter the "Target Tab" selector in the popup.
 - **Diagnostics**: A "Dev" tab provides real-time access to the underlying `<video>` state (`readyState`, `paused`, `currentTime`) for easier troubleshooting.
+
+## 6. Constant Synchronization & Consistency
+To maintain a "Single Source of Truth" across the server and extension without using a bundler:
+- **Relay Server & Extension Modules**: `background.js` and `popup.js` import constants directly from `shared/constants.js`.
+- **Content Scripts**: To ensure zero-latency execution, `content.js` uses a manual mirror of `EVENTS`. 
+- **Synchronization**: The `./scripts/sync-constants.sh` script ensures that the `shared/` folder within the `extension/` directory is kept up-to-date with the root `shared/` source.
+- **Verification**: Any protocol change requires a manual verification sweep across all three constant locations (Shared, Server, and Content Script Mirror).

@@ -36,6 +36,7 @@ const io = new Server(httpServer, {
  */
 const rooms = new Map();
 const socketToRoom = new Map();
+const peerToSocket = new Map(); // peerId -> socketId (Global lookup)
 
 function log(type, message, details = '') {
     const timestamp = new Date().toISOString();
@@ -246,6 +247,7 @@ io.on('connection', (socket) => {
                 lastSeen: Date.now() 
             });
             socketToRoom.set(socket.id, { roomId, peerId });
+            peerToSocket.set(peerId, socket.id);
 
             socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, tabTitle: tabTitle || null, status: 'joined' });
             socket.emit(EVENTS.ROOM_DATA, { 
@@ -323,20 +325,27 @@ io.on('connection', (socket) => {
                 }
             }
             socketToRoom.delete(socket.id);
+            if (peerToSocket.get(peerId) === socket.id) {
+                peerToSocket.delete(peerId);
+            }
         }
     });
 
         socket.on(EVENTS.EVENT_ACK, (data) => {
             if (!data.targetId) return;
-            const targetSocket = Array.from(io.sockets.sockets.values()).find(s => {
-                const roomData = socketToRoom.get(s.id);
-                return roomData && roomData.peerId === data.targetId;
-            });
-            if (targetSocket) {
-                targetSocket.emit(EVENTS.EVENT_ACK, { 
+            
+            const senderMapping = socketToRoom.get(socket.id);
+            const targetSocketId = peerToSocket.get(data.targetId);
+            const targetMapping = targetSocketId ? socketToRoom.get(targetSocketId) : null;
+
+            // Security: Only relay ACK if both peers are in the same room
+            if (senderMapping && targetMapping && senderMapping.roomId === targetMapping.roomId) {
+                io.to(targetSocketId).emit(EVENTS.EVENT_ACK, { 
                     senderId: data.senderId,
                     actionTimestamp: data.actionTimestamp
                 });
+            } else {
+                log('SECURITY', `Blocked cross-room ACK attempt from ${socket.id} to ${data.targetId}`);
             }
         });
 
@@ -357,6 +366,9 @@ io.on('connection', (socket) => {
                 }
             }
             socketToRoom.delete(socket.id);
+            if (peerToSocket.get(peerId) === socket.id) {
+                peerToSocket.delete(peerId);
+            }
         }
     });
 });
@@ -378,6 +390,9 @@ setInterval(() => {
                 room.peerIds.delete(sid);
                 room.peerData.delete(sid);
                 socketToRoom.delete(sid);
+                if (peerToSocket.get(data.peerId) === sid) {
+                    peerToSocket.delete(data.peerId);
+                }
                 
                 io.to(roomId).emit(EVENTS.PEER_STATUS, { peerId: data.peerId, status: 'left' });
                 log('CLEANUP', `Pruned dead peer ${data.peerId} from room ${roomId}`);
