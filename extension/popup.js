@@ -114,6 +114,8 @@ function updateUI(roomId, password, useCustomServer = false, serverUrl = '') {
             elements.activeServer.textContent = useCustomServer ? (serverUrl || 'Custom Server') : 'Official Server';
             elements.activeServer.title = useCustomServer ? (serverUrl || '') : 'sync.shik3i.net';
         }
+    } else {
+        updatePeerList([]);
     }
 }
 

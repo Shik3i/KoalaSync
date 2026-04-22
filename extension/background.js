@@ -509,6 +509,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         currentRoom = null;
         if (storageInitialized) chrome.storage.session.set({ currentRoom: null });
         addLog('Left Room', 'info');
+        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
     } else if (message.type === 'CLEAR_LOGS') {
         logs = [];
         sendResponse({ status: 'ok' });
