@@ -14,6 +14,7 @@ let history = []; // New: for Action History
 let storageInitialized = false;
 let pendingLogs = [];
 let pendingHistory = [];
+let eventQueue = [];
 
 // Restore state from session storage
 chrome.storage.session.get(['logs', 'history'], (data) => {
@@ -182,6 +183,11 @@ async function connect() {
                     protocolVersion: PROTOCOL_VERSION
                 });
             }
+            while (eventQueue.length > 0) {
+                const queuedMsg = eventQueue.shift();
+                emit(queuedMsg.event, queuedMsg.data);
+            }
+            eventQueue = []; // Explicitly reset to avoid memory leaks
         } else if (msg.startsWith('42')) {
             // Event: 42["event", data]
             try {
@@ -272,6 +278,8 @@ function emit(event, data) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         const msg = `42${JSON.stringify([event, data])}`;
         socket.send(msg);
+    } else {
+        eventQueue.push({ event, data });
     }
 }
 
@@ -425,15 +433,14 @@ async function routeToContent(action, payload) {
 }
 
 // --- Keep-Alive Mechanism ---
-chrome.alarms.create('keepAlive', { periodInMinutes: 1 }); // every 1m
-chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'keepAlive') {
-        // console.log('SW KeepAlive Heartbeat');
-        if (!socket || socket.readyState !== WebSocket.OPEN) {
-            connect();
-        }
+chrome.alarms.clearAll();
+setInterval(() => {
+    // Calling a chrome API keeps the SW alive in MV3 (Chrome 110+)
+    chrome.storage.session.get('keepAlive', () => {});
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+        connect();
     }
-});
+}, 20000); // every 20s
 
 // --- Extension Message Listeners ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -459,9 +466,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         logs = [];
         sendResponse({ status: 'ok' });
     } else if (message.type === 'GET_LOGS') {
-        sendResponse(logs);
+        sendResponse(storageInitialized ? logs : pendingLogs);
     } else if (message.type === 'GET_HISTORY') {
-        sendResponse(history);
+        sendResponse(storageInitialized ? history : pendingHistory);
     } else if (message.type === 'GET_ROOM_LIST') {
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(`42${JSON.stringify([EVENTS.GET_ROOMS])}`);

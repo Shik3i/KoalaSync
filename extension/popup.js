@@ -260,23 +260,25 @@ function checkInviteLink() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0];
         if (tab && tab.url && tab.url.includes(OFFICIAL_LANDING_PAGE_URL) && tab.url.includes('#join:')) {
-            const parts = tab.url.split('#join:')[1].split(':');
+            const rawHash = tab.url.split('#join:')[1];
+            const parts = rawHash.split(':');
             if (parts.length >= 2) {
-                const roomId = parts[0];
-                const password = parts[1];
+                const roomId = parts.shift();
                 let useCustomServer = false;
                 let serverUrl = '';
 
                 // Smart Link: Parse Server Config if present
-                if (parts.length >= 4) {
-                    useCustomServer = parts[2] === '1';
-                    serverUrl = decodeURIComponent(parts[3]);
+                if (parts.length >= 3 && (parts[parts.length - 2] === '0' || parts[parts.length - 2] === '1')) {
+                    serverUrl = decodeURIComponent(parts.pop());
+                    useCustomServer = parts.pop() === '1';
                 }
+
+                const password = parts.join(':');
 
                 elements.roomId.value = roomId;
                 elements.password.value = password;
                 
-                if (parts.length >= 4) {
+                if (serverUrl || useCustomServer) {
                     elements.serverUrl.value = serverUrl;
                     setServerMode(useCustomServer);
                     chrome.storage.sync.set({ serverUrl, useCustomServer });

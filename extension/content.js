@@ -7,7 +7,7 @@
     if (window.koalaSyncInjected) return;
     window.koalaSyncInjected = true;
 
-    let processingCommandUntil = 0;
+    let lastTargetState = null;
 
     // --- Helper: find the best video element on the page ---
     function findVideo() {
@@ -20,7 +20,6 @@
         const video = findVideo();
         if (!video) return;
 
-        processingCommandUntil = Date.now() + 1000;
         try {
             const host = window.location.hostname.toLowerCase();
             const isYouTube = host.includes('youtube.com');
@@ -31,11 +30,12 @@
                 if (ytButton) {
                     const isCurrentlyPlaying = !video.paused;
                     if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
+                        lastTargetState = action === 'play' ? 'playing' : 'paused';
                         ytButton.click();
                     }
+                    if (action === 'seek') video.currentTime = data.targetTime;
+                    return;
                 }
-                if (action === 'seek') video.currentTime = data.targetTime;
-                return;
             }
 
             if (isTwitch) {
@@ -43,17 +43,20 @@
                 if (twitchButton) {
                     const isCurrentlyPlaying = !video.paused;
                     if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
+                        lastTargetState = action === 'play' ? 'playing' : 'paused';
                         twitchButton.click();
                     }
+                    if (action === 'seek') video.currentTime = data.targetTime;
+                    return;
                 }
-                if (action === 'seek') video.currentTime = data.targetTime;
-                return;
             }
 
             // Fallback for native HTML5
             if (action === 'play') {
+                lastTargetState = 'playing';
                 video.play().catch(() => {});
             } else if (action === 'pause') {
+                lastTargetState = 'paused';
                 video.pause();
             } else if (action === 'seek') {
                 video.currentTime = data.targetTime;
@@ -104,17 +107,15 @@
             } else if (action === 'seek') {
                 tryMediaAction('seek', payload);
             } else if (action === 'force_sync_prepare') {
-                processingCommandUntil = Date.now() + 10000;
+                if (!payload || payload.targetTime === undefined) return;
                 const video = findVideo();
                 if (video) {
+                    lastTargetState = 'paused';
                     video.pause();
                     video.currentTime = payload.targetTime;
                     pollSeekReady(payload.targetTime).then(() => {
                         chrome.runtime.sendMessage({ type: 'FORCE_SYNC_ACK' });
-                        processingCommandUntil = Date.now() + 1000;
                     });
-                } else {
-                    processingCommandUntil = 0;
                 }
             } else if (action === 'force_sync_execute') {
                 tryMediaAction('play');
@@ -124,9 +125,18 @@
 
     // Detect native events
     function reportEvent(action) {
-        if (Date.now() < processingCommandUntil) return;
         const video = findVideo();
         if (!video) return;
+
+        const eventState = action === 'play' ? 'playing' : (action === 'pause' ? 'paused' : null);
+        
+        if (eventState && lastTargetState === eventState) {
+            lastTargetState = null; // Consume the match
+            return; // Ignore event caused by our programmatic action
+        }
+        if (action !== 'seek') {
+            lastTargetState = null; // Reset on mismatch
+        }
 
         chrome.runtime.sendMessage({
             type: 'CONTENT_EVENT',
