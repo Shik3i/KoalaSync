@@ -7,6 +7,17 @@
     if (window.koalaSyncInjected) return;
     window.koalaSyncInjected = true;
 
+    // Local Protocol Constants (Mirroring shared/constants.js)
+    const EVENTS = {
+        PLAY: "play",
+        PAUSE: "pause",
+        SEEK: "seek",
+        FORCE_SYNC_PREPARE: "force_sync_prepare",
+        FORCE_SYNC_ACK: "force_sync_ack",
+        FORCE_SYNC_EXECUTE: "force_sync_execute",
+        PEER_STATUS: "peer_status"
+    };
+
     let lastTargetState = null;
     let targetStateTimeout = null;
 
@@ -40,11 +51,11 @@
                 const ytButton = document.querySelector('.ytp-play-button');
                 if (ytButton) {
                     const isCurrentlyPlaying = !video.paused;
-                    if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
-                        setTargetState(action === 'play' ? 'playing' : 'paused');
+                    if ((action === EVENTS.PLAY && !isCurrentlyPlaying) || (action === EVENTS.PAUSE && isCurrentlyPlaying)) {
+                        setTargetState(action === EVENTS.PLAY ? 'playing' : 'paused');
                         ytButton.click();
                     }
-                    if (action === 'seek') video.currentTime = data.targetTime;
+                    if (action === EVENTS.SEEK) video.currentTime = data.targetTime;
                     return;
                 }
             }
@@ -53,26 +64,26 @@
                 const twitchButton = document.querySelector('[data-a-target="player-play-pause-button"]');
                 if (twitchButton) {
                     const isCurrentlyPlaying = !video.paused;
-                    if ((action === 'play' && !isCurrentlyPlaying) || (action === 'pause' && isCurrentlyPlaying)) {
-                        setTargetState(action === 'play' ? 'playing' : 'paused');
+                    if ((action === EVENTS.PLAY && !isCurrentlyPlaying) || (action === EVENTS.PAUSE && isCurrentlyPlaying)) {
+                        setTargetState(action === EVENTS.PLAY ? 'playing' : 'paused');
                         twitchButton.click();
                     }
-                    if (action === 'seek') video.currentTime = data.targetTime;
+                    if (action === EVENTS.SEEK) video.currentTime = data.targetTime;
                     return;
                 }
             }
 
             // Fallback for native HTML5
-            if (action === 'play') {
+            if (action === EVENTS.PLAY) {
                 setTargetState('playing');
                 video.play().catch((e) => {
                     console.warn('KoalaSync playback prevented:', e);
                     setTargetState(null);
                 });
-            } else if (action === 'pause') {
+            } else if (action === EVENTS.PAUSE) {
                 setTargetState('paused');
                 video.pause();
-            } else if (action === 'seek') {
+            } else if (action === EVENTS.SEEK) {
                 video.currentTime = data.targetTime;
             }
         } catch (e) {
@@ -114,13 +125,13 @@
         if (message.type === 'SERVER_COMMAND') {
             const { action, payload } = message;
             
-            if (action === 'play') {
-                tryMediaAction('play');
-            } else if (action === 'pause') {
-                tryMediaAction('pause');
-            } else if (action === 'seek') {
-                tryMediaAction('seek', payload);
-            } else if (action === 'force_sync_prepare') {
+            if (action === EVENTS.PLAY) {
+                tryMediaAction(EVENTS.PLAY);
+            } else if (action === EVENTS.PAUSE) {
+                tryMediaAction(EVENTS.PAUSE);
+            } else if (action === EVENTS.SEEK) {
+                tryMediaAction(EVENTS.SEEK, payload);
+            } else if (action === EVENTS.FORCE_SYNC_PREPARE) {
                 if (!payload || payload.targetTime === undefined) return;
                 const video = findVideo();
                 if (video) {
@@ -131,8 +142,8 @@
                         chrome.runtime.sendMessage({ type: 'FORCE_SYNC_ACK' });
                     });
                 }
-            } else if (action === 'force_sync_execute') {
-                tryMediaAction('play');
+            } else if (action === EVENTS.FORCE_SYNC_EXECUTE) {
+                tryMediaAction(EVENTS.PLAY);
             }
         }
     });
@@ -142,7 +153,7 @@
         const video = findVideo();
         if (!video) return;
 
-        const eventState = action === 'play' ? 'playing' : (action === 'pause' ? 'paused' : null);
+        const eventState = action === EVENTS.PLAY ? 'playing' : (action === EVENTS.PAUSE ? 'paused' : null);
         
         if (eventState && lastTargetState === eventState) {
             setTargetState(null); // Consume the match
@@ -162,9 +173,9 @@
         });
     }
 
-    const handlePlay = () => reportEvent('play');
-    const handlePause = () => reportEvent('pause');
-    const handleSeeked = () => reportEvent('seek');
+    const handlePlay = () => reportEvent(EVENTS.PLAY);
+    const handlePause = () => reportEvent(EVENTS.PAUSE);
+    const handleSeeked = () => reportEvent(EVENTS.SEEK);
 
     let lastVideoSrc = null;
 
@@ -195,7 +206,6 @@
         const currentSrc = video.currentSrc || video.src;
 
         if (!video.dataset.koalaAttached || (lastVideoSrc && currentSrc && lastVideoSrc !== currentSrc)) {
-            console.log('KoalaSync: Video element attached or recycled.');
             setupListeners();
         }
     }

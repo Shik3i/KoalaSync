@@ -515,17 +515,26 @@ chrome.runtime.onMessage.addListener((msg) => {
         updatePeerList(msg.peers);
     } else if (msg.type === 'CONNECTION_STATUS') {
         applyConnectionStatus(msg.status);
+        if (msg.status === 'disconnected' || msg.status === 'reconnect_failed') {
+            elements.joinBtn.disabled = false;
+            elements.joinBtn.textContent = 'Join / Create Room';
+        }
     } else if (msg.type === 'HISTORY_UPDATE') {
         updateHistory(msg.history);
     } else if (msg.type === 'ROOM_LIST') {
         updateRoomList(msg.rooms);
     } else if (msg.type === 'LOG_UPDATE' && msg.log && msg.log.type === 'error') {
         showError(msg.log.message);
-    } else if (msg.type === 'JOIN_STATUS' && msg.success) {
-        // Final confirmation of join from background
-        chrome.storage.sync.get(['roomId', 'password', 'useCustomServer', 'serverUrl'], (data) => {
-            updateUI(data.roomId, data.password, data.useCustomServer, data.serverUrl);
-        });
+    } else if (msg.type === 'JOIN_STATUS') {
+        if (msg.success) {
+            // Final confirmation of join from background
+            chrome.storage.sync.get(['roomId', 'password', 'useCustomServer', 'serverUrl'], (data) => {
+                updateUI(data.roomId, data.password, data.useCustomServer, data.serverUrl);
+            });
+        } else {
+            // Join failed: reset UI state
+            updateUI(null, null);
+        }
     }
 });
 

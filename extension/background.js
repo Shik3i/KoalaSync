@@ -227,7 +227,8 @@ function broadcastConnectionStatus(status) {
 }
 
 function updateBadgeStatus() {
-    const status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting || socket.readyState === WebSocket.CONNECTING ? 'connecting' : 'disconnected')) : 'disconnected';
+    const isConnected = socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined;
+    const status = isConnected ? 'connected' : (isConnecting || (socket && socket.readyState === WebSocket.CONNECTING) ? 'connecting' : 'disconnected');
 
     if (reconnectFailed) {
         chrome.action.setBadgeText({ text: 'ERR' });
@@ -309,7 +310,6 @@ function addToHistory(action, senderId) {
 
 // --- Event Handlers ---
 function handleServerEvent(event, data) {
-    // console.log(`[RECV] ${event}`, data);
     
     switch (event) {
         case EVENTS.ROOM_DATA:
@@ -473,7 +473,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         reconnectDelay = 1000;
         connect();
     } else if (message.type === 'GET_STATUS') {
-        let status = socket ? (socket.readyState === WebSocket.OPEN ? 'connected' : (isConnecting || socket.readyState === WebSocket.CONNECTING ? 'connecting' : 'disconnected')) : 'disconnected';
+        const isConnected = socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined;
+        let status = isConnected ? 'connected' : (isConnecting || (socket && socket.readyState === WebSocket.CONNECTING) ? 'connecting' : 'disconnected');
         if (reconnectFailed) status = 'reconnect_failed';
         sendResponse({ status, peerId, peers: currentRoom ? currentRoom.peers : [] });
         // Global return true at the end handles this
