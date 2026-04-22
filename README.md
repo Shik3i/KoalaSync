@@ -8,11 +8,17 @@ KoalaSync is a premium, lightweight Chrome Extension and Relay Server for synchr
 ## Repository Structure
 - `extension/`: Chrome Extension (Manifest V3, Vanilla JS).
 - `server/`: Node.js + Socket.IO Relay Server (Containerized).
-- `website/`: Static marketing landing page & tutorials.
-- `shared/`: Shared protocol constants.
+- `website/`: Marketing landing page & **Invitation Bridge**.
+- `shared/`: Protocol constants and domain blacklist.
+- `scripts/`: Development utilities for protocol synchronization.
+
+> [!NOTE]
+> For deep technical dives, see [ARCHITECTURE.md](ARCHITECTURE.md) and [SYNC_GUIDE.md](SYNC_GUIDE.md).
 
 ## Key Features
 - **Global Synchronization**: Synchronize Play, Pause, and Seeking on any website with a `<video>` tag.
+- **Smart Matching**: Automatically highlights and sorts tabs containing matching video titles.
+- **Noise Filtering**: Built-in domain blacklist to hide non-video sites from selection.
 - **Smart Identity**: Customizable usernames combined with unique hexadecimal peer IDs.
 - **Dual Heartbeat Architecture**: Robust session tracking that prevents ghost rooms and stale connections.
 - **Zero-Latency Relay**: Custom Socket.IO wire protocol implementation for maximum performance.
