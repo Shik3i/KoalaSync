@@ -259,7 +259,7 @@ function updateBadgeStatus() {
     } else if (status === 'connecting') {
         chrome.action.setBadgeText({ text: '...' });
         chrome.action.setBadgeBackgroundColor({ color: '#fbbf24' });
-    } else if (currentTabId) {
+    } else if (status === 'connected' && currentTabId) {
         chrome.action.setBadgeText({ text: 'ON' });
         chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
     } else {
@@ -531,7 +531,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'LEAVE_ROOM') {
         emit(EVENTS.LEAVE_ROOM, { peerId });
         currentRoom = null;
+        currentTabId = null;
         stopHeartbeat();
+        updateBadgeStatus();
         if (storageInitialized) chrome.storage.session.set({ currentRoom: null });
         addLog('Left Room', 'info');
         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
