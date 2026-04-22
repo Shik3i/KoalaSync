@@ -191,6 +191,22 @@
         if (message.type === 'GET_VIDEO_STATE') {
             const video = findVideo();
             if (video) {
+                const dataAttributes = {};
+                if (video.attributes) {
+                    for (const attr of video.attributes) {
+                        if (attr.name.startsWith('data-')) {
+                            dataAttributes[attr.name] = attr.value;
+                        }
+                    }
+                }
+
+                const metadata = (navigator.mediaSession && navigator.mediaSession.metadata) ? {
+                    title: navigator.mediaSession.metadata.title,
+                    artist: navigator.mediaSession.metadata.artist,
+                    album: navigator.mediaSession.metadata.album,
+                    artwork: Array.from(navigator.mediaSession.metadata.artwork || []).map(a => a.src)
+                } : null;
+
                 sendResponse({
                     paused: video.paused,
                     currentTime: video.currentTime,
@@ -199,7 +215,12 @@
                     muted: video.muted,
                     playbackRate: video.playbackRate,
                     url: window.location.href,
-                    id: video.id || 'none'
+                    id: video.id || 'none',
+                    className: video.className || 'none',
+                    src: video.src || 'none',
+                    currentSrc: video.currentSrc || 'none',
+                    dataAttributes,
+                    metadata
                 });
             } else {
                 sendResponse({ error: 'No video found' });

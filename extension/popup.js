@@ -806,31 +806,57 @@ function refreshDebugInfo() {
             if (elements.videoDebug) {
                 elements.videoDebug.innerHTML = '';
                 
-                const status = document.createElement('div');
-                status.style.cssText = 'color:var(--accent); margin-bottom:4px;';
-                status.textContent = `VIDEO STATE: ${state.paused ? 'PAUSED' : 'PLAYING'}`;
+                const addField = (label, value, color = null) => {
+                    const row = document.createElement('div');
+                    row.style.marginBottom = '4px';
+                    if (color) row.style.color = color;
+                    
+                    const b = document.createElement('b');
+                    b.textContent = `${label}: `;
+                    b.style.color = 'var(--text-muted)';
+                    
+                    const span = document.createElement('span');
+                    span.textContent = value;
+                    span.style.wordBreak = 'break-all';
+                    
+                    row.appendChild(b);
+                    row.appendChild(span);
+                    elements.videoDebug.appendChild(row);
+                };
+
+                const addSection = (title) => {
+                    const div = document.createElement('div');
+                    div.style.cssText = 'margin: 8px 0 4px 0; border-bottom: 1px solid #334155; padding-bottom: 2px; color: var(--accent); font-weight: bold; font-size: 9px;';
+                    div.textContent = title.toUpperCase();
+                    elements.videoDebug.appendChild(div);
+                };
+
+                addField('STATE', state.paused ? 'PAUSED' : 'PLAYING', 'var(--accent)');
+                addField('TIME', `${state.currentTime.toFixed(2)}s / ${state.duration.toFixed(2)}s`);
+                addField('READY', state.readyState);
                 
-                const time = document.createElement('div');
-                time.style.fontSize = '11px';
-                time.textContent = `Time: ${state.currentTime.toFixed(2)}s / ${state.duration.toFixed(2)}s`;
+                addSection('Identification');
+                addField('URL', state.url);
+                addField('ID', state.id);
+                addField('CLASS', state.className);
                 
-                const readyState = document.createElement('div');
-                readyState.style.fontSize = '11px';
-                readyState.textContent = `ReadyState: ${state.readyState}`;
-                
-                const misc = document.createElement('div');
-                misc.style.fontSize = '11px';
-                misc.textContent = `Muted: ${state.muted} | PlaybackRate: ${state.playbackRate}`;
-                
-                const url = document.createElement('div');
-                url.style.cssText = 'font-size:9px; margin-top:4px; opacity:0.7;';
-                url.textContent = `URL: ${state.url.substring(0, 40)}...`;
-                
-                elements.videoDebug.appendChild(status);
-                elements.videoDebug.appendChild(time);
-                elements.videoDebug.appendChild(readyState);
-                elements.videoDebug.appendChild(misc);
-                elements.videoDebug.appendChild(url);
+                addSection('Media Source');
+                addField('CURRENT_SRC', state.currentSrc);
+                addField('SRC', state.src);
+
+                if (state.metadata) {
+                    addSection('Media Session API');
+                    addField('TITLE', state.metadata.title || 'n/a');
+                    addField('ARTIST', state.metadata.artist || 'n/a');
+                    addField('ALBUM', state.metadata.album || 'n/a');
+                }
+
+                if (state.dataAttributes && Object.keys(state.dataAttributes).length > 0) {
+                    addSection('Data Attributes');
+                    for (const [key, val] of Object.entries(state.dataAttributes)) {
+                        addField(key.replace('data-', '').toUpperCase(), val);
+                    }
+                }
             }
         });
     });
