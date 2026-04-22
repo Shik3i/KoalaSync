@@ -1,0 +1,13 @@
+.git
+.gitignore
+.vscode
+node_modules
+server/node_modules
+extension/
+website/
+scripts/
+*.md
+*.bat
+*.sh
+.env
+server/.env
