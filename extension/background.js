@@ -465,7 +465,7 @@ function handleServerEvent(event, data) {
         case EVENTS.FORCE_SYNC_PREPARE:
             if (data.senderId) {
                 addToHistory(event, data.senderId);
-                showNotification(event, data.senderId);
+                showNotification(data.senderId, event);
                 updateLastAction(event, data.senderId);
             }
             routeToContent(event, data);

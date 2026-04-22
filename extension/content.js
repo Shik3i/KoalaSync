@@ -165,8 +165,8 @@
                     setTargetState('paused');
                     video.pause();
                     video.currentTime = payload.targetTime;
-                    pollSeekReady(payload.targetTime).then(() => {
-                        chrome.runtime.sendMessage({ type: 'FORCE_SYNC_ACK' });
+                    pollSeekReady(payload.targetTime).then((ready) => {
+                        if (ready) chrome.runtime.sendMessage({ type: 'FORCE_SYNC_ACK' });
                     });
                 }
             } else if (action === EVENTS.FORCE_SYNC_EXECUTE) {
