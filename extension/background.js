@@ -334,7 +334,7 @@ function updateBadgeStatus() {
     } else if (status === 'connecting') {
         chrome.action.setBadgeText({ text: '...' });
         chrome.action.setBadgeBackgroundColor({ color: '#fbbf24' });
-    } else if (status === 'connected' && currentTabId) {
+    } else if (status === 'connected' && currentRoom && currentTabId) {
         chrome.action.setBadgeText({ text: 'ON' });
         chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
     } else {
@@ -787,46 +787,59 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
         });
     } else if (message.type === 'CONTENT_EVENT') {
-        if (sender.tab) {
-            currentTabId = sender.tab.id;
-            currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
-            updateBadgeStatus();
-        } else {
-            // Event coming from POPUP: We must also route it to our OWN content script
-            routeToContent(message.action, message.payload);
-        }
-        
-        // Update local state as initiator
-        const timestamp = Date.now();
-        updateLastAction(message.action, 'You', timestamp);
-        message.payload.actionTimestamp = timestamp;
-        
-        // Events coming from content script or popup
-        if (message.action === EVENTS.FORCE_SYNC_PREPARE) {
-            isForceSyncInitiator = true;
-            forceSyncAcks.clear();
-            const deadline = Date.now() + 5000;
-            chrome.storage.session.set({ 
-                isForceSyncInitiator: true, 
-                forceSyncAcks: [], 
-                forceSyncDeadline: deadline 
-            });
-            addLog('Initiating Force Sync...', 'info');
+        const processEvent = () => {
+            const timestamp = Date.now();
+            updateLastAction(message.action, 'You', timestamp);
+            message.payload.actionTimestamp = timestamp;
             
-            // Route to our own content script so we pause and seek
-            routeToContent(EVENTS.FORCE_SYNC_PREPARE, message.payload);
- 
-            // Timeout if not everyone ACKs
-            forceSyncTimeout = setTimeout(() => {
-                if (isForceSyncInitiator) {
-                    addLog('Force Sync: Timeout waiting for ACKs, executing anyway...', 'warn');
-                    executeForceSync();
+            if (message.action === EVENTS.FORCE_SYNC_PREPARE) {
+                isForceSyncInitiator = true;
+                forceSyncAcks.clear();
+                const deadline = Date.now() + 5000;
+                chrome.storage.session.set({ 
+                    isForceSyncInitiator: true, 
+                    forceSyncAcks: [], 
+                    forceSyncDeadline: deadline 
+                });
+                addLog('Initiating Force Sync...', 'info');
+                
+                routeToContent(EVENTS.FORCE_SYNC_PREPARE, message.payload);
+     
+                forceSyncTimeout = setTimeout(() => {
+                    if (isForceSyncInitiator) {
+                        addLog('Force Sync: Timeout waiting for ACKs, executing anyway...', 'warn');
+                        executeForceSync();
+                    }
+                }, 5000);
+            }
+            addToHistory(message.action, 'You');
+            emit(message.action, { ...message.payload, peerId });
+            sendResponse({ status: 'ok' });
+        };
+
+        if (sender.tab) {
+            getSettings().then(settings => {
+                const savedTargetId = parseInt(settings.targetTabId);
+                const senderTabId = sender.tab.id;
+                
+                if (savedTargetId && savedTargetId !== senderTabId) {
+                    sendResponse({ status: 'ignored_unselected_tab' });
+                    return;
+                } else if (!savedTargetId && currentTabId && currentTabId !== senderTabId) {
+                    sendResponse({ status: 'ignored_unselected_tab' });
+                    return;
                 }
-            }, 5000);
+                
+                currentTabId = senderTabId;
+                currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
+                updateBadgeStatus();
+                processEvent();
+            });
+            return true;
+        } else {
+            routeToContent(message.action, message.payload);
+            processEvent();
         }
-        addToHistory(message.action, 'You');
-        emit(message.action, { ...message.payload, peerId });
-        sendResponse({ status: 'ok' });
     } else if (message.type === 'FORCE_SYNC_ACK') {
         if (isForceSyncInitiator) {
             forceSyncAcks.add(peerId);
@@ -851,16 +864,27 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'HEARTBEAT') {
-        if (sender.tab) {
-            currentTabId = sender.tab.id;
-            currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
-        }
-        // Peer status heartbeat from content script
         getSettings().then(settings => {
+            if (sender.tab) {
+                const savedTargetId = parseInt(settings.targetTabId);
+                const senderTabId = sender.tab.id;
+                
+                if (savedTargetId && savedTargetId !== senderTabId) {
+                    sendResponse({ status: 'ignored_unselected_tab' });
+                    return;
+                } else if (!savedTargetId && currentTabId && currentTabId !== senderTabId) {
+                    sendResponse({ status: 'ignored_unselected_tab' });
+                    return;
+                }
+                
+                currentTabId = senderTabId;
+                currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
+                updateBadgeStatus();
+            }
+
             const statusPayload = { ...message.payload, peerId, username: settings.username, tabTitle: currentTabTitle };
             emit(EVENTS.PEER_STATUS, statusPayload);
 
-            // Locally update our own metadata so the popup sees it for "YOU"
             if (currentRoom && currentRoom.peers) {
                 const me = currentRoom.peers.find(p => (p.peerId || p) === peerId);
                 if (me && typeof me === 'object') {
@@ -870,8 +894,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                 }
             }
+            sendResponse({ status: 'ok' });
         });
-        sendResponse({ status: 'ok' });
+        return true;
     } else if (message.type === 'LOG') {
         addLog(`[Content] ${message.message}`, message.level || 'info');
         sendResponse({ status: 'ok' });
