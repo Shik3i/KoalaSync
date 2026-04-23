@@ -1,6 +1,10 @@
 /**
  * blacklist.js
  * 
+ * ⚠️ WARNING: This is the SINGLE SOURCE OF TRUTH.
+ * If you edit this file, you MUST run /scripts/sync-constants.bat 
+ * to propagate changes to the extension and relay server.
+ * 
  * Domains to be filtered out from the tab selection dropdown to reduce "noise".
  * These are typically sites that won't contain shareable video content.
  */

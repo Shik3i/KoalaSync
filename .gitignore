@@ -38,7 +38,8 @@ coverage/
 # KoalaSync Specific
 # We ignore the synced files in the extension folder to ensure 
 # the root 'shared/' remains the Single Source of Truth.
-extension/shared/
+extension/shared/*
+!extension/shared/README.md
 
 # Temporary scratch files
 scratch/

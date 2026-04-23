@@ -1,5 +1,9 @@
 /**
  * KoalaSync Shared Constants & Protocol Definitions
+ * 
+ * ⚠️ WARNING: This is the SINGLE SOURCE OF TRUTH.
+ * If you edit this file, you MUST run /scripts/sync-constants.bat 
+ * to propagate changes to the extension and relay server.
  */
 
 export const PROTOCOL_VERSION = "1.0.0";
