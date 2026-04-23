@@ -687,6 +687,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     protocolVersion: PROTOCOL_VERSION
                 });
             }
+        } else {
             connect();
         }
         sendResponse({ status: 'ok' });
@@ -832,7 +833,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 updateBadgeStatus();
                 processEvent();
             });
-            return true;
         } else {
             routeToContent(message.action, message.payload);
             processEvent();
@@ -890,7 +890,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
             sendResponse({ status: 'ok' });
         });
-        return true;
     } else if (message.type === 'LOG') {
         addLog(`[Content] ${message.message}`, message.level || 'info');
         sendResponse({ status: 'ok' });
