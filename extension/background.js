@@ -30,8 +30,10 @@ function ensureState() {
             chrome.storage.session.get([
                 'logs', 'history', 'currentRoom', 'lastActionState', 
                 'eventQueue', 'isForceSyncInitiator', 'forceSyncAcks', 
-                'forceSyncDeadline', 'reconnectFailed', 'reconnectStartTime'
+                'forceSyncDeadline', 'reconnectFailed', 'reconnectStartTime', 'currentTabId', 'currentTabTitle'
             ], (data) => {
+                if (data.currentTabId !== undefined) currentTabId = data.currentTabId;
+                if (data.currentTabTitle !== undefined) currentTabTitle = data.currentTabTitle;
                 // Merge data from storage with any early-arriving state
                 // New entries (added during boot) must stay at the top (index 0)
                 if (data.logs) logs = [...logs, ...data.logs].slice(0, 50);
@@ -121,13 +123,12 @@ async function getPeerId() {
 
 async function getSettings() {
     return new Promise(resolve => {
-        chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'targetTabId', 'username'], (data) => {
+        chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'username'], (data) => {
             resolve({
                 serverUrl: data.serverUrl || '',
                 useCustomServer: data.useCustomServer || false,
                 roomId: data.roomId || '',
                 password: data.password || '',
-                targetTabId: data.targetTabId || null,
                 username: data.username || ''
             });
         });
@@ -587,10 +588,6 @@ function updateLastAction(action, senderId, timestamp = Date.now()) {
 }
 
 async function routeToContent(action, payload) {
-    const settings = await getSettings();
-    if (settings.targetTabId) {
-        currentTabId = settings.targetTabId;
-    }
     if (!currentTabId) return;
 
     const tabId = parseInt(currentTabId);
@@ -819,20 +816,17 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         };
 
         if (sender.tab) {
-            getSettings().then(settings => {
-                const savedTargetId = parseInt(settings.targetTabId);
-                const senderTabId = sender.tab.id;
-                
-                if (!savedTargetId || savedTargetId !== senderTabId) {
-                    sendResponse({ status: 'ignored_unselected_tab' });
-                    return;
-                }
-                
-                currentTabId = senderTabId;
-                currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
-                updateBadgeStatus();
-                processEvent();
-            });
+            const senderTabId = sender.tab.id;
+            
+            if (!currentTabId || currentTabId !== senderTabId) {
+                sendResponse({ status: 'ignored_unselected_tab' });
+                return;
+            }
+            
+            currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
+            chrome.storage.session.set({ currentTabTitle });
+            updateBadgeStatus();
+            processEvent();
         } else {
             routeToContent(message.action, message.payload);
             processEvent();
@@ -861,21 +855,20 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'HEARTBEAT') {
-        getSettings().then(settings => {
-            if (sender.tab) {
-                const savedTargetId = parseInt(settings.targetTabId);
-                const senderTabId = sender.tab.id;
-                
-                if (!savedTargetId || savedTargetId !== senderTabId) {
-                    sendResponse({ status: 'ignored_unselected_tab' });
-                    return;
-                }
-                
-                currentTabId = senderTabId;
-                currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
-                updateBadgeStatus();
+        if (sender.tab) {
+            const senderTabId = sender.tab.id;
+            
+            if (!currentTabId || currentTabId !== senderTabId) {
+                sendResponse({ status: 'ignored_unselected_tab' });
+                return;
             }
+            
+            currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
+            chrome.storage.session.set({ currentTabTitle });
+            updateBadgeStatus();
+        }
 
+        getSettings().then(settings => {
             const statusPayload = { ...message.payload, peerId, username: settings.username, tabTitle: currentTabTitle };
             emit(EVENTS.PEER_STATUS, statusPayload);
 
@@ -890,6 +883,22 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
             sendResponse({ status: 'ok' });
         });
+    } else if (message.type === 'SET_TARGET_TAB') {
+        currentTabId = message.tabId;
+        currentTabTitle = message.tabTitle;
+        chrome.storage.session.set({ currentTabId, currentTabTitle });
+        updateBadgeStatus();
+        
+        if (currentTabId) {
+            chrome.scripting.executeScript({
+                target: { tabId: currentTabId },
+                files: ['content.js']
+            }).catch(err => {
+                addLog(`Failed to inject into tab: ${err.message}`, 'warn');
+            });
+        }
+        
+        sendResponse({ status: 'ok' });
     } else if (message.type === 'LOG') {
         addLog(`[Content] ${message.message}`, message.level || 'info');
         sendResponse({ status: 'ok' });
@@ -904,9 +913,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     if (tabId === currentTabId) {
         currentTabId = null;
         currentTabTitle = null;
-        chrome.storage.sync.set({ targetTabId: null });
+        chrome.storage.session.set({ currentTabId: null, currentTabTitle: null });
         updateBadgeStatus();
         addLog('Target tab closed.', 'warn');
+    }
+});
+
+// Re-inject on full page refresh
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (currentTabId && tabId === parseInt(currentTabId) && changeInfo.status === 'complete') {
+        chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['content.js']
+        }).catch(() => {});
     }
 });
 

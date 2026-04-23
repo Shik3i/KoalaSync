@@ -25,19 +25,16 @@
         PEER_STATUS: "peer_status"
     };
 
-    let lastTargetState = null;
-    let targetStateTimeout = null;
+    let expectedEvents = new Set();
+    let expectedTimeouts = {};
 
-    function setTargetState(state) {
-        lastTargetState = state;
-        if (targetStateTimeout) clearTimeout(targetStateTimeout);
-        if (state !== null) {
-            // Seek events might take longer than play/pause, using 2s for safety
-            const timeout = state === 'seek' ? 2000 : 1500;
-            targetStateTimeout = setTimeout(() => {
-                lastTargetState = null;
-            }, timeout);
-        }
+    function expectEvent(state) {
+        expectedEvents.add(state);
+        if (expectedTimeouts[state]) clearTimeout(expectedTimeouts[state]);
+        const timeout = state === 'seek' ? 10000 : 1500;
+        expectedTimeouts[state] = setTimeout(() => {
+            expectedEvents.delete(state);
+        }, timeout);
     }
 
     function reportLog(message, level = 'info') {
@@ -74,11 +71,11 @@
                 if (ytButton) {
                     const isCurrentlyPlaying = !video.paused;
                     if ((action === EVENTS.PLAY && !isCurrentlyPlaying) || (action === EVENTS.PAUSE && isCurrentlyPlaying)) {
-                        setTargetState(action === EVENTS.PLAY ? 'playing' : 'paused');
+                        expectEvent(action === EVENTS.PLAY ? 'playing' : 'paused');
                         ytButton.click();
                     }
                     if (action === EVENTS.SEEK) {
-                        setTargetState('seek');
+                        expectEvent('seek');
                         video.currentTime = data.targetTime;
                     }
                     return;
@@ -90,11 +87,11 @@
                 if (twitchButton) {
                     const isCurrentlyPlaying = !video.paused;
                     if ((action === EVENTS.PLAY && !isCurrentlyPlaying) || (action === EVENTS.PAUSE && isCurrentlyPlaying)) {
-                        setTargetState(action === EVENTS.PLAY ? 'playing' : 'paused');
+                        expectEvent(action === EVENTS.PLAY ? 'playing' : 'paused');
                         twitchButton.click();
                     }
                     if (action === EVENTS.SEEK) {
-                        setTargetState('seek');
+                        expectEvent('seek');
                         video.currentTime = data.targetTime;
                     }
                     return;
@@ -103,16 +100,16 @@
 
             // Fallback for native HTML5
             if (action === EVENTS.PLAY) {
-                setTargetState('playing');
+                expectEvent('playing');
                 video.play().catch((e) => {
                     reportLog(`Playback prevented: ${e.message}`, 'warn');
-                    setTargetState(null);
+                    expectedEvents.delete('playing');
                 });
             } else if (action === EVENTS.PAUSE) {
-                setTargetState('paused');
+                expectEvent('paused');
                 video.pause();
             } else if (action === EVENTS.SEEK) {
-                setTargetState('seek');
+                expectEvent('seek');
                 video.currentTime = data.targetTime;
             }
         } catch (e) {
@@ -135,7 +132,7 @@
 
                 elapsed += interval;
                 const timeDiff = Math.abs(video.currentTime - targetTime);
-                const ready = video.readyState >= 3 && timeDiff < 1.0;
+                const ready = video.readyState >= 3 && timeDiff < 2.0;
                 if (ready) {
                     clearInterval(timer);
                     resolve(true);
@@ -175,7 +172,8 @@
                         reportLog(`Media Action Error: Invalid force sync payload - ${JSON.stringify(payload)}`, 'error');
                         return;
                     }
-                    setTargetState('paused');
+                    expectEvent('paused');
+                    expectEvent('seek');
                     video.pause();
                     video.currentTime = payload.targetTime;
                     pollSeekReady(payload.targetTime).then((ready) => {
@@ -240,8 +238,8 @@
 
         const eventState = action === EVENTS.PLAY ? 'playing' : (action === EVENTS.PAUSE ? 'paused' : (action === EVENTS.SEEK ? 'seek' : null));
         
-        if (eventState && lastTargetState === eventState) {
-            setTargetState(null); // Consume the match
+        if (eventState && expectedEvents.has(eventState)) {
+            expectedEvents.delete(eventState); // Consume the match
             return; // Ignore event caused by our programmatic action
         }
         

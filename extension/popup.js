@@ -49,7 +49,7 @@ let lastPeersJson = null;
 // --- Initialization ---
 async function init() {
     // Load Settings
-    const data = await chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'targetTabId', 'filterNoise', 'username']);
+    const data = await chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'filterNoise', 'username']);
     elements.serverUrl.value = data.serverUrl || '';
     elements.roomId.value = data.roomId || '';
     elements.password.value = data.password || '';
@@ -62,21 +62,23 @@ async function init() {
         setServerMode(false);
     }
 
-    // Populate Tabs
-    await populateTabs();
-
     toggleUIState(!!data.roomId);
     updateUI(data.roomId, data.password, data.useCustomServer, data.serverUrl);
     refreshLogs();
     refreshHistory();
 
     // Initial Status Check
-    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, async (res) => {
         if (res) {
             localPeerId = res.peerId;
             applyConnectionStatus(res.status);
             updatePeerList(res.peers);
             if (res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
+            
+            // Populate Tabs using the background's targetTabId
+            await populateTabs(res.peers, res.targetTabId);
+        } else {
+            await populateTabs();
         }
     });
 
@@ -267,10 +269,16 @@ function updatePeerList(peers) {
     populateTabs(peers);
 }
 
-async function populateTabs(providedPeers = null) {
-    const data = await chrome.storage.sync.get(['targetTabId', 'filterNoise']);
+async function populateTabs(providedPeers = null, providedTargetTabId = null) {
+    const data = await chrome.storage.sync.get(['filterNoise']);
     const isFilterActive = data.filterNoise !== false;
-    const currentTargetTabId = data.targetTabId;
+    
+    // Fallback if not provided directly
+    let currentTargetTabId = providedTargetTabId;
+    if (currentTargetTabId === null) {
+        const status = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_STATUS' }, r));
+        currentTargetTabId = status?.targetTabId;
+    }
  
     // Use provided peers or fetch if missing
     let peerIds = providedPeers;
@@ -646,15 +654,18 @@ elements.retryBtn.addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'RETRY_CONNECT' });
 });
 
-elements.targetTab.addEventListener('change', async () => {
-    await chrome.storage.sync.set({ targetTabId: elements.targetTab.value });
+elements.targetTab.addEventListener('change', () => {
+    const val = elements.targetTab.value;
+    const tabId = val ? parseInt(val) : null;
+    const tabTitle = elements.targetTab.options[elements.targetTab.selectedIndex]?.text.replace('⭐ MATCH: ', '') || null;
+    chrome.runtime.sendMessage({ type: 'SET_TARGET_TAB', tabId, tabTitle });
 });
 
 elements.forceSyncBtn.addEventListener('click', async () => {
     if (elements.forceSyncBtn.disabled) return;
     
-    const settings = await chrome.storage.sync.get(['targetTabId']);
-    if (!settings.targetTabId) return;
+    const status = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_STATUS' }, r));
+    if (!status || !status.targetTabId) return;
 
     // Lockout to prevent spamming
     const originalText = elements.forceSyncBtn.textContent;
@@ -665,7 +676,7 @@ elements.forceSyncBtn.addEventListener('click', async () => {
         elements.forceSyncBtn.textContent = originalText;
     }, 5000);
 
-    const tabId = parseInt(settings.targetTabId);
+    const tabId = parseInt(status.targetTabId);
 
     const sendForceSync = (time) => {
         chrome.runtime.sendMessage({
