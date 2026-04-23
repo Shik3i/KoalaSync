@@ -822,10 +822,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 const savedTargetId = parseInt(settings.targetTabId);
                 const senderTabId = sender.tab.id;
                 
-                if (savedTargetId && savedTargetId !== senderTabId) {
-                    sendResponse({ status: 'ignored_unselected_tab' });
-                    return;
-                } else if (!savedTargetId && currentTabId && currentTabId !== senderTabId) {
+                if (!savedTargetId || savedTargetId !== senderTabId) {
                     sendResponse({ status: 'ignored_unselected_tab' });
                     return;
                 }
@@ -869,10 +866,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 const savedTargetId = parseInt(settings.targetTabId);
                 const senderTabId = sender.tab.id;
                 
-                if (savedTargetId && savedTargetId !== senderTabId) {
-                    sendResponse({ status: 'ignored_unselected_tab' });
-                    return;
-                } else if (!savedTargetId && currentTabId && currentTabId !== senderTabId) {
+                if (!savedTargetId || savedTargetId !== senderTabId) {
                     sendResponse({ status: 'ignored_unselected_tab' });
                     return;
                 }
