@@ -587,8 +587,8 @@ function updateLastAction(action, senderId, timestamp = Date.now()) {
 }
 
 async function routeToContent(action, payload) {
-    if (!currentTabId) {
-        const settings = await getSettings();
+    const settings = await getSettings();
+    if (settings.targetTabId) {
         currentTabId = settings.targetTabId;
     }
     if (!currentTabId) return;
