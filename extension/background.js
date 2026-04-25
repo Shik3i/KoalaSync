@@ -101,6 +101,26 @@ let forceSyncTimeout = null;
 
 // --- Storage Utils ---
 
+/**
+ * Canonical peer data factory. All peer object construction must go through
+ * here to guarantee a consistent shape with predictable null defaults.
+ * @param {object} raw - Raw data from server event or heartbeat payload.
+ * @returns {object} Normalized peer data object.
+ */
+function createPeerData(raw) {
+    return {
+        peerId:        raw.peerId        || null,
+        username:      raw.username      || null,
+        tabTitle:      raw.tabTitle      || null,
+        mediaTitle:    raw.mediaTitle    || null,
+        playbackState: raw.playbackState || null,
+        currentTime:   raw.currentTime   != null ? raw.currentTime : null,
+        volume:        raw.volume        != null ? raw.volume       : null,
+        muted:         raw.muted         != null ? raw.muted        : null,
+        lastHeartbeat: Date.now()
+    };
+}
+
 async function getPeerId() {
     const data = await chrome.storage.local.get(['peerId']);
     if (data.peerId) return data.peerId;
@@ -413,9 +433,7 @@ function handleServerEvent(event, data) {
             if (storageInitialized) chrome.storage.session.set({ currentRoom });
             addLog(`Joined Room: ${data.roomId}`, 'success');
             chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: data.peers }).catch(() => {});
-            
-
-            
+                        
             // Inform Website Bridge & Popup
             const joinStatusMsg = { type: 'JOIN_STATUS', success: true, message: 'Joined' };
             chrome.runtime.sendMessage(joinStatusMsg).catch(() => {});
@@ -506,17 +524,7 @@ function handleServerEvent(event, data) {
                 if (!Array.isArray(currentRoom.peers)) currentRoom.peers = [];
                 if (data.status === 'joined') {
                     if (!currentRoom.peers.find(p => (p.peerId || p) === data.peerId)) {
-                        currentRoom.peers.push({ 
-                            peerId: data.peerId, 
-                            username: data.username, 
-                            tabTitle: data.tabTitle,
-                            mediaTitle: data.mediaTitle || null,
-                            playbackState: data.playbackState || null,
-                            currentTime: data.currentTime != null ? data.currentTime : null,
-                            volume: data.volume != null ? data.volume : null,
-                            muted: data.muted != null ? data.muted : null,
-                            lastHeartbeat: Date.now()
-                        });
+                        currentRoom.peers.push(createPeerData(data));
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                     }
@@ -538,19 +546,9 @@ function handleServerEvent(event, data) {
                             peer.muted = data.muted !== undefined ? data.muted : peer.muted;
                             peer.lastHeartbeat = Date.now();
                         } else {
-                            // Migration: replace string with object
+                            // Migration: replace string peer with normalized object
                             const idx = currentRoom.peers.indexOf(peer);
-                            currentRoom.peers[idx] = { 
-                                peerId: data.peerId, 
-                                username: data.username, 
-                                tabTitle: data.tabTitle,
-                                mediaTitle: data.mediaTitle || null,
-                                playbackState: data.playbackState || null,
-                                currentTime: data.currentTime != null ? data.currentTime : null,
-                                volume: data.volume != null ? data.volume : null,
-                                muted: data.muted != null ? data.muted : null,
-                                lastHeartbeat: Date.now()
-                            };
+                            currentRoom.peers[idx] = createPeerData(data);
                         }
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});

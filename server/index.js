@@ -200,7 +200,16 @@ io.on('connection', (socket) => {
             return;
         }
         if (!payload || typeof payload.roomId !== 'string') return;
-        const { roomId, password, peerId, username, tabTitle, mediaTitle, protocolVersion } = payload;
+        const { password, peerId, protocolVersion } = payload;
+
+        // --- M-2: Sanitize and clamp all string fields ---
+        const roomId   = String(payload.roomId   || '').substring(0, 64);
+        const username = typeof payload.username  === 'string' ? payload.username.substring(0, 30)  : null;
+        const tabTitle = typeof payload.tabTitle  === 'string' ? payload.tabTitle.substring(0, 100) : null;
+        const mediaTitle = typeof payload.mediaTitle === 'string' ? payload.mediaTitle.substring(0, 100) : null;
+
+        if (!roomId) return; // Guard: empty after sanitization
+
         try {
             // Protocol check
             if (protocolVersion !== '1.0.0') {
@@ -422,3 +431,23 @@ setInterval(() => {
 httpServer.listen(PORT, () => {
     log('SERVER', `KoalaSync Relay running on port ${PORT}`);
 });
+
+// --- M-4: Graceful Shutdown ---
+function gracefulShutdown(signal) {
+    log('SERVER', `${signal} received — starting graceful shutdown...`);
+    // 1. Notify all connected clients so they can display a meaningful message
+    io.emit(EVENTS.ERROR, { message: 'Server is restarting. Please reconnect in a moment.' });
+    // 2. Stop accepting new HTTP connections
+    httpServer.close(() => {
+        log('SERVER', 'HTTP server closed. Exiting.');
+        process.exit(0);
+    });
+    // 3. Safety net: force-exit after 5s if connections don't drain
+    setTimeout(() => {
+        log('SERVER', 'Force-exit after timeout.');
+        process.exit(1);
+    }, 5000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
