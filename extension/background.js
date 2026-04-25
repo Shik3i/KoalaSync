@@ -36,7 +36,7 @@ function ensureState() {
                 if (data.currentTabTitle !== undefined) currentTabTitle = data.currentTabTitle;
                 // Merge data from storage with any early-arriving state
                 // New entries (added during boot) must stay at the top (index 0)
-                if (data.logs) logs = [...logs, ...data.logs].slice(0, 50);
+                if (data.logs) logs = [...logs, ...data.logs].slice(0, 200);
                 if (data.history) history = [...history, ...data.history].slice(0, 20);
                 if (data.currentRoom) currentRoom = data.currentRoom;
                 if (data.lastActionState) lastActionState = data.lastActionState;
@@ -82,7 +82,7 @@ function ensureState() {
                 
                 // Process any early logs/history that weren't captured in the spread
                 if (pendingLogs.length > 0) {
-                    logs = [...pendingLogs, ...logs].slice(0, 50);
+                    logs = [...pendingLogs, ...logs].slice(0, 200);
                     chrome.storage.session.set({ logs });
                     pendingLogs = [];
                 }
@@ -169,7 +169,7 @@ function addLog(message, type = 'info') {
         pendingLogs.unshift(log);
     } else {
         logs.unshift(log);
-        if (logs.length > 50) logs.pop();
+        if (logs.length > 200) logs.pop();
         chrome.storage.session.set({ logs });
     }
     chrome.runtime.sendMessage({ type: 'LOG_UPDATE', log }).catch(() => {});

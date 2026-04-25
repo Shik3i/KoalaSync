@@ -414,12 +414,17 @@
         if (expectedEvents.has('seek')) {
             expectedEvents.delete('seek');
             lastReportedSeekTime = current; // Update baseline so next user seek is relative to here
+            // No log — this is routine programmatic behavior (Force Sync, lobby, peer command)
             return;
         }
 
+        const delta = lastReportedSeekTime !== null ? Math.abs(current - lastReportedSeekTime) : null;
+        const deltaStr = delta !== null ? `Δ${delta.toFixed(2)}s` : 'Δ?';
+
         // Step 2: Delta check — skip micro-seeks (buffering, chapter markers, etc.)
-        if (lastReportedSeekTime !== null && Math.abs(current - lastReportedSeekTime) < MIN_SEEK_DELTA) {
-            return; // Too small — likely an internal player seek, not user-initiated
+        if (lastReportedSeekTime !== null && delta < MIN_SEEK_DELTA) {
+            reportLog(`[Seek] Filtered (${deltaStr} < ${MIN_SEEK_DELTA}s threshold) @ ${current.toFixed(2)}s — not relayed`, 'warn');
+            return;
         }
 
         // Step 3: Debounce rapid consecutive seeks (e.g. scrubbing)
@@ -430,10 +435,14 @@
             const v = findVideo();
             if (!v) return;
             const settled = v.currentTime;
+            const finalDelta = lastReportedSeekTime !== null ? Math.abs(settled - lastReportedSeekTime) : null;
+            const finalDeltaStr = finalDelta !== null ? `Δ${finalDelta.toFixed(2)}s` : 'Δ?';
             lastReportedSeekTime = settled;
+            reportLog(`[Seek] Relayed @ ${settled.toFixed(2)}s (${finalDeltaStr})`, 'info');
             reportEvent(EVENTS.SEEK);
         }, 800);
     };
+
 
     let lastVideoSrc = null;
 
