@@ -55,6 +55,12 @@ async function init() {
     elements.password.value = data.password || '';
     elements.username.value = data.username || '';
     elements.filterNoise.checked = data.filterNoise !== false;
+    
+    // Set Version Info
+    const versionEl = document.getElementById('appVersion');
+    if (versionEl) {
+        versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+    }
 
     if (data.useCustomServer) {
         setServerMode(true);
