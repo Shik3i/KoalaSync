@@ -329,16 +329,19 @@ io.on('connection', (socket) => {
                     room.lastActivity = Date.now();
                     
                     // Update peer metadata and lastSeen
+                    // Sanitize mutable string fields to enforce the same length
+                    // limits as JOIN_ROOM — the relay path is otherwise unbounded.
+                    const clamp = (val, max) => typeof val === 'string' ? val.substring(0, max) : val;
                     const existing = room.peerData.get(socket.id) || { peerId: mapping.peerId };
                     room.peerData.set(socket.id, { 
                         ...existing,
-                        username: data.username !== undefined ? data.username : existing.username,
-                        tabTitle: data.tabTitle !== undefined ? data.tabTitle : existing.tabTitle,
-                        mediaTitle: data.mediaTitle !== undefined ? data.mediaTitle : existing.mediaTitle,
-                        playbackState: data.playbackState !== undefined ? data.playbackState : existing.playbackState,
-                        currentTime: data.currentTime !== undefined ? data.currentTime : existing.currentTime,
-                        volume: data.volume !== undefined ? data.volume : existing.volume,
-                        muted: data.muted !== undefined ? data.muted : existing.muted,
+                        username:      data.username      !== undefined ? clamp(data.username, 30)   : existing.username,
+                        tabTitle:      data.tabTitle      !== undefined ? clamp(data.tabTitle, 100)  : existing.tabTitle,
+                        mediaTitle:    data.mediaTitle    !== undefined ? clamp(data.mediaTitle, 100) : existing.mediaTitle,
+                        playbackState: data.playbackState !== undefined ? data.playbackState          : existing.playbackState,
+                        currentTime:   data.currentTime   !== undefined ? data.currentTime            : existing.currentTime,
+                        volume:        data.volume        !== undefined ? data.volume                 : existing.volume,
+                        muted:         data.muted         !== undefined ? data.muted                  : existing.muted,
                         lastSeen: Date.now()
                     });
 

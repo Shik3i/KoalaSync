@@ -426,7 +426,6 @@ function addToHistory(action, senderId) {
 
 // --- Event Handlers ---
 function handleServerEvent(event, data) {
-    
     switch (event) {
         case EVENTS.ROOM_DATA:
             currentRoom = data;
