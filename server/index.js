@@ -113,6 +113,51 @@ function checkEventRate(socketId) {
     return entry.count <= 30;
 }
 
+/**
+ * Central peer teardown. Removes a socket from all room state and notifies
+ * remaining peers. Call this from every disconnect/leave/reaper/dedupe path.
+ *
+ * @param {string}  socketId   - The socket.id being removed.
+ * @param {string}  roomId     - The room it belongs to.
+ * @param {string}  reason     - Log label ('disconnect', 'leave', 'reaper', 'dedupe', 'room-switch').
+ * @param {boolean} [emitLeave=true] - Set false when the socket.io room leave
+ *                                     is handled by the caller (e.g. reaper calls
+ *                                     socket.leave() before us, or dedupe calls
+ *                                     oldSocket.leave() before disconnecting).
+ */
+function removePeerFromRoom(socketId, roomId, reason, emitLeave = true) {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const peerData = room.peerData.get(socketId);
+    if (!peerData) return; // Already cleaned up
+
+    const { peerId } = peerData;
+
+    // 1. Remove from room data structures
+    room.peers.delete(socketId);
+    room.peerIds.delete(socketId);
+    room.peerData.delete(socketId);
+
+    // 2. Remove from global maps
+    socketToRoom.delete(socketId);
+    if (peerToSocket.get(peerId) === socketId) {
+        peerToSocket.delete(peerId);
+    }
+
+    // 3. Notify remaining peers (use io.to so the removed socket itself
+    //    doesn't receive it — it has already left or is disconnecting)
+    io.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
+
+    // 4. Delete empty room
+    if (room.peers.size === 0) {
+        rooms.delete(roomId);
+        log('ROOM', `Deleted empty room after ${reason}: ${roomId.substring(0, 3)}***`);
+    }
+
+    log('ROOM', `Peer ${peerId} removed (${reason}) from room ${roomId.substring(0, 3)}***`);
+}
+
 io.on('connection', (socket) => {
     const clientIp = socket.handshake.address;
     
@@ -171,14 +216,7 @@ io.on('connection', (socket) => {
             }
             if (oldMapping && oldMapping.roomId !== roomId) {
                 socket.leave(oldMapping.roomId);
-                const oldRoom = rooms.get(oldMapping.roomId);
-                if (oldRoom) {
-                    oldRoom.peers.delete(socket.id);
-                    oldRoom.peerIds.delete(socket.id);
-                    oldRoom.peerData.delete(socket.id);
-                    socket.to(oldMapping.roomId).emit(EVENTS.PEER_STATUS, { peerId: oldMapping.peerId, status: 'left' });
-                    if (oldRoom.peers.size === 0) rooms.delete(oldMapping.roomId);
-                }
+                removePeerFromRoom(socket.id, oldMapping.roomId, 'room-switch');
             }
 
             const ip = socket.handshake.address;
@@ -228,11 +266,7 @@ io.on('connection', (socket) => {
                             oldSocket.disconnect(true);
                             log('DEDUPE', `Kicked old session for peer ${peerId}`);
                         }
-                        room.peers.delete(sid);
-                        room.peerIds.delete(sid);
-                        room.peerData.delete(sid);
-                        socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId: data.peerId, status: 'left' });
-                        log('ROOM', `Deduplicated peer ${peerId} from room ${roomId}`);
+                        removePeerFromRoom(sid, roomId, 'dedupe');
                     }
                 }
             }
@@ -317,23 +351,8 @@ io.on('connection', (socket) => {
     socket.on(EVENTS.LEAVE_ROOM, () => {
         const mapping = socketToRoom.get(socket.id);
         if (mapping) {
-            const { roomId, peerId } = mapping;
-            socket.leave(roomId);
-            const room = rooms.get(roomId);
-            if (room) {
-                room.peers.delete(socket.id);
-                room.peerIds.delete(socket.id);
-                room.peerData.delete(socket.id);
-                socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
-                if (room.peers.size === 0) {
-                    rooms.delete(roomId);
-                    log('ROOM', `Deleted empty room: ${roomId.substring(0, 3)}***`);
-                }
-            }
-            socketToRoom.delete(socket.id);
-            if (peerToSocket.get(peerId) === socket.id) {
-                peerToSocket.delete(peerId);
-            }
+            socket.leave(mapping.roomId);
+            removePeerFromRoom(socket.id, mapping.roomId, 'leave');
         }
     });
 
@@ -359,22 +378,10 @@ io.on('connection', (socket) => {
         eventCounts.delete(socket.id);
         const mapping = socketToRoom.get(socket.id);
         if (mapping) {
-            const { roomId, peerId } = mapping;
-            const room = rooms.get(roomId);
-            if (room) {
-                room.peers.delete(socket.id);
-                room.peerIds.delete(socket.id);
-                room.peerData.delete(socket.id);
-                socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
-                if (room.peers.size === 0) {
-                    rooms.delete(roomId);
-                    log('ROOM', `Deleted empty room (after disconnect): ${roomId.substring(0, 3)}***`);
-                }
-            }
-            socketToRoom.delete(socket.id);
-            if (peerToSocket.get(peerId) === socket.id) {
-                peerToSocket.delete(peerId);
-            }
+            // Socket is already disconnected — no need to call socket.leave().
+            // removePeerFromRoom uses io.to() for notifications, which correctly
+            // excludes this dead socket since it has already left all rooms.
+            removePeerFromRoom(socket.id, mapping.roomId, 'disconnect');
         }
     });
 });
@@ -387,22 +394,20 @@ setInterval(() => {
     
     for (const [roomId, room] of rooms) {
         // 1. Prune dead peers
+        // Snapshot keys first — we must not mutate peerData while iterating it.
+        const staleSids = [];
         for (const [sid, data] of room.peerData.entries()) {
             if (data.lastSeen && data.lastSeen < peerCutoff) {
-                const socket = io.sockets.sockets.get(sid);
-                if (socket) socket.leave(roomId);
-                
-                room.peers.delete(sid);
-                room.peerIds.delete(sid);
-                room.peerData.delete(sid);
-                socketToRoom.delete(sid);
-                if (peerToSocket.get(data.peerId) === sid) {
-                    peerToSocket.delete(data.peerId);
-                }
-                
-                io.to(roomId).emit(EVENTS.PEER_STATUS, { peerId: data.peerId, status: 'left' });
-                log('CLEANUP', `Pruned dead peer ${data.peerId} from room ${roomId}`);
+                staleSids.push(sid);
             }
+        }
+        for (const sid of staleSids) {
+            // Gracefully evict the socket from the Socket.IO room if it is
+            // still technically connected (zombie with no heartbeat).
+            const deadSocket = io.sockets.sockets.get(sid);
+            if (deadSocket) deadSocket.leave(roomId);
+            log('CLEANUP', `Pruning dead peer from room ${roomId.substring(0, 3)}***`);
+            removePeerFromRoom(sid, roomId, 'reaper');
         }
 
         // 2. Prune empty or inactive rooms
