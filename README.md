@@ -2,6 +2,8 @@
 
 KoalaSync is a premium, lightweight Chrome Extension and Relay Server for synchronized video playback across any website (YouTube, Twitch, Netflix, and custom HTML5 players).
 
+**Latest Version**: `v1.2.0` (Episode Auto-Sync)
+
 > [!TIP]
 > **New Developers & AI Agents**: Please read [AI_INIT.md](AI_INIT.md) before starting work.
 
@@ -17,6 +19,7 @@ KoalaSync is a premium, lightweight Chrome Extension and Relay Server for synchr
 
 ## Key Features
 - **Global Synchronization**: Synchronize Play, Pause, and Seeking on any website with a `<video>` tag.
+- **Episode Auto-Sync**: Perfectly sync series binges. All peers wait until everyone has loaded the next episode before starting together (v1.2.0+).
 - **Smart Matching**: Automatically highlights and sorts tabs containing matching video titles.
 - **Noise Filtering**: Built-in domain blacklist to hide non-video sites from selection.
 - **Smart Identity**: Customizable usernames combined with unique hexadecimal peer IDs.
@@ -24,6 +27,7 @@ KoalaSync is a premium, lightweight Chrome Extension and Relay Server for synchr
 - **Zero-Latency Relay**: Custom Socket.IO wire protocol implementation for maximum performance.
 - **Integrated Diagnostics**: A dedicated "Dev" tab for real-time video state debugging.
 - **Seamless Invitations**: Smart invitation links that automatically configure the server and room credentials for your friends.
+
 
 ## Setup Instructions
 
