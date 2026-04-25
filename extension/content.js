@@ -30,6 +30,13 @@
     let expectedEvents = new Set();
     let expectedTimeouts = {};
 
+    // --- Seek Relay Filtering ---
+    // Minimum seek delta (seconds) to report. Prevents HLS/DASH buffering micro-seeks
+    // from being relayed to peers as user-initiated seeks.
+    const MIN_SEEK_DELTA = 3.0;
+    let lastReportedSeekTime = null;  // last currentTime we relayed as a SEEK
+    let seekDebounceTimer = null;     // debounce timer for rapid seek events
+
     // --- Episode Auto-Sync State ---
     let lastKnownMediaTitle = null;
     let episodeTransitionDebounce = null;
@@ -394,7 +401,39 @@
 
     const handlePlay = () => reportEvent(EVENTS.PLAY);
     const handlePause = () => reportEvent(EVENTS.PAUSE);
-    const handleSeeked = () => reportEvent(EVENTS.SEEK);
+
+    // Seek filtering: ignore HLS/DASH buffering micro-seeks.
+    // Only relay if delta >= MIN_SEEK_DELTA AND not already debouncing.
+    const handleSeeked = () => {
+        const video = findVideo();
+        if (!video) return;
+        const current = video.currentTime;
+        if (!Number.isFinite(current)) return;
+
+        // Step 1: Check expectedEvents (programmatic seek suppression)
+        if (expectedEvents.has('seek')) {
+            expectedEvents.delete('seek');
+            lastReportedSeekTime = current; // Update baseline so next user seek is relative to here
+            return;
+        }
+
+        // Step 2: Delta check — skip micro-seeks (buffering, chapter markers, etc.)
+        if (lastReportedSeekTime !== null && Math.abs(current - lastReportedSeekTime) < MIN_SEEK_DELTA) {
+            return; // Too small — likely an internal player seek, not user-initiated
+        }
+
+        // Step 3: Debounce rapid consecutive seeks (e.g. scrubbing)
+        // — wait 800ms for the user to settle before relaying
+        if (seekDebounceTimer) clearTimeout(seekDebounceTimer);
+        seekDebounceTimer = setTimeout(() => {
+            seekDebounceTimer = null;
+            const v = findVideo();
+            if (!v) return;
+            const settled = v.currentTime;
+            lastReportedSeekTime = settled;
+            reportEvent(EVENTS.SEEK);
+        }, 800);
+    };
 
     let lastVideoSrc = null;
 
