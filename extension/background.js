@@ -1,4 +1,4 @@
-import { EVENTS, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, APP_VERSION } from './shared/constants.js';
+import { EVENTS, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, APP_VERSION, EPISODE_LOBBY_TIMEOUT } from './shared/constants.js';
 
 // --- State Management ---
 let socket = null;
@@ -29,7 +29,8 @@ function ensureState() {
             chrome.storage.session.get([
                 'logs', 'history', 'currentRoom', 'lastActionState', 
                 'eventQueue', 'isForceSyncInitiator', 'forceSyncAcks', 
-                'forceSyncDeadline', 'reconnectFailed', 'reconnectStartTime', 'currentTabId', 'currentTabTitle'
+                'forceSyncDeadline', 'reconnectFailed', 'reconnectStartTime', 'currentTabId', 'currentTabTitle',
+                'episodeLobby'
             ], (data) => {
                 if (data.currentTabId !== undefined) currentTabId = data.currentTabId;
                 if (data.currentTabTitle !== undefined) currentTabTitle = data.currentTabTitle;
@@ -66,6 +67,17 @@ function ensureState() {
                     }
                 }
 
+                // Recover Episode Lobby
+                if (data.episodeLobby && !episodeLobby) {
+                    episodeLobby = data.episodeLobby;
+                    const lobbyRemaining = (episodeLobby.createdAt + EPISODE_LOBBY_TIMEOUT) - Date.now();
+                    if (lobbyRemaining > 0) {
+                        episodeLobbyTimeout = setTimeout(() => cancelEpisodeLobby('Timeout'), lobbyRemaining);
+                    } else {
+                        cancelEpisodeLobby('Timeout (recovered)');
+                    }
+                }
+
                 storageInitialized = true;
                 
                 // Process any early logs/history that weren't captured in the spread
@@ -98,6 +110,10 @@ let reconnectFailed = false; // New: true if we hit the 5-min cap
 let isForceSyncInitiator = false;
 let forceSyncAcks = new Set();
 let forceSyncTimeout = null;
+
+// Episode Auto-Sync Lobby
+let episodeLobby = null; // { expectedTitle, initiatorPeerId, readyPeers: [], createdAt }
+let episodeLobbyTimeout = null;
 
 // --- Storage Utils ---
 
@@ -531,6 +547,11 @@ function handleServerEvent(event, data) {
                     currentRoom.peers = currentRoom.peers.filter(p => (p.peerId || p) !== data.peerId);
                     if (storageInitialized) chrome.storage.session.set({ currentRoom });
                     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+
+                    // Episode Lobby: Handle peer departure
+                    if (episodeLobby) {
+                        checkEpisodeLobbyPeerDeparture();
+                    }
                 } else {
                     // Heartbeat/Update: Update tabTitle for matching
                     const peer = currentRoom.peers.find(p => (p.peerId || p) === data.peerId);
@@ -555,6 +576,51 @@ function handleServerEvent(event, data) {
                 }
             }
             break;
+        case EVENTS.EPISODE_LOBBY:
+            if (data.senderId && data.expectedTitle) {
+                addLog(`Episode lobby from ${data.senderId}: "${data.expectedTitle}"`, 'info');
+                // If we already have a lobby for this same title, treat as dedup
+                if (episodeLobby && episodeLobby.expectedTitle === data.expectedTitle) {
+                    break; // Already tracking this lobby
+                }
+                // Cancel any existing lobby before starting a new one
+                if (episodeLobby) clearEpisodeLobbyState();
+                
+                episodeLobby = {
+                    expectedTitle: data.expectedTitle,
+                    initiatorPeerId: data.senderId,
+                    readyPeers: [],
+                    createdAt: Date.now()
+                };
+                persistEpisodeLobby();
+                broadcastLobbyUpdate();
+
+                // Start timeout
+                episodeLobbyTimeout = setTimeout(() => cancelEpisodeLobby('Timeout'), EPISODE_LOBBY_TIMEOUT);
+
+                // Forward to content script to start polling
+                if (currentTabId) {
+                    const tabId = parseInt(currentTabId);
+                    if (!isNaN(tabId)) {
+                        chrome.tabs.sendMessage(tabId, {
+                            type: 'EPISODE_LOBBY',
+                            expectedTitle: data.expectedTitle
+                        }).catch(() => {});
+                    }
+                }
+            }
+            break;
+        case EVENTS.EPISODE_READY:
+            if (episodeLobby && data.senderId) {
+                if (!episodeLobby.readyPeers.includes(data.senderId)) {
+                    episodeLobby.readyPeers.push(data.senderId);
+                    persistEpisodeLobby();
+                    broadcastLobbyUpdate();
+                    addLog(`Episode ready from ${data.senderId} (${episodeLobby.readyPeers.length})`, 'info');
+                    checkEpisodeLobbyCompletion();
+                }
+            }
+            break;
         default:
             addLog(`Received unknown event from server: ${event}`, 'warn');
             break;
@@ -573,6 +639,102 @@ function executeForceSync() {
     emit(EVENTS.FORCE_SYNC_EXECUTE, {});
     routeToContent(EVENTS.FORCE_SYNC_EXECUTE, {});
     addLog('Force Sync Executed', 'success');
+}
+
+// --- Episode Auto-Sync Lobby Functions ---
+function persistEpisodeLobby() {
+    if (storageInitialized) chrome.storage.session.set({ episodeLobby });
+}
+
+function broadcastLobbyUpdate() {
+    chrome.runtime.sendMessage({ type: 'LOBBY_UPDATE', lobby: episodeLobby }).catch(() => {});
+}
+
+function clearEpisodeLobbyState() {
+    if (episodeLobbyTimeout) clearTimeout(episodeLobbyTimeout);
+    episodeLobbyTimeout = null;
+    episodeLobby = null;
+    if (storageInitialized) chrome.storage.session.set({ episodeLobby: null });
+    broadcastLobbyUpdate();
+
+    // Notify content script to stop polling
+    if (currentTabId) {
+        const tabId = parseInt(currentTabId);
+        if (!isNaN(tabId)) {
+            chrome.tabs.sendMessage(tabId, { type: 'EPISODE_LOBBY_CANCEL' }).catch(() => {});
+        }
+    }
+}
+
+function cancelEpisodeLobby(reason) {
+    if (!episodeLobby) return;
+    const title = episodeLobby.expectedTitle;
+    clearEpisodeLobbyState();
+    addLog(`Episode lobby cancelled: ${reason} for "${title}"`, 'warn');
+
+    // Chrome notification on failure (per Q2: only notify on failure)
+    chrome.notifications.create(`episode_${Date.now()}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'KoalaSync — Episode Sync Failed',
+        message: `Auto-sync cancelled: ${reason}. You may need to manually sync.`,
+        priority: 1
+    });
+}
+
+function executeEpisodeLobby() {
+    if (!episodeLobby) return;
+    const title = episodeLobby.expectedTitle;
+    clearEpisodeLobbyState();
+    addLog(`Episode lobby complete: Starting "${title}" via Force Sync`, 'success');
+
+    // Trigger a standard Force Sync at targetTime 0.0
+    isForceSyncInitiator = true;
+    forceSyncAcks.clear();
+    const deadline = Date.now() + 5000;
+    chrome.storage.session.set({ 
+        isForceSyncInitiator: true, 
+        forceSyncAcks: [], 
+        forceSyncDeadline: deadline 
+    });
+
+    const syncPayload = { targetTime: 0.0 };
+    emit(EVENTS.FORCE_SYNC_PREPARE, { ...syncPayload, peerId });
+    routeToContent(EVENTS.FORCE_SYNC_PREPARE, syncPayload);
+
+    forceSyncTimeout = setTimeout(() => {
+        if (isForceSyncInitiator) {
+            addLog('Force Sync (Episode): Timeout waiting for ACKs, executing anyway...', 'warn');
+            executeForceSync();
+        }
+    }, 5000);
+}
+
+function checkEpisodeLobbyCompletion() {
+    if (!episodeLobby || !currentRoom) return;
+    const peerCount = currentRoom.peers ? currentRoom.peers.length : 1;
+    if (episodeLobby.readyPeers.length >= peerCount) {
+        executeEpisodeLobby();
+    }
+}
+
+function checkEpisodeLobbyPeerDeparture() {
+    if (!episodeLobby || !currentRoom) return;
+    const remainingPeerIds = currentRoom.peers.map(p => typeof p === 'object' ? p.peerId : p);
+    
+    // If only we remain, cancel the lobby
+    if (remainingPeerIds.length <= 1) {
+        cancelEpisodeLobby('All other peers left');
+        return;
+    }
+
+    // Filter readyPeers to only include peers still in the room
+    episodeLobby.readyPeers = episodeLobby.readyPeers.filter(id => remainingPeerIds.includes(id));
+    persistEpisodeLobby();
+    broadcastLobbyUpdate();
+
+    // Re-check if all remaining peers are now ready
+    checkEpisodeLobbyCompletion();
 }
 
 function updateLastAction(action, senderId, timestamp = Date.now()) {
@@ -686,7 +848,8 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             peerId, 
             peers: currentRoom ? currentRoom.peers : [],
             lastActionState,
-            targetTabId: currentTabId
+            targetTabId: currentTabId,
+            episodeLobby: episodeLobby
         });
     } else if (message.type === 'LEAVE_ROOM') {
         emit(EVENTS.LEAVE_ROOM, { peerId });
@@ -699,11 +862,15 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         forceSyncAcks.clear();
         if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
 
+        // Cancel any active episode lobby
+        clearEpisodeLobbyState();
+
         chrome.storage.session.set({ 
             currentRoom: null,
             isForceSyncInitiator: false,
             forceSyncAcks: [],
-            forceSyncDeadline: null
+            forceSyncDeadline: null,
+            episodeLobby: null
         });
         addLog('Left Room', 'info');
         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
@@ -890,6 +1057,96 @@ async function handleAsyncMessage(message, sender, sendResponse) {
     } else if (message.type === 'LOG') {
         addLog(`[Content] ${message.message}`, message.level || 'info');
         sendResponse({ status: 'ok' });
+    } else if (message.type === 'EPISODE_CHANGED') {
+        // Content script detected an episode transition
+        if (sender.tab) {
+            const senderTabId = sender.tab.id;
+            if (!currentTabId || currentTabId !== senderTabId) {
+                sendResponse({ status: 'ignored_unselected_tab' });
+                return;
+            }
+        }
+
+        const newTitle = message.payload && message.payload.newTitle;
+        if (!newTitle) {
+            sendResponse({ status: 'no_title' });
+            return;
+        }
+
+        // Check setting
+        const epSettings = await chrome.storage.sync.get(['autoSyncNextEpisode']);
+        if (!epSettings.autoSyncNextEpisode) {
+            addLog(`Episode change detected ("${newTitle}") but Auto-Sync is disabled.`, 'info');
+            sendResponse({ status: 'disabled' });
+            return;
+        }
+
+        // If lobby already exists for this title, just mark self ready
+        if (episodeLobby && episodeLobby.expectedTitle === newTitle) {
+            if (!episodeLobby.readyPeers.includes(peerId)) {
+                episodeLobby.readyPeers.push(peerId);
+                persistEpisodeLobby();
+                broadcastLobbyUpdate();
+                emit(EVENTS.EPISODE_READY, { peerId, title: newTitle });
+                checkEpisodeLobbyCompletion();
+            }
+            sendResponse({ status: 'ready_sent' });
+            return;
+        }
+
+        // Cancel any existing lobby for a different episode
+        if (episodeLobby) clearEpisodeLobbyState();
+
+        // Create new lobby
+        episodeLobby = {
+            expectedTitle: newTitle,
+            initiatorPeerId: peerId,
+            readyPeers: [peerId], // We are already ready
+            createdAt: Date.now()
+        };
+        persistEpisodeLobby();
+        broadcastLobbyUpdate();
+        addLog(`Episode lobby created: "${newTitle}"`, 'info');
+
+        // Tell content script to pause the video and start polling
+        // (This is the only place we pause — after confirming the feature is enabled)
+        if (sender.tab && sender.tab.id) {
+            chrome.tabs.sendMessage(sender.tab.id, {
+                type: 'PAUSE_FOR_LOBBY',
+                expectedTitle: newTitle
+            }).catch(() => {});
+        }
+
+        // Broadcast to room
+        emit(EVENTS.EPISODE_LOBBY, { peerId, expectedTitle: newTitle });
+
+        // Start timeout (Q1: Option B — cancel on timeout)
+        episodeLobbyTimeout = setTimeout(() => cancelEpisodeLobby('Timeout — not all peers loaded the episode'), EPISODE_LOBBY_TIMEOUT);
+
+        // Immediate check — maybe we're the only one in the room
+        checkEpisodeLobbyCompletion();
+
+        sendResponse({ status: 'lobby_created' });
+    } else if (message.type === 'EPISODE_READY_LOCAL') {
+        // Content script confirmed it loaded the lobby episode
+        if (episodeLobby && message.payload && message.payload.title === episodeLobby.expectedTitle) {
+            if (!episodeLobby.readyPeers.includes(peerId)) {
+                episodeLobby.readyPeers.push(peerId);
+                persistEpisodeLobby();
+                broadcastLobbyUpdate();
+                emit(EVENTS.EPISODE_READY, { peerId, title: message.payload.title });
+                addLog(`Local episode ready: "${message.payload.title}"`, 'success');
+                checkEpisodeLobbyCompletion();
+            }
+        }
+        sendResponse({ status: 'ok' });
+    } else if (message.type === 'CONTENT_BOOT') {
+        // Content script re-injected, check if there's an active lobby
+        if (episodeLobby) {
+            sendResponse({ lobbyActive: true, expectedTitle: episodeLobby.expectedTitle });
+        } else {
+            sendResponse({ lobbyActive: false });
+        }
     } else {
         // Final fallback to prevent channel hanging
         sendResponse({ error: 'unhandled_message' });

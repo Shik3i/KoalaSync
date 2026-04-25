@@ -287,6 +287,16 @@
             <div style="text-align:center; color: var(--text-muted); font-size: 11px; padding-top: 20px;">No recent commands</div>
         </div>
 
+        <!-- Episode Auto-Sync Lobby Status -->
+        <div id="episodeLobbyCard" class="info-card" style="display:none; margin-bottom: 15px; border-left: 4px solid var(--star); animation: fadeIn 0.3s ease-out;">
+            <div style="display:flex; align-items:center; gap: 6px; margin-bottom: 6px;">
+                <span style="font-size: 16px;">⏳</span>
+                <span style="font-weight: 700; color: var(--star); font-size: 12px;">EPISODE LOBBY</span>
+            </div>
+            <div id="lobbyTitle" style="font-size: 11px; color: var(--text); margin-bottom: 6px; font-weight: 600;"></div>
+            <div id="lobbyPeerStatus" style="font-size: 10px; color: var(--text-muted);"></div>
+        </div>
+
         <div id="peerListSync" class="info-card" style="display:none;"></div>
     </div>
     
@@ -301,10 +311,16 @@
             <label style="margin-bottom: 0;">Filter Noise Tabs</label>
             <input type="checkbox" id="filterNoise" style="width: auto;" checked>
         </div>
+
+        <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; background: var(--card); padding: 10px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #334155;">
+            <label style="margin-bottom: 0;">Auto-Sync Next Episode</label>
+            <input type="checkbox" id="autoSyncNextEpisode" style="width: auto;">
+        </div>
         
         <div style="font-size: 11px; color: var(--text-muted); padding: 8px;">
             <p>• Username helps others identify you.</p>
             <p>• Noise filtering uses a blacklist to hide common non-video sites (e.g. Search, Social Media) from the Target Tab selector.</p>
+            <p>• Auto-Sync will pause and wait for all peers when an episode changes, then sync-start together.</p>
         </div>
 
         <div style="margin-top: 15px; padding: 8px; border-top: 1px solid var(--card);">

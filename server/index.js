@@ -309,7 +309,8 @@ io.on('connection', (socket) => {
     const relayEvents = [
         EVENTS.PLAY, EVENTS.PAUSE, EVENTS.SEEK, 
         EVENTS.PEER_STATUS, EVENTS.FORCE_SYNC_PREPARE, 
-        EVENTS.FORCE_SYNC_ACK, EVENTS.FORCE_SYNC_EXECUTE
+        EVENTS.FORCE_SYNC_ACK, EVENTS.FORCE_SYNC_EXECUTE,
+        EVENTS.EPISODE_LOBBY, EVENTS.EPISODE_READY
     ];
 
     relayEvents.forEach(eventName => {

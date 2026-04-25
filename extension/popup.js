@@ -40,7 +40,11 @@ const elements = {
     peerListSync: document.getElementById('peerListSync'),
     videoDebug: document.getElementById('videoDebug'),
     playBtn: document.getElementById('playBtn'),
-    pauseBtn: document.getElementById('pauseBtn')
+    pauseBtn: document.getElementById('pauseBtn'),
+    autoSyncNextEpisode: document.getElementById('autoSyncNextEpisode'),
+    episodeLobbyCard: document.getElementById('episodeLobbyCard'),
+    lobbyTitle: document.getElementById('lobbyTitle'),
+    lobbyPeerStatus: document.getElementById('lobbyPeerStatus')
 };
 
 let localPeerId = null;
@@ -49,12 +53,13 @@ let lastPeersJson = null;
 // --- Initialization ---
 async function init() {
     // Load Settings
-    const data = await chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'filterNoise', 'username']);
+    const data = await chrome.storage.sync.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'filterNoise', 'username', 'autoSyncNextEpisode']);
     elements.serverUrl.value = data.serverUrl || '';
     elements.roomId.value = data.roomId || '';
     elements.password.value = data.password || '';
     elements.username.value = data.username || '';
     elements.filterNoise.checked = data.filterNoise !== false;
+    elements.autoSyncNextEpisode.checked = !!data.autoSyncNextEpisode;
     
     // Set Version Info
     const versionEl = document.getElementById('appVersion');
@@ -83,6 +88,9 @@ async function init() {
             
             // Populate Tabs using the background's targetTabId
             await populateTabs(res.peers, res.targetTabId);
+
+            // Render lobby status if active
+            if (res.episodeLobby) updateLobbyUI(res.episodeLobby, res.peers);
         } else {
             await populateTabs();
         }
@@ -630,6 +638,10 @@ elements.filterNoise.addEventListener('change', () => {
     });
 });
 
+elements.autoSyncNextEpisode.addEventListener('change', () => {
+    chrome.storage.sync.set({ autoSyncNextEpisode: elements.autoSyncNextEpisode.checked });
+});
+
 elements.serverUrl.addEventListener('input', () => {
     chrome.storage.sync.set({ serverUrl: elements.serverUrl.value });
 });
@@ -883,6 +895,15 @@ chrome.runtime.onMessage.addListener((msg) => {
             // Join failed: reset UI state
             updateUI(null, null);
         }
+    } else if (msg.type === 'LOBBY_UPDATE') {
+        // Episode lobby state changed
+        chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+            if (res && res.peers) {
+                updateLobbyUI(msg.lobby, res.peers);
+            } else {
+                updateLobbyUI(msg.lobby, []);
+            }
+        });
     }
 });
 
@@ -977,3 +998,43 @@ function refreshDebugInfo() {
 
 init();
 setInterval(refreshLogs, 5000);
+
+// --- Episode Lobby UI ---
+function updateLobbyUI(lobby, peers) {
+    if (!elements.episodeLobbyCard) return;
+
+    if (!lobby) {
+        elements.episodeLobbyCard.style.display = 'none';
+        return;
+    }
+
+    elements.episodeLobbyCard.style.display = 'block';
+    elements.lobbyTitle.textContent = `\u{1F3AC} Waiting for: "${lobby.expectedTitle}"`;
+
+    // Build peer readiness list
+    const readySet = new Set(lobby.readyPeers || []);
+    const peerLines = [];
+
+    if (peers && peers.length > 0) {
+        peers.forEach(p => {
+            const pId = typeof p === 'object' ? p.peerId : p;
+            const pName = (typeof p === 'object' && p.username) ? p.username : pId;
+            const isReady = readySet.has(pId);
+            const icon = isReady ? '\u2705' : '\u23f3';
+            const label = isReady ? 'Ready' : 'Loading...';
+            peerLines.push(`${icon} ${pName} \u2014 ${label}`);
+        });
+    }
+
+    if (peerLines.length > 0) {
+        elements.lobbyPeerStatus.textContent = peerLines.join(' | ');
+    } else {
+        elements.lobbyPeerStatus.textContent = 'Waiting for peers...';
+    }
+
+    // Show elapsed time
+    if (lobby.createdAt) {
+        const elapsed = Math.floor((Date.now() - lobby.createdAt) / 1000);
+        elements.lobbyPeerStatus.textContent += ` (${elapsed}s)`;
+    }
+}

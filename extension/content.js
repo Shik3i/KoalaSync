@@ -22,11 +22,19 @@
         FORCE_SYNC_PREPARE: "force_sync_prepare",
         FORCE_SYNC_ACK: "force_sync_ack",
         FORCE_SYNC_EXECUTE: "force_sync_execute",
-        PEER_STATUS: "peer_status"
+        PEER_STATUS: "peer_status",
+        EPISODE_LOBBY: "episode_lobby",
+        EPISODE_READY: "episode_ready"
     };
 
     let expectedEvents = new Set();
     let expectedTimeouts = {};
+
+    // --- Episode Auto-Sync State ---
+    let lastKnownMediaTitle = null;
+    let episodeTransitionDebounce = null;
+    let pendingLobbyTitle = null; // Title we're waiting to match (from remote lobby)
+    let lobbyPollTimer = null;
 
     function expectEvent(state) {
         expectedEvents.add(state);
@@ -45,6 +53,100 @@
     function findVideo() {
         const videos = document.querySelectorAll('video');
         return videos.length > 0 ? videos[0] : null;
+    }
+
+    // --- Episode Auto-Sync: Detection ---
+    function getMediaTitle() {
+        return (navigator.mediaSession && navigator.mediaSession.metadata)
+            ? navigator.mediaSession.metadata.title
+            : null;
+    }
+
+    function checkEpisodeTransition() {
+        const currentTitle = getMediaTitle();
+        const video = findVideo();
+
+        // Only trigger if: we had a previous title, the title changed,
+        // a video exists, and we're near the start of new content.
+        if (lastKnownMediaTitle && currentTitle
+            && currentTitle !== lastKnownMediaTitle
+            && video
+            && video.currentTime < 5
+            && video.readyState >= 1) {
+            onEpisodeTransition(currentTitle);
+        }
+
+        // Always track the latest known title
+        if (currentTitle) lastKnownMediaTitle = currentTitle;
+    }
+
+    function onEpisodeTransition(newTitle) {
+        // Debounce: prevent duplicate fires from multiple signals
+        if (episodeTransitionDebounce) return;
+        episodeTransitionDebounce = setTimeout(() => {
+            episodeTransitionDebounce = null;
+        }, 2000);
+
+        reportLog(`Episode transition detected: "${newTitle}"`, 'info');
+
+        // Do NOT pause here. We notify background.js first.
+        // Background checks the setting; if enabled it creates a lobby
+        // and sends back PAUSE_FOR_LOBBY so we only freeze if the feature is on.
+        chrome.runtime.sendMessage({
+            type: 'EPISODE_CHANGED',
+            payload: { newTitle }
+        }).catch(() => {});
+    }
+
+    function checkAndReportLobbyReady(expectedTitle) {
+        const video = findVideo();
+        const currentTitle = getMediaTitle();
+
+        if (video && currentTitle && currentTitle === expectedTitle
+            && video.currentTime < 5 && video.readyState >= 1) {
+            // Match! Pause at start and report ready.
+            if (!video.paused) {
+                expectEvent('paused');
+                video.pause();
+            }
+            stopLobbyPoll();
+            chrome.runtime.sendMessage({
+                type: 'EPISODE_READY_LOCAL',
+                payload: { title: currentTitle }
+            }).catch(() => {});
+            reportLog(`Episode lobby: Ready for "${currentTitle}"`, 'success');
+            return true;
+        }
+        return false;
+    }
+
+    function startLobbyPoll(expectedTitle) {
+        stopLobbyPoll();
+        pendingLobbyTitle = expectedTitle;
+
+        // NOTE: Do NOT pause here. Three callers reach this function:
+        // 1. PAUSE_FOR_LOBBY (initiator): already paused by that handler before calling us.
+        // 2. EPISODE_LOBBY (non-initiator): peer may still be on the PREVIOUS episode — pausing
+        //    would freeze them mid-episode. The pause happens inside checkAndReportLobbyReady()
+        //    only once their title actually matches.
+        // 3. CONTENT_BOOT recovery: same reasoning as (2).
+
+        // Check immediately
+        if (checkAndReportLobbyReady(expectedTitle)) return;
+
+        // Poll every 2 seconds — no log spam, internal only
+        lobbyPollTimer = setInterval(() => {
+            checkAndReportLobbyReady(expectedTitle);
+        }, 2000);
+    }
+
+
+    function stopLobbyPoll() {
+        pendingLobbyTitle = null;
+        if (lobbyPollTimer) {
+            clearInterval(lobbyPollTimer);
+            lobbyPollTimer = null;
+        }
     }
 
     // --- Helper: YouTube/Twitch specific actions ---
@@ -181,9 +283,43 @@
                     });
                 }
             } else if (action === EVENTS.FORCE_SYNC_EXECUTE) {
+                stopLobbyPoll(); // Clear any pending lobby on force sync
                 tryMediaAction(EVENTS.PLAY);
                 chrome.runtime.sendMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp });
             }
+        }
+
+        // Episode Auto-Sync: Lobby notification from background
+        if (message.type === 'EPISODE_LOBBY') {
+            const expectedTitle = message.expectedTitle;
+            if (expectedTitle) {
+                reportLog(`Episode lobby received: waiting for "${expectedTitle}"`, 'info');
+                startLobbyPoll(expectedTitle);
+            }
+            sendResponse({ status: 'ok' });
+            return true;
+        }
+
+        // Episode Auto-Sync: Lobby cancelled by background
+        if (message.type === 'EPISODE_LOBBY_CANCEL') {
+            stopLobbyPoll();
+            sendResponse({ status: 'ok' });
+            return true;
+        }
+
+        // Episode Auto-Sync: Background confirmed lobby created, pause the video
+        if (message.type === 'PAUSE_FOR_LOBBY') {
+            const video = findVideo();
+            if (video && !video.paused) {
+                expectEvent('paused');
+                video.pause();
+            }
+            // Start lobby poll now that we know the feature is enabled
+            if (message.expectedTitle) {
+                startLobbyPoll(message.expectedTitle);
+            }
+            sendResponse({ status: 'ok' });
+            return true;
         }
 
         if (message.type === 'GET_VIDEO_STATE') {
@@ -262,18 +398,30 @@
 
     let lastVideoSrc = null;
 
+    // Episode detection handler for loadeddata event
+    const handleLoadedData = () => {
+        checkEpisodeTransition();
+    };
+
     function setupListeners() {
         const video = findVideo();
         if (video) {
             video.removeEventListener('play', handlePlay);
             video.removeEventListener('pause', handlePause);
             video.removeEventListener('seeked', handleSeeked);
+            video.removeEventListener('loadeddata', handleLoadedData);
 
             video.addEventListener('play', handlePlay);
             video.addEventListener('pause', handlePause);
             video.addEventListener('seeked', handleSeeked);
+            video.addEventListener('loadeddata', handleLoadedData);
             video.dataset.koalaAttached = 'true';
             lastVideoSrc = video.currentSrc || video.src;
+
+            // Initialize episode tracking title on first attach
+            if (!lastKnownMediaTitle) {
+                lastKnownMediaTitle = getMediaTitle();
+            }
         }
     }
 
@@ -289,6 +437,10 @@
         const currentSrc = video.currentSrc || video.src;
 
         if (!video.dataset.koalaAttached || (lastVideoSrc && currentSrc && lastVideoSrc !== currentSrc)) {
+            // If src changed, also check for episode transition
+            if (lastVideoSrc && currentSrc && lastVideoSrc !== currentSrc) {
+                checkEpisodeTransition();
+            }
             setupListeners();
         }
     }
@@ -334,5 +486,13 @@
 
     // Initial Setup
     setupListeners();
+
+    // Episode Auto-Sync: Boot recovery — check if background has an active lobby
+    chrome.runtime.sendMessage({ type: 'CONTENT_BOOT' }, (res) => {
+        if (res && res.lobbyActive && res.expectedTitle) {
+            reportLog(`Boot: Active lobby detected for "${res.expectedTitle}"`, 'info');
+            startLobbyPoll(res.expectedTitle);
+        }
+    });
 
 })();

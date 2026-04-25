@@ -7,7 +7,7 @@
  */
 
 export const PROTOCOL_VERSION = "1.0.0";
-export const APP_VERSION = "1.1.4";
+export const APP_VERSION = "1.2.0";
 
 export const OFFICIAL_SERVER_URL = 'wss://sync.shik3i.net';
 export const OFFICIAL_LANDING_PAGE_URL = 'https://koalasync.shik3i.net';
@@ -32,8 +32,13 @@ export const EVENTS = {
     FORCE_SYNC_EXECUTE: "force_sync_execute",
     EVENT_ACK: "event_ack",
     GET_ROOMS: "get_rooms",
-    ROOM_LIST: "room_list"
+    ROOM_LIST: "room_list",
+
+    // Episode Auto-Sync
+    EPISODE_LOBBY: "episode_lobby",     // Broadcast: waiting for everyone on this episode
+    EPISODE_READY: "episode_ready"      // Response: loaded the episode and paused at 0:00
 };
 
 export const HEARTBEAT_INTERVAL = 15000; // 15s
 export const FORCE_SYNC_TIMEOUT = 5000; // 5s timeout for ACKs
+export const EPISODE_LOBBY_TIMEOUT = 60000; // 60s timeout for episode lobby
