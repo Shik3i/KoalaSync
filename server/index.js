@@ -23,7 +23,7 @@ const httpServer = createServer(app);
 // Socket.IO setup with security constraints
 const io = new Server(httpServer, {
     cors: {
-        origin: "*",
+        origin: ["https://koalasync.shik3i.net"],
         methods: ["GET", "POST"]
     },
     maxHttpBufferSize: 1024, // 1KB max per message

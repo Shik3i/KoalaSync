@@ -104,12 +104,26 @@ document.addEventListener('DOMContentLoaded', () => {
                             const banner = document.createElement('div');
                             banner.className = 'invite-banner';
                             banner.id = 'koala-banner';
-                            banner.innerHTML = `
-                                <div class="container" style="display:flex; justify-content:space-between; align-items:center;">
-                                    <span>🎫 Invitation for <b>${roomId}</b> detected!</span>
-                                    <a href="join.html${window.location.hash}" class="btn-banner">OPEN JOIN PAGE</a>
-                                </div>
-                            `;
+
+                            const container = document.createElement('div');
+                            container.className = 'container';
+                            container.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+
+                            const inviteSpan = document.createElement('span');
+                            inviteSpan.appendChild(document.createTextNode('🎫 Invitation for '));
+                            const boldRoom = document.createElement('b');
+                            boldRoom.textContent = roomId;
+                            inviteSpan.appendChild(boldRoom);
+                            inviteSpan.appendChild(document.createTextNode(' detected!'));
+
+                            const joinLink = document.createElement('a');
+                            joinLink.href = 'join.html' + window.location.hash;
+                            joinLink.className = 'btn-banner';
+                            joinLink.textContent = 'OPEN JOIN PAGE';
+
+                            container.appendChild(inviteSpan);
+                            container.appendChild(joinLink);
+                            banner.appendChild(container);
                             document.body.prepend(banner);
                         }
                     }
@@ -178,7 +192,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(() => window.close(), 3000);
                 } else {
                     banner.style.background = 'var(--error)';
-                    banner.innerHTML = `<div class="container">❌ Error: ${message}</div>`;
+                    banner.innerHTML = '';
+                    const errDiv = document.createElement('div');
+                    errDiv.className = 'container';
+                    errDiv.textContent = '❌ Error: ' + message;
+                    banner.appendChild(errDiv);
                 }
             }
         }

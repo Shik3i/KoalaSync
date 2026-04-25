@@ -8,7 +8,6 @@ let isConnecting = false;
 let peerId = null; // initialized via getPeerId()
 let currentRoom = null;
 let lastPeersJson = null;
-let heartbeatInterval = null;
 let currentTabId = null;
 let currentTabTitle = null; // New: for Smart Matching
 let logs = [];
@@ -101,17 +100,6 @@ let forceSyncAcks = new Set();
 let forceSyncTimeout = null;
 
 // --- Storage Utils ---
-function startHeartbeat() {
-    // Session heartbeats are now handled by the chrome.alarms 'keepAlive' listener
-    // to ensure they survive Service Worker suspension in MV3.
-}
-
-function stopHeartbeat() {
-    if (heartbeatInterval) {
-        clearInterval(heartbeatInterval);
-        heartbeatInterval = null;
-    }
-}
 
 async function getPeerId() {
     const data = await chrome.storage.local.get(['peerId']);
@@ -426,8 +414,7 @@ function handleServerEvent(event, data) {
             addLog(`Joined Room: ${data.roomId}`, 'success');
             chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: data.peers }).catch(() => {});
             
-            // Start background heartbeat
-            startHeartbeat();
+
             
             // Inform Website Bridge & Popup
             const joinStatusMsg = { type: 'JOIN_STATUS', success: true, message: 'Joined' };
@@ -656,23 +643,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     }
 });
 
-setInterval(async () => {
-    await ensureState();
-    // Calling a chrome API keeps the SW alive in MV3 (Chrome 110+)
-    chrome.storage.session.get('keepAlive', () => {});
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-        connect();
-    } else if (currentRoom) {
-        // Redundant heartbeat for active SW state
-        const settings = await getSettings();
-        emit(EVENTS.PEER_STATUS, { 
-            peerId, 
-            status: 'heartbeat',
-            username: settings.username,
-            tabTitle: currentTabTitle 
-        });
-    }
-}, 30000); // every 30s
+
 
 // --- Extension Message Listeners ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -724,7 +695,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         emit(EVENTS.LEAVE_ROOM, { peerId });
         currentRoom = null;
         currentTabId = null;
-        stopHeartbeat();
+
         updateBadgeStatus();
         
         isForceSyncInitiator = false;
