@@ -188,11 +188,56 @@ function updateLastActionUI(state, peers) {
     elements.lastActionCard.appendChild(grid);
 }
 
+function formatTime(seconds) {
+    if (seconds === null || seconds === undefined || isNaN(seconds)) return '--:--';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function getVolumeIcon(volume, muted) {
+    if (muted || volume === 0) return '🔇';
+    if (volume < 0.33) return '🔈';
+    if (volume < 0.66) return '🔉';
+    return '🔊';
+}
+
+let activePeers = [];
+let interpolationInterval = null;
+
+function startInterpolation() {
+    if (interpolationInterval) return;
+    interpolationInterval = setInterval(() => {
+        const timeElements = document.querySelectorAll('.peer-time-display');
+        timeElements.forEach(el => {
+            const peerId = el.dataset.peerId;
+            const peer = activePeers.find(p => p.peerId === peerId);
+            if (peer && peer.playbackState === 'playing' && peer.currentTime != null && peer.lastHeartbeat) {
+                const elapsed = (Date.now() - peer.lastHeartbeat) / 1000;
+                el.textContent = formatTime(peer.currentTime + elapsed);
+            }
+        });
+    }, 1000);
+}
+
 function updatePeerList(peers) {
     if (!peers) return;
+    activePeers = peers;
+    if (!interpolationInterval) startInterpolation();
     
-    // UI Throttle: Only re-render if the peer state actually changed
-    const currentPeersJson = JSON.stringify(peers);
+    // UI Throttle: Only re-render if the peer state actually changed (excluding time interpolation)
+    const stateToHash = peers.map(p => ({
+        id: p.peerId,
+        user: p.username,
+        tab: p.tabTitle,
+        media: p.mediaTitle,
+        state: p.playbackState,
+        vol: p.volume,
+        muted: p.muted
+    }));
+    const currentPeersJson = JSON.stringify(stateToHash);
     if (currentPeersJson === lastPeersJson) return;
     lastPeersJson = currentPeersJson;
 
@@ -213,10 +258,10 @@ function updatePeerList(peers) {
 
             const peerItem = document.createElement('div');
             peerItem.className = 'peer-item';
-            peerItem.style.cssText = 'display:block; padding: 6px 0;';
+            peerItem.style.cssText = 'position:relative; display:block; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);';
 
             const header = document.createElement('div');
-            header.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+            header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding-right: 24px;';
 
             const nameSpan = document.createElement('span');
             if (pUsername) {
@@ -235,29 +280,72 @@ function updatePeerList(peers) {
 
             header.appendChild(nameSpan);
 
+            // Volume Icon (Top Right)
+            if (p.volume !== undefined && p.volume !== null) {
+                const volIcon = document.createElement('div');
+                volIcon.style.cssText = 'position:absolute; top:8px; right:0; cursor:help; font-size:14px;';
+                volIcon.textContent = getVolumeIcon(p.volume, p.muted);
+                volIcon.title = p.muted ? 'Muted' : `Volume: ${Math.round(p.volume * 100)}%`;
+                peerItem.appendChild(volIcon);
+            }
+
             if (pId === localPeerId) {
                 const you = document.createElement('span');
-                you.style.cssText = 'font-size:10px; color:var(--accent)';
+                you.style.cssText = 'font-size:10px; color:var(--accent); font-weight:bold;';
                 you.textContent = 'YOU';
                 header.appendChild(you);
             }
 
             peerItem.appendChild(header);
 
+            // Media Info
             if (p.mediaTitle) {
                 const mediaDiv = document.createElement('div');
-                mediaDiv.style.cssText = 'font-size:11px; color:var(--star); font-weight: 600; margin-top: 2px;';
+                mediaDiv.style.cssText = 'font-size:11px; color:var(--star); font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;';
                 mediaDiv.textContent = `🎬 ${p.mediaTitle}`;
                 peerItem.appendChild(mediaDiv);
             }
 
-            if (pTabTitle) {
-                const titleDiv = document.createElement('div');
-                titleDiv.style.cssText = 'font-size:10px; color:var(--text-muted); opacity: 0.8;';
-                titleDiv.textContent = p.mediaTitle ? `via ${pTabTitle}` : pTabTitle;
-                peerItem.appendChild(titleDiv);
+            // Status Line (Play/Pause + Time)
+            const statusLine = document.createElement('div');
+            statusLine.style.cssText = 'display:flex; align-items:center; gap:8px; margin-top:4px;';
+
+            if (p.playbackState) {
+                const stateIcon = document.createElement('span');
+                stateIcon.style.fontSize = '10px';
+                if (p.playbackState === 'playing') {
+                    stateIcon.textContent = '▶';
+                    stateIcon.style.color = 'var(--success)';
+                } else {
+                    stateIcon.textContent = '⏸';
+                    stateIcon.style.color = 'var(--error)';
+                }
+                statusLine.appendChild(stateIcon);
             }
 
+            if (p.currentTime !== undefined && p.currentTime !== null) {
+                const timeSpan = document.createElement('span');
+                timeSpan.className = 'peer-time-display';
+                timeSpan.dataset.peerId = pId;
+                timeSpan.style.cssText = 'font-size:11px; font-family:monospace; color:var(--text-muted);';
+                
+                let displayTime = p.currentTime;
+                if (p.playbackState === 'playing' && p.lastHeartbeat && p.currentTime != null) {
+                    const elapsed = (Date.now() - p.lastHeartbeat) / 1000;
+                    displayTime += elapsed;
+                }
+                timeSpan.textContent = formatTime(displayTime);
+                statusLine.appendChild(timeSpan);
+            }
+
+            if (pTabTitle) {
+                const titleDiv = document.createElement('span');
+                titleDiv.style.cssText = 'font-size:10px; color:var(--text-muted); opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; text-align: right;';
+                titleDiv.textContent = pTabTitle;
+                statusLine.appendChild(titleDiv);
+            }
+
+            peerItem.appendChild(statusLine);
             container.appendChild(peerItem);
         });
     };

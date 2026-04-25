@@ -292,6 +292,10 @@ io.on('connection', (socket) => {
                         username: data.username !== undefined ? data.username : existing.username,
                         tabTitle: data.tabTitle !== undefined ? data.tabTitle : existing.tabTitle,
                         mediaTitle: data.mediaTitle !== undefined ? data.mediaTitle : existing.mediaTitle,
+                        playbackState: data.playbackState !== undefined ? data.playbackState : existing.playbackState,
+                        currentTime: data.currentTime !== undefined ? data.currentTime : existing.currentTime,
+                        volume: data.volume !== undefined ? data.volume : existing.volume,
+                        muted: data.muted !== undefined ? data.muted : existing.muted,
                         lastSeen: Date.now()
                     });
 

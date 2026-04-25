@@ -211,6 +211,7 @@
                     duration: video.duration || 0,
                     readyState: video.readyState,
                     muted: video.muted,
+                    volume: video.volume,
                     playbackRate: video.playbackRate,
                     url: window.location.href,
                     id: video.id || 'none',
@@ -314,7 +315,9 @@
                 payload: {
                     playbackState: video.paused ? 'paused' : 'playing',
                     currentTime: video.currentTime,
-                    mediaTitle: mediaTitle
+                    mediaTitle: mediaTitle,
+                    volume: video.volume,
+                    muted: video.muted
                 }
             }).catch(err => {
                 if (err.message.includes('Extension context invalidated')) {

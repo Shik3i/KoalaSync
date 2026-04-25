@@ -523,7 +523,12 @@ function handleServerEvent(event, data) {
                             peerId: data.peerId, 
                             username: data.username, 
                             tabTitle: data.tabTitle,
-                            mediaTitle: data.mediaTitle || null
+                            mediaTitle: data.mediaTitle || null,
+                            playbackState: data.playbackState || null,
+                            currentTime: data.currentTime != null ? data.currentTime : null,
+                            volume: data.volume != null ? data.volume : null,
+                            muted: data.muted != null ? data.muted : null,
+                            lastHeartbeat: Date.now()
                         });
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
                         chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
@@ -540,6 +545,11 @@ function handleServerEvent(event, data) {
                             peer.tabTitle = data.tabTitle;
                             peer.username = data.username;
                             peer.mediaTitle = data.mediaTitle !== undefined ? data.mediaTitle : peer.mediaTitle;
+                            peer.playbackState = data.playbackState !== undefined ? data.playbackState : peer.playbackState;
+                            peer.currentTime = data.currentTime !== undefined ? data.currentTime : peer.currentTime;
+                            peer.volume = data.volume !== undefined ? data.volume : peer.volume;
+                            peer.muted = data.muted !== undefined ? data.muted : peer.muted;
+                            peer.lastHeartbeat = Date.now();
                         } else {
                             // Migration: replace string with object
                             const idx = currentRoom.peers.indexOf(peer);
@@ -547,7 +557,12 @@ function handleServerEvent(event, data) {
                                 peerId: data.peerId, 
                                 username: data.username, 
                                 tabTitle: data.tabTitle,
-                                mediaTitle: data.mediaTitle || null
+                                mediaTitle: data.mediaTitle || null,
+                                playbackState: data.playbackState || null,
+                                currentTime: data.currentTime != null ? data.currentTime : null,
+                                volume: data.volume != null ? data.volume : null,
+                                muted: data.muted != null ? data.muted : null,
+                                lastHeartbeat: Date.now()
                             };
                         }
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
@@ -878,6 +893,11 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     me.tabTitle = currentTabTitle;
                     me.username = settings.username;
                     me.mediaTitle = message.payload.mediaTitle;
+                    me.playbackState = message.payload.playbackState;
+                    me.currentTime = message.payload.currentTime;
+                    me.volume = message.payload.volume;
+                    me.muted = message.payload.muted;
+                    me.lastHeartbeat = Date.now();
                     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
                 }
             }

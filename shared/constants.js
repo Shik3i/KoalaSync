@@ -7,7 +7,7 @@
  */
 
 export const PROTOCOL_VERSION = "1.0.0";
-export const APP_VERSION = "1.1.2";
+export const APP_VERSION = "1.1.3";
 
 export const OFFICIAL_SERVER_URL = 'wss://sync.shik3i.net';
 export const OFFICIAL_LANDING_PAGE_URL = 'https://koalasync.shik3i.net';
