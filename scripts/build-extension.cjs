@@ -196,6 +196,9 @@ async function run() {
 
     // Build Firefox
     await buildBrowser('firefox', (manifest) => {
+      // Firefox does not support the 'key' property for extension IDs, it uses browser_specific_settings.gecko.id
+      delete manifest.key;
+      
       manifest.background = {
         scripts: ["background.js"],
         type: "module"
