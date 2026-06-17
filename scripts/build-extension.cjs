@@ -200,6 +200,9 @@ async function run() {
         scripts: ["background.js"],
         type: "module"
       };
+      manifest.content_security_policy = {
+        extension_pages: "script-src 'self'; connect-src 'self' ws://127.0.0.1:3000 ws://localhost:3000 wss://127.0.0.1:3000 wss://localhost:3000 https://sync.koalastuff.net wss://sync.koalastuff.net"
+      };
       manifest.browser_specific_settings = {
         gecko: {
           id: "koalasync@koalastuff.net",

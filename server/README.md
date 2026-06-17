@@ -20,6 +20,10 @@ MIN_VERSION="1.0.0"
 # Use a long random token, 32+ characters recommended.
 ADMIN_METRICS_TOKEN=""
 
+# Optional: Comma-separated list of allowed Chrome extension IDs. If unset, any Chrome extension origin is allowed.
+# Note: This is an optional browser-side hardening mechanism, not real authentication.
+ALLOWED_EXTENSION_IDS=""
+
 # Optional: set to "1" to enable verbose connection, room-join/leave, and CORS logs in the console. Default is "0" (disabled).
 DEBUG_LOGGING="0"
 ```

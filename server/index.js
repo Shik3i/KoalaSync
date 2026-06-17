@@ -123,8 +123,22 @@ export const httpServer = createServer(app);
 export const io = new Server(httpServer, {
     cors: {
         origin: (origin, callback) => {
-            if (!origin || origin === 'https://sync.koalastuff.net' || origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+            const allowedIdsEnv = process.env.ALLOWED_EXTENSION_IDS;
+            if (!origin || origin === 'https://sync.koalastuff.net' || origin.startsWith('moz-extension://')) {
                 callback(null, true);
+            } else if (origin.startsWith('chrome-extension://')) {
+                if (!allowedIdsEnv) {
+                    callback(null, true);
+                } else {
+                    const allowedIds = allowedIdsEnv.split(',').map(id => id.trim()).filter(Boolean);
+                    const extensionId = origin.replace('chrome-extension://', '');
+                    if (allowedIds.includes(extensionId)) {
+                        callback(null, true);
+                    } else {
+                        log('CORS', `Rejected chrome-extension origin (ID not in ALLOWED_EXTENSION_IDS): ${origin}`);
+                        callback(new Error('Not allowed by CORS'));
+                    }
+                }
             } else {
                 log('CORS', `Rejected origin: ${(origin || '').replace(/[\r\n]/g, '')}`);
                 callback(new Error('Not allowed by CORS'));

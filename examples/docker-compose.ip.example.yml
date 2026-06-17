@@ -12,6 +12,7 @@ services:                                                                       
       - MAX_ROOMS=100                                                                      # Maximum number of rooms that can exist
       - MAX_PEERS_PER_ROOM=25                                                              # Maximum number of peers allowed per room
       - ADMIN_METRICS_TOKEN=                                                               # Optional: 32+ char random token for aggregate-only /health metrics
+      # - ALLOWED_EXTENSION_IDS=obbnmkmlaaddodakcbdljknjpagklifc                           # Optional: Comma-separated allowed Chrome Extension IDs (browser hardening)
     pids_limit: 2048                                                                       # Limits the container to 2048 process IDs for safety
     networks:                                                                              # Attaches the service to the networks listed below
       bond0_network:                                                                       # Network name as referenced by the service

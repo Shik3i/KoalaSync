@@ -1,7 +1,10 @@
-import { EVENTS, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, EPISODE_LOBBY_TIMEOUT, FORCE_SYNC_TIMEOUT } from './shared/constants.js';
+import { EVENTS, PROTOCOL_VERSION, EPISODE_LOBBY_TIMEOUT, FORCE_SYNC_TIMEOUT } from './shared/constants.js';
 import { generateUsername } from './shared/names.js';
 import { loadLocale, getMessage, getSystemLanguage } from './i18n.js';
 import { sameEpisode } from './episode-utils.js';
+import { WorkerContext } from './modules/worker-context.js';
+import { SocketManager } from './modules/socket-manager.js';
+import { TabManager } from './modules/tab-manager.js';
 
 // --- Uninstall URL Initialization ---
 chrome.runtime.onInstalled.addListener((details) => {
@@ -56,6 +59,60 @@ let pingInterval = null;
 let pingTimeout = null;
 let pendingPingT = null;
 let currentPingMs = null;
+
+const context = new WorkerContext({
+    socket: { get: () => socket, set: (val) => socket = val },
+    isConnecting: { get: () => isConnecting, set: (val) => isConnecting = val },
+    peerId: { get: () => peerId, set: (val) => peerId = val },
+    currentRoom: { get: () => currentRoom, set: (val) => currentRoom = val },
+    currentTabId: { get: () => currentTabId, set: (val) => currentTabId = val },
+    currentTabTitle: { get: () => currentTabTitle, set: (val) => currentTabTitle = val },
+    logs: { get: () => logs, set: (val) => logs = val },
+    history: { get: () => history, set: (val) => history = val },
+    storageInitialized: { get: () => storageInitialized, set: (val) => storageInitialized = val },
+    pendingLogs: { get: () => pendingLogs, set: (val) => pendingLogs = val },
+    pendingHistory: { get: () => pendingHistory, set: (val) => pendingHistory = val },
+    eventQueue: { get: () => eventQueue, set: (val) => eventQueue = val },
+    isNamespaceJoined: { get: () => isNamespaceJoined, set: (val) => isNamespaceJoined = val },
+    lastActionState: { get: () => lastActionState, set: (val) => lastActionState = val },
+    localSeq: { get: () => localSeq, set: (val) => localSeq = val },
+    lastSeqBySender: { get: () => lastSeqBySender },
+    activePorts: { get: () => activePorts },
+    expectedAcksCount: { get: () => expectedAcksCount, set: (val) => expectedAcksCount = val },
+    reconnectTimer: { get: () => reconnectTimer, set: (val) => reconnectTimer = val },
+    reconnectStartTime: { get: () => reconnectStartTime, set: (val) => reconnectStartTime = val },
+    reconnectFailed: { get: () => reconnectFailed, set: (val) => reconnectFailed = val },
+    reconnectAttempts: { get: () => reconnectAttempts, set: (val) => reconnectAttempts = val },
+    currentServerUrl: { get: () => currentServerUrl, set: (val) => currentServerUrl = val },
+    roomIdleSince: { get: () => roomIdleSince, set: (val) => roomIdleSince = val },
+    lastContentHeartbeatAt: { get: () => lastContentHeartbeatAt, set: (val) => lastContentHeartbeatAt = val },
+    connectIntent: { get: () => connectIntent, set: (val) => connectIntent = val },
+    isForceSyncInitiator: { get: () => isForceSyncInitiator, set: (val) => isForceSyncInitiator = val },
+    forceSyncAcks: { get: () => forceSyncAcks, set: (val) => forceSyncAcks = val },
+    forceSyncTimeout: { get: () => forceSyncTimeout, set: (val) => forceSyncTimeout = val },
+    episodeLobby: { get: () => episodeLobby, set: (val) => episodeLobby = val },
+    episodeLobbyTimeout: { get: () => episodeLobbyTimeout, set: (val) => episodeLobbyTimeout = val },
+    pingInterval: { get: () => pingInterval, set: (val) => pingInterval = val },
+    pingTimeout: { get: () => pingTimeout, set: (val) => pingTimeout = val },
+    pendingPingT: { get: () => pendingPingT, set: (val) => pendingPingT = val },
+    currentPingMs: { get: () => currentPingMs, set: (val) => currentPingMs = val }
+});
+
+const socketManager = new SocketManager(context, {
+    addLog,
+    addToHistory,
+    handleServerEvent,
+    updateBadgeStatus,
+    getSettings,
+    getPeerId
+});
+
+const tabManager = new TabManager(context, {
+    addLog,
+    updateBadgeStatus,
+    leaveRoomAfterIdleGrace,
+    emit
+});
 
 // --- Keep-Alive Port Listener ---
 chrome.runtime.onConnect.addListener((port) => {
@@ -178,9 +235,6 @@ let currentServerUrl = null;
 let roomIdleSince = null;
 let lastContentHeartbeatAt = null;
 let connectIntent = false;
-const MAX_RECONNECT_ATTEMPTS = 20;
-const _RECONNECT_BASE_DELAY = 500;
-const _RECONNECT_MAX_DELAY = 5000;
 const ROOM_IDLE_AUTO_LEAVE_MS = 2 * 60 * 60 * 1000;
 
 // Force Sync Coordination
@@ -297,57 +351,11 @@ function addLog(message, type = 'info') {
 
 // --- WebSocket Client ---
 function resolveServerUrl(settings) {
-    return (settings.serverUrl && settings.useCustomServer) ? settings.serverUrl : OFFICIAL_SERVER_URL;
+    return socketManager.resolveServerUrl(settings);
 }
 
 function forceDisconnect() {
-    if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-    }
-    if (episodeLobbyTimeout) {
-        clearTimeout(episodeLobbyTimeout);
-        episodeLobbyTimeout = null;
-    }
-    episodeLobby = null;
-    if (forceSyncTimeout) {
-        clearTimeout(forceSyncTimeout);
-        forceSyncTimeout = null;
-    }
-    stopPing();
-    if (socket) {
-        socket.onopen = null;
-        socket.onmessage = null;
-        socket.onclose = null;
-        socket.onerror = null;
-        socket.close();
-        socket = null;
-    }
-    currentServerUrl = null;
-    isConnecting = false;
-    isNamespaceJoined = false;
-    isForceSyncInitiator = false;
-    expectedAcksCount = 0;
-    roomIdleSince = null;
-    lastContentHeartbeatAt = null;
-    forceSyncAcks.clear();
-    eventQueue = [];
-    chrome.storage.session.set({
-        isForceSyncInitiator: false,
-        forceSyncAcks: [],
-        forceSyncDeadline: null,
-        expectedAcksCount: 0,
-        eventQueue: [],
-        episodeLobby: null,
-        roomIdleSince: null,
-        lastContentHeartbeatAt: null
-    }).catch(() => {});
-    if (currentRoom) {
-        currentRoom.peers = [];
-        if (storageInitialized) chrome.storage.session.set({ currentRoom });
-        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
-    }
-    broadcastConnectionStatus('disconnected');
+    socketManager.forceDisconnect();
 }
 
 function persistRoomIdleState() {
@@ -373,16 +381,6 @@ function markRoomPotentiallyIdle() {
     }
 }
 
-function clearTargetTabForIdle() {
-    currentTabId = null;
-    currentTabTitle = null;
-    lastContentHeartbeatAt = null;
-    if (currentRoom) {
-        roomIdleSince = Date.now();
-    }
-    chrome.storage.session.set({ currentTabId, currentTabTitle, roomIdleSince, lastContentHeartbeatAt }).catch(() => {});
-    updateBadgeStatus();
-}
 
 async function leaveRoomAfterIdleGrace(reason) {
     if (!currentRoom) return;
@@ -413,196 +411,12 @@ async function leaveRoomAfterIdleGrace(reason) {
 }
 
 async function connect() {
-    if (isConnecting) return;
-    isConnecting = true;
-
-    let finalUrl = '';
-    try {
-        // --- Phase 1: Storage ---
-        let settings;
-        try {
-            if (!peerId) peerId = await getPeerId();
-            settings = await getSettings();
-        } catch (e) {
-            throw new Error(`[Storage Error] ${e.message}`);
-        }
-
-        // --- Phase 2: Connection Guard ---
-        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-            if (isNamespaceJoined) {
-                isConnecting = false;
-                return;
-            }
-            socket.onopen = null;
-            socket.onmessage = null;
-            socket.onclose = null;
-            socket.onerror = null;
-            socket.close();
-        }
-
-        if (!navigator.onLine) {
-            addLog('Browser is offline. Waiting...', 'warn');
-            broadcastConnectionStatus('offline');
-            isConnecting = false;
-            if (currentRoom || connectIntent) {
-                scheduleReconnect();
-            }
-            return;
-        }
-
-        broadcastConnectionStatus('reconnecting');
-        const isCustomServer = settings.serverUrl && settings.useCustomServer;
-        finalUrl = isCustomServer ? settings.serverUrl : OFFICIAL_SERVER_URL;
-
-        // --- Phase 3: URL Validation ---
-        try {
-            if (isCustomServer) {
-                finalUrl = finalUrl.trim();
-                if (!finalUrl.includes('://')) {
-                    finalUrl = 'ws://' + finalUrl;
-                }
-                const urlObj = new URL(finalUrl);
-                const isLocal = urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1';
-                if (urlObj.protocol !== 'wss:' && !isLocal) {
-                    urlObj.protocol = 'wss:';
-                    finalUrl = urlObj.toString();
-                    addLog('Security: Upgraded to wss:// for remote host.', 'warn');
-                }
-            }
-        } catch (e) {
-            throw new Error(`[URL Error] ${e.message}`);
-        }
-
-        addLog(`Connecting to ${isCustomServer ? finalUrl : 'Official Server'}... (attempt ${reconnectAttempts + 1})`, 'info');
-
-        currentServerUrl = finalUrl;
-
-        // --- Phase 4: WebSocket Init ---
-        try {
-            const url = new URL(finalUrl);
-            url.pathname = '/socket.io/';
-            url.searchParams.set('EIO', '4');
-            url.searchParams.set('transport', 'websocket');
-            url.searchParams.set('version', chrome.runtime.getManifest().version);
-            url.searchParams.set('token', OFFICIAL_SERVER_TOKEN);
-
-            socket = new WebSocket(url.toString());
-        } catch (e) {
-            throw new Error(`[Connection Error] ${e.message}`);
-        }
-
-        // --- Phase 5: Event Listeners ---
-        socket.onopen = () => {
-            reconnectAttempts = 0;
-            reconnectStartTime = null;
-            reconnectFailed = false;
-            addLog('WebSocket Connection Opened', 'success');
-            chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null }).catch(() => {});
-            isNamespaceJoined = false;
-            socket.send('40');
-        };
-
-        socket.onmessage = async (event) => {
-            await ensureState();
-            const msg = event.data;
-            if (msg === '2') {
-                socket.send('3');
-                return;
-            }
-            if (msg.startsWith('0')) {
-                addLog(`Socket.IO Handshake: ${msg}`, 'info');
-            } else if (msg.startsWith('40')) {
-                isConnecting = false;
-                isNamespaceJoined = true;
-                broadcastConnectionStatus('connected');
-                startPing();
-                addLog('Joined Namespace /', 'success');
-                const settings = await getSettings();
-                if (settings.roomId) {
-                    emit(EVENTS.JOIN_ROOM, { 
-                        roomId: settings.roomId, 
-                        password: settings.password,
-                        peerId,
-                        username: settings.username,
-                        tabTitle: currentTabTitle,
-                        protocolVersion: PROTOCOL_VERSION
-                    });
-                }
-                while (eventQueue.length > 0) {
-                    const queuedMsg = eventQueue.shift();
-                    emit(queuedMsg.event, queuedMsg.data);
-                }
-                eventQueue = [];
-                chrome.storage.session.set({ eventQueue: [] });
-            } else if (msg.startsWith('42')) {
-                try {
-                    const payload = JSON.parse(msg.substring(2));
-                    try {
-                        handleServerEvent(payload[0], payload[1]);
-                    } catch (handlerErr) {
-                        addLog(`Handler error for ${payload[0]}: ${handlerErr.message}`, 'error');
-                    }
-                } catch (_e) {
-                    addLog(`Failed to parse message: ${msg}`, 'error');
-                }
-            }
-        };
-
-        socket.onclose = () => {
-            isConnecting = false;
-            isNamespaceJoined = false;
-            stopPing();
-            
-            if (!connectIntent && !currentRoom) {
-                isForceSyncInitiator = false;
-                forceSyncAcks.clear();
-                if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
-                chrome.storage.session.set({ 
-                    isForceSyncInitiator: false, 
-                    forceSyncAcks: [], 
-                    forceSyncDeadline: null 
-                }).catch(() => {});
-            }
-
-            
-            if (currentRoom && !connectIntent) {
-                currentRoom.peers = [];
-                if (storageInitialized) chrome.storage.session.set({ currentRoom }).catch(() => {});
-                chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
-            }
-            broadcastConnectionStatus('disconnected');
-            if (currentRoom || connectIntent) {
-                addLog('Disconnected. Scheduling reconnect...', 'warn');
-                socket = null;
-                scheduleReconnect();
-            } else {
-                addLog('Disconnected. No active session — staying disconnected.', 'info');
-                socket = null;
-            }
-        };
-
-        socket.onerror = () => {
-            broadcastConnectionStatus('disconnected');
-            const logType = reconnectAttempts > 1 ? 'error' : 'warn';
-            addLog('WebSocket Error: Connection failed', logType);
-        };
-
-    } catch (e) {
-        isConnecting = false;
-        const logType = reconnectAttempts > 1 ? 'error' : 'warn';
-        const errMsg = (e && e.message) ? e.message : String(e || 'Unknown connection error');
-        addLog(errMsg, logType);
-        broadcastConnectionStatus('disconnected');
-        if (currentRoom || connectIntent) {
-            scheduleReconnect();
-        }
-    }
+    await socketManager.connect();
 }
 
 
 function broadcastConnectionStatus(status) {
-    chrome.runtime.sendMessage({ type: 'CONNECTION_STATUS', status }).catch(() => {});
-    updateBadgeStatus();
+    socketManager.broadcastConnectionStatus(status);
 }
 
 function updateBadgeStatus() {
@@ -662,51 +476,12 @@ function showNotification(senderName, action) {
     });
 }
 
-function scheduleReconnect() {
-    if (reconnectTimer) return;
 
-    if (!reconnectStartTime) reconnectStartTime = Date.now();
-
-    const elapsed = Date.now() - reconnectStartTime;
-    reconnectAttempts++;
-
-    if (!reconnectFailed && (elapsed > 300000 || reconnectAttempts > MAX_RECONNECT_ATTEMPTS)) {
-        reconnectFailed = true;
-        addLog('Switching to slow reconnect mode (every 5 minutes)', 'warn');
-    }
-
-    const delay = reconnectFailed
-        ? 300000
-        : Math.min(_RECONNECT_BASE_DELAY * Math.pow(1.5, reconnectAttempts - 1), _RECONNECT_MAX_DELAY);
-
-    if (reconnectFailed) {
-        addLog(`Slow reconnect in 5min (attempt ${reconnectAttempts})`, 'info');
-    } else {
-        addLog(`Reconnect in ${Math.round(delay)}ms (attempt ${reconnectAttempts})`, 'warn');
-    }
-
-    chrome.storage.session.set({ reconnectFailed, reconnectAttempts, reconnectStartTime }).catch(() => {});
-
-    reconnectTimer = setTimeout(() => {
-        reconnectTimer = null;
-        connect();
-    }, delay);
-}
 
 // Slow reconnect logic is now handled in the keepAlive alarm
 
 function emit(event, data) {
-    if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
-        const msg = `42${JSON.stringify([event, data])}`;
-        socket.send(msg);
-    } else {
-        eventQueue.push({ event, data });
-        if (eventQueue.length > 50) {
-            eventQueue.shift();
-            addLog('Event queue cap reached, dropping oldest event', 'warn');
-        }
-        chrome.storage.session.set({ eventQueue });
-    }
+    socketManager.emit(event, data);
 }
 
 function addToHistory(action, senderId) {
@@ -726,45 +501,7 @@ function addToHistory(action, senderId) {
 }
 
 // --- Ping / Latency ---
-function sendPing() {
-    const t = Date.now();
-    pendingPingT = t;
-    emit(EVENTS.PING, { t });
-    if (pingTimeout) clearTimeout(pingTimeout);
-    pingTimeout = setTimeout(() => {
-        if (pendingPingT === t) {
-            addLog('Ping timeout reached, force disconnecting to trigger reconnect', 'warn');
-            pendingPingT = null;
-            forceDisconnect();
-            if (currentRoom || connectIntent) {
-                scheduleReconnect();
-            }
-        }
-        pingTimeout = null;
-    }, 5000);
-}
 
-function startPing() {
-    if (pingInterval) clearInterval(pingInterval);
-    if (pingTimeout) { clearTimeout(pingTimeout); pingTimeout = null; }
-    currentPingMs = null;
-    pendingPingT = null;
-    pingInterval = setInterval(sendPing, 15000);
-    sendPing();
-}
-
-function stopPing() {
-    if (pingInterval) {
-        clearInterval(pingInterval);
-        pingInterval = null;
-    }
-    if (pingTimeout) {
-        clearTimeout(pingTimeout);
-        pingTimeout = null;
-    }
-    currentPingMs = null;
-    pendingPingT = null;
-}
 
 // --- Event Handlers ---
 function handleServerEvent(event, data) {
@@ -1296,44 +1033,7 @@ function updateLastAction(action, senderId, timestamp = Date.now()) {
 }
 
 async function routeToContent(action, payload) {
-    if (!currentTabId) return;
-
-    const tabId = parseInt(currentTabId);
-    if (isNaN(tabId)) return;
-
-    const actionTimestamp = payload?.actionTimestamp || Date.now();
-    const commandSenderId = payload?.senderId || null;
-
-    _routeToContentInternal(tabId, action, payload, actionTimestamp, commandSenderId, 0);
-}
-
-function _routeToContentInternal(tabId, action, payload, actionTimestamp, commandSenderId, retries) {
-    chrome.tabs.sendMessage(tabId, { 
-        type: 'SERVER_COMMAND',
-        action,
-        payload,
-        actionTimestamp,
-        commandSenderId
-    }).catch(err => {
-        if (retries >= 3) {
-            addLog(`Content Script not responding in tab ${tabId} after ${retries} retries`, 'warn');
-            clearTargetTabForIdle();
-            return;
-        }
-        if (err.message.includes('Receiving end does not exist') || err.message.includes('Extension context invalidated')) {
-            chrome.scripting.executeScript({
-                target: { tabId },
-                files: ['content.js']
-            }).then(() => {
-                setTimeout(() => _routeToContentInternal(tabId, action, payload, actionTimestamp, commandSenderId, retries + 1), 500);
-            }).catch(_err => {
-                addLog(`Auto-reinject failed for tab ${tabId}`, 'warn');
-            });
-        } else {
-            addLog(`Content Script not responding in tab ${tabId}`, 'warn');
-            clearTargetTabForIdle();
-        }
-    });
+    await tabManager.routeToContent(action, payload);
 }
 
 // --- Keep-Alive Mechanism ---
@@ -1394,24 +1094,11 @@ function leaveOldRoomIfSwitching(newRoomId) {
 }
 
 function resetAudioProcessingInTab(tabId) {
-    if (!tabId) return;
-    chrome.tabs.sendMessage(tabId, { action: 'RESET_AUDIO_PROCESSING' }).catch(() => {});
+    tabManager.resetAudioProcessingInTab(tabId);
 }
 
 async function applyAudioSettingsToTab(tabId) {
-    if (!tabId) return;
-    let data = (await chrome.storage.local.get(['audioSettings']));
-    if (!data.audioSettings) {
-        const syncData = await chrome.storage.sync.get(['audioSettings']);
-        if (syncData.audioSettings) {
-            data = syncData;
-            await chrome.storage.local.set({ audioSettings: syncData.audioSettings });
-        }
-    }
-    chrome.tabs.sendMessage(tabId, {
-        action: 'APPLY_AUDIO_SETTINGS',
-        settings: data.audioSettings
-    }).catch(() => {});
+    await tabManager.applyAudioSettingsToTab(tabId);
 }
 
 // --- Extension Message Listeners ---
@@ -1913,58 +1600,13 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 // Tab removal listener
 chrome.tabs.onRemoved.addListener(async (tabId) => {
     await ensureState();
-    if (tabId === currentTabId) {
-        const wasInRoom = !!currentRoom;
-        currentTabId = null;
-        currentTabTitle = null;
-        lastContentHeartbeatAt = null;
-        roomIdleSince = Date.now();
-        chrome.storage.session.set({ currentTabId: null, currentTabTitle: null, roomIdleSince, lastContentHeartbeatAt });
-        updateBadgeStatus();
-        addLog('Target tab closed.', 'warn');
-
-        if (wasInRoom) {
-            const roomAtClose = currentRoom;
-            getSettings().then(settings => {
-                if (currentRoom !== roomAtClose) return;
-
-                emit(EVENTS.PEER_STATUS, {
-                    peerId,
-                    playbackState: 'paused',
-                    currentTime: null,
-                    mediaTitle: null,
-                    username: settings.username,
-                    tabTitle: null
-                });
-
-                if (currentRoom && Array.isArray(currentRoom.peers)) {
-                    const me = currentRoom.peers.find(p => (p.peerId || p) === peerId);
-                    if (me && typeof me === 'object') {
-                        me.playbackState = 'paused';
-                        me.currentTime = null;
-                        me.mediaTitle = null;
-                        me.tabTitle = null;
-                        me.lastHeartbeat = Date.now();
-                        if (storageInitialized) chrome.storage.session.set({ currentRoom });
-                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
-                    }
-                }
-            }).catch(() => {});
-        }
-    }
+    await tabManager.handleTabRemoved(tabId);
 });
 
 // Re-inject on full page refresh
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, _tab) => {
     await ensureState();
-    if (currentTabId && tabId === parseInt(currentTabId) && changeInfo.status === 'complete') {
-        chrome.scripting.executeScript({
-            target: { tabId },
-            files: ['content.js']
-        })
-            .then(() => applyAudioSettingsToTab(tabId))
-            .catch(() => {});
-    }
+    await tabManager.handleTabUpdated(tabId, changeInfo);
 });
 
 // Initial Connect — only if user has an active room configuration
