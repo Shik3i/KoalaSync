@@ -18,9 +18,17 @@ All notable changes to the KoalaSync browser extension and relay server.
 - **Backward-compatible Host Control rollout** — The extension only shows Host Control when the connected relay supports it, so users on older self-hosted servers do not see controls that cannot work yet.
 - **Extension: Clear host and guest states** — The popup shows the current control mode, host status, peer roles, and localized guest guidance so participants understand when playback is controlled by the host.
 - **Website: FAQ clarification for streaming access** — The landing page and FAQ structured data now state clearly that KoalaSync does not stream, host, share, or bypass access to video content. Every participant watches locally and needs their own access to services such as Netflix.
+- **Documentation: WebSocket Protocol Specification** — Complete reference for all protocol events, payload schemas, rate limits, and edge cases in PROTOCOL.md.
+- **Server: Graceful Shutdown** — Socket.IO clients are now properly disconnected during server shutdown.
+- **Server: LEAVE_ROOM Rate Limiting** — Prevents abuse with 10 requests per socket per minute limit.
+- **Testing: Vitest Framework** — Modern testing setup with coverage reporting for server and shared modules.
 
 ### Changed
 - **Playback sync now follows the room's control setting** — When Host Control is enabled, only the host can drive room-wide playback changes; guests can still watch in sync without accidentally changing playback for everyone.
+- **Architecture: Modularized background.js** — Refactored 2410-line file into 11 focused modules for better maintainability.
+- **Documentation: Consolidated Host Control Mode** — Unified documentation in host-control-mode.md with references to internal implementation details.
+- **README: Added protocol documentation** — Updated documentation links to include PROTOCOL.md reference.
+- **ARCHITECTURE: Added protocol reference** — Updated architecture documentation with link to PROTOCOL.md.
 
 ---
 

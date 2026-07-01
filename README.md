@@ -131,6 +131,7 @@ gh attestation verify dist/koalasync-chrome.zip \
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**: Our community standards and expectations.
 - **[HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**: Step-by-step walkthrough of the complete user flow.
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Deep-dive into the two-phase sync and heartbeat logic.
+- **[PROTOCOL.md](docs/PROTOCOL.md)**: WebSocket protocol specification and event reference.
 - **[ROADMAP.md](docs/ROADMAP.md)**: Planned features, backlog, and rejected ideas.
 - **[SECURITY.md](SECURITY.md)**: Disclosure policy and security practices.
 - **[Caddyfile.example](examples/Caddyfile.example)**: Production Caddy configuration for website and relay.

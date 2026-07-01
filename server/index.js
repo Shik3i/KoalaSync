@@ -661,6 +661,10 @@ io.on('connection', (socket) => {
     });
 
     socket.on(EVENTS.LEAVE_ROOM, () => {
+        if (!checkLeaveRoomRate(socket.id)) {
+            log('SECURITY', `LEAVE_ROOM rate limit exceeded for socket: ${socket.id}`);
+            return;
+        }
         try {
             const mapping = socketToRoom.get(socket.id);
             if (mapping) {
@@ -919,12 +923,14 @@ function gracefulShutdown(signal) {
     log('SERVER', `${signal} received — starting graceful shutdown...`);
     // 1. Notify all connected clients so they can display a meaningful message
     io.emit(EVENTS.ERROR, { message: 'Server is restarting. Reconnecting automatically...' });
-    // 2. Stop accepting new HTTP connections
+    // 2. Gracefully disconnect all Socket.IO clients
+    io.disconnectSockets(true);
+    // 3. Stop accepting new HTTP connections
     httpServer.close(() => {
         log('SERVER', 'HTTP server closed. Exiting.');
         process.exit(0);
     });
-    // 3. Safety net: force-exit after 5s if connections don't drain
+    // 4. Safety net: force-exit after 5s if connections don't drain
     setTimeout(() => {
         log('SERVER', 'Force-exit after timeout.');
         process.exit(1);

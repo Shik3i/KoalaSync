@@ -14,6 +14,8 @@ export const EVENT_RATE_LIMIT = 50;                // max relayed events per soc
 export const EVENT_RATE_WINDOW_MS = 10000;         // 10 seconds
 export const HEALTH_RATE_WINDOW_MS = 60000;        // 1 minute
 export const ADMIN_METRICS_AUTH_WINDOW_MS = 60000; // 1 minute
+export const LEAVE_ROOM_RATE_LIMIT = 10;           // max LEAVE_ROOM events per socket per window
+export const LEAVE_ROOM_RATE_WINDOW_MS = 60000;    // 1 minute
 
 export const connectionCounts = new Map(); // ip -> { count, resetTime }
 export const failedAuthAttempts = new Map(); // Map<IP+RoomID, {count, lastAttempt}>
@@ -21,13 +23,15 @@ export const eventCounts = new Map(); // socketId -> { count, resetTime }
 export const healthCounts = new Map(); // ip -> { count, resetTime }
 export const adminMetricsAuthCounts = new Map(); // ip -> { count, resetTime }
 export const roomListCooldowns = new Map(); // socketId -> last allowed timestamp
+export const leaveRoomCounts = new Map();    // socketId -> { count, resetTime }
 
 export const rateLimitDenied = {
     connections: 0,
     events: 0,
     health: 0,
     adminMetricsAuth: 0,
-    roomList: 0
+    roomList: 0,
+    leaveRoom: 0
 };
 
 let authCleanupId = null;
@@ -122,6 +126,20 @@ export function checkAdminMetricsAuthRate(ip) {
     return false;
 }
 
+export function checkLeaveRoomRate(socketId) {
+    const now = Date.now();
+    const entry = leaveRoomCounts.get(socketId) || { count: 0, resetTime: now + LEAVE_ROOM_RATE_WINDOW_MS };
+    if (now > entry.resetTime) {
+        entry.count = 0;
+        entry.resetTime = now + LEAVE_ROOM_RATE_WINDOW_MS;
+    }
+    entry.count++;
+    leaveRoomCounts.set(socketId, entry);
+    if (entry.count <= LEAVE_ROOM_RATE_LIMIT) return true;
+    rateLimitDenied.leaveRoom++;
+    return false;
+}
+
 export function startRateLimitCleanup(io) {
     if (authCleanupId !== null || rateLimitCleanupId !== null) return; // guard double-start
     // Clean up old auth failure records (every 15 minutes)
@@ -145,6 +163,11 @@ export function startRateLimitCleanup(io) {
                 eventCounts.delete(socketId);
             }
         }
+        for (const [socketId, entry] of leaveRoomCounts.entries()) {
+            if (now > entry.resetTime) {
+                leaveRoomCounts.delete(socketId);
+            }
+        }
         for (const [ip, entry] of healthCounts.entries()) {
             if (now > entry.resetTime) healthCounts.delete(ip);
         }
@@ -166,7 +189,9 @@ export function clearRateLimitMaps() {
     connectionCounts.clear();
     failedAuthAttempts.clear();
     eventCounts.clear();
+
     healthCounts.clear();
     adminMetricsAuthCounts.clear();
     roomListCooldowns.clear();
+    leaveRoomCounts.clear();
 }

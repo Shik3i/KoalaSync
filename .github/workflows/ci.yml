@@ -42,5 +42,9 @@ jobs:
         run: npm ci
         working-directory: server
 
-      - name: Run verification suite
-        run: npm run verify
+       - name: Run tests
+         run: npm test
+         continue-on-error: true
+
+       - name: Run verification suite
+         run: npm run verify

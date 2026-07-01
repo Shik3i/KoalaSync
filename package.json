@@ -8,15 +8,17 @@
     "build:extension": "node scripts/build-extension.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "node scripts/verify-release.mjs",
+    "test": "vitest run",
     "verify": "node scripts/verify-release.mjs"
   },
   "devDependencies": {
     "archiver": "^7.0.1",
+    "c8": "^11.0.0",
     "esbuild": "^0.28.1",
     "eslint": "^10.4.0",
     "fs-extra": "^11.2.0",
     "sharp": "^0.34.5",
-    "svgo": "^4.0.1"
+    "svgo": "^4.0.1",
+    "vitest": "^4.1.9"
   }
 }
