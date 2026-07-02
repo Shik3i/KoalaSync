@@ -2711,3 +2711,54 @@ elements.restartTourBtn?.addEventListener('click', () => {
     onboardingStep = 0;
     showOnboarding();
 });
+
+// Chat Functions
+function sendChatMessage() {
+    const text = elements.chatInput?.value;
+    if (!text || !text.trim()) return;
+    
+    const message = {
+        id: Date.now().toString(),
+        senderId: localPeerId,
+        username: elements.username?.value || 'Anonymous',
+        text: text.trim(),
+        timestamp: Date.now()
+    };
+    
+    // Send to background
+    chrome.runtime.sendMessage({ 
+        type: 'CHAT_MESSAGE', 
+        payload: message 
+    }).catch(err => {
+        console.error('Failed to send chat message:', err);
+    });
+    
+    // Clear input
+    if (elements.chatInput) {
+        elements.chatInput.value = '';
+    }
+}
+
+// Chat Event Listeners
+function initChatEventListeners() {
+    // Enter key sends message
+    elements.chatInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage();
+        }
+    });
+    
+    // Send button click
+    elements.sendBtn?.addEventListener('click', () => {
+        sendChatMessage();
+    });
+    
+    // Emoji button click (placeholder - shows toast for now)
+    elements.emojiBtn?.addEventListener('click', () => {
+        showToast('Emoji picker coming soon!', 'info');
+    });
+}
+
+// Initialize chat event listeners
+initChatEventListeners();
