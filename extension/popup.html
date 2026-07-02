@@ -293,6 +293,37 @@
             animation: fadeSlideIn 0.15s ease-out forwards;
         }
 
+        /* Chat Styles */
+        .chat-container { display: flex; flex-direction: column; height: 400px; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 10px; }
+        .message { margin: 8px 0; padding: 8px 12px; border-radius: 8px; }
+        .message.own { background: #007bff; color: white; align-self: flex-end; }
+        .message.other { background: #e9ecef; }
+        .message.system { background: transparent; font-style: italic; text-align: center; }
+        .message-header { font-size: 0.75rem; opacity: 0.7; margin-bottom: 4px; }
+        .message-text { word-break: break-word; }
+        .message-meta { font-size: 0.7rem; opacity: 0.5; margin-top: 4px; }
+        .chat-input-row { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #ddd; }
+        #chat-input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .typing-indicator { font-size: 0.8rem; font-style: italic; color: #666; padding: 0 10px; }
+        .read-receipt { font-size: 0.7rem; float: right; margin-left: 8px; }
+
+        /* Dark Mode */
+        :root {
+          --chat-bg: #ffffff;
+          --chat-text: #333333;
+          --chat-message-own: #007bff;
+          --chat-message-other: #e9ecef;
+        }
+        @media (prefers-color-scheme: dark) {
+          :root {
+            --chat-bg: #1a1a1a;
+            --chat-text: #e0e0e0;
+            --chat-message-own: #005cbf;
+            --chat-message-other: #333333;
+          }
+        }
+
         /* Toggle Switch CSS */
         .toggle-switch {
             position: relative;
@@ -389,6 +420,7 @@
     <div class="tabs">
         <button class="tab-btn active" data-tab="tab-room" data-i18n="TAB_ROOM" data-i18n-title="TAB_ROOM_TOOLTIP" title="Room settings and connection">Room</button>
         <button class="tab-btn" data-tab="tab-sync" data-i18n="TAB_SYNC" data-i18n-title="TAB_SYNC_TOOLTIP" title="Video sync controls and remote actions">Sync</button>
+        <button class="tab-btn" data-tab="tab-chat" data-i18n="TAB_CHAT" data-i18n-title="TAB_CHAT_TOOLTIP" title="Chat with peers">Chat</button>
         <button class="tab-btn" data-tab="tab-settings" data-i18n="TAB_SETTINGS" data-i18n-title="TAB_SETTINGS_TOOLTIP" title="Extension preferences">Settings</button>
         <button class="tab-btn" data-tab="tab-dev" data-i18n="TAB_STATUS" data-i18n-title="TAB_STATUS_TOOLTIP" title="Advanced Diagnostics & Logs">Status</button>
         <button id="devToolsTabBtn" class="tab-btn" data-tab="tab-devtools" style="display:none;">Dev</button>
@@ -645,6 +677,19 @@
             <a id="settingsSupportLink" href="#" target="_blank" data-i18n="FOOTER_SUPPORT">Support KoalaSync</a>
             <span> · </span>
             <span id="settingsVersion">v0.0.0</span>
+        </div>
+    </div>
+
+    <!-- Chat Tab -->
+    <div id="tab-chat" class="tab-content">
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-typing-indicator" id="chat-typing-indicator"></div>
+            <div class="chat-input-row">
+                <button id="emoji-btn" title="Emoji">😀</button>
+                <input type="text" id="chat-input" placeholder="Type a message..." maxlength="500">
+                <button id="send-btn" title="Send">➤</button>
+            </div>
         </div>
     </div>
 

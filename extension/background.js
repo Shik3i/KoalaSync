@@ -1396,6 +1396,82 @@ function handleServerEvent(event, data) {
                 }
             }
             break;
+        case EVENTS.CHAT_MESSAGE:
+            if (currentRoom && currentRoom.peers && data.senderId && data.text) {
+                // Forward to popup
+                const messagePayload = {
+                    type: 'CHAT_MESSAGE_RECEIVED',
+                    payload: {
+                        senderId: data.senderId,
+                        username: data.username,
+                        text: data.text,
+                        timestamp: data.timestamp
+                    }
+                };
+                chrome.runtime.sendMessage(messagePayload).catch(() => {});
+            }
+            break;
+        case EVENTS.CHAT_TYPING:
+            if (currentRoom && currentRoom.peers && data.senderId) {
+                // Forward to popup
+                const typingPayload = {
+                    type: 'CHAT_TYPING_RECEIVED',
+                    payload: {
+                        senderId: data.senderId,
+                        username: data.username,
+                        isTyping: data.isTyping
+                    }
+                };
+                chrome.runtime.sendMessage(typingPayload).catch(() => {});
+            }
+            break;
+        case EVENTS.CHAT_READ:
+            if (currentRoom && currentRoom.peers && data.senderId && data.targetId && data.messageId) {
+                // Forward to popup
+                const readPayload = {
+                    type: 'CHAT_READ_RECEIVED',
+                    payload: {
+                        senderId: data.senderId,
+                        targetId: data.targetId,
+                        messageId: data.messageId
+                    }
+                };
+                chrome.runtime.sendMessage(readPayload).catch(() => {});
+            }
+            break;
+        case EVENTS.CHAT_SYSTEM:
+            if (currentRoom && currentRoom.peers && data.message) {
+                // Forward to popup
+                const systemPayload = {
+                    type: 'CHAT_SYSTEM_RECEIVED',
+                    payload: {
+                        message: data.message,
+                        timestamp: data.timestamp
+                    }
+                };
+                chrome.runtime.sendMessage(systemPayload).catch(() => {});
+            }
+            break;
+        case EVENTS.CHAT_KICK:
+            // Only host/controller can kick
+            if (currentRoom && currentRoom.peers && data.senderId && data.targetId) {
+                // Validate permissions first
+                if (!amHost() && !amController()) {
+                    addLog(`Ignored CHAT_KICK from non-controller ${data.senderId} (host-only)`, 'warn');
+                    break;
+                }
+                
+                // Forward to popup
+                const kickPayload = {
+                    type: 'CHAT_KICK_RECEIVED',
+                    payload: {
+                        senderId: data.senderId,
+                        targetId: data.targetId
+                    }
+                };
+                chrome.runtime.sendMessage(kickPayload).catch(() => {});
+            }
+            break;
         default:
             addLog(`Received unknown event from server: ${event}`, 'warn');
             break;
@@ -2616,6 +2692,64 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             sendResponse({ status: 'ok' });
         } else {
             sendResponse({ error: 'No active lobby' });
+        }
+    } else if (message.type === 'CHAT_MESSAGE') {
+        // Forward chat message to the server
+        if (currentRoom && message.payload && message.payload.text) {
+            const payload = {
+                senderId: peerId,
+                username: message.payload.username,
+                text: message.payload.text,
+                timestamp: message.payload.timestamp
+            };
+            emit(EVENTS.CHAT_MESSAGE, payload);
+            sendResponse({ status: 'ok' });
+        } else {
+            sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
+        }
+    } else if (message.type === 'CHAT_TYPING') {
+        // Forward typing indicator to the server
+        if (currentRoom && message.payload) {
+            const payload = {
+                senderId: peerId,
+                username: message.payload.username,
+                isTyping: message.payload.isTyping
+            };
+            emit(EVENTS.CHAT_TYPING, payload);
+            sendResponse({ status: 'ok' });
+        } else {
+            sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
+        }
+    } else if (message.type === 'CHAT_READ') {
+        // Forward read receipt to the server
+        if (currentRoom && message.payload) {
+            const payload = {
+                senderId: peerId,
+                targetId: message.payload.targetId,
+                messageId: message.payload.messageId
+            };
+            emit(EVENTS.CHAT_READ, payload);
+            sendResponse({ status: 'ok' });
+        } else {
+            sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
+        }
+    } else if (message.type === 'CHAT_KICK') {
+        // Only host/controller can kick
+        if (!amHost() && !amController()) {
+            sendResponse({ status: 'error', message: 'Insufficient permissions' });
+            return;
+        }
+        
+        // Forward kick command to the server
+        if (currentRoom && message.payload) {
+            const payload = {
+                senderId: peerId,
+                targetId: message.payload.targetId
+            };
+            emit(EVENTS.CHAT_KICK, payload);
+            sendResponse({ status: 'ok' });
+        } else {
+            sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
         }
     } else {
         // Final fallback to prevent channel hanging

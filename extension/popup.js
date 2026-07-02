@@ -75,7 +75,14 @@ const elements = {
     devToolsTabBtn: document.getElementById('devToolsTabBtn'),
     remoteSeekBack: document.getElementById('remoteSeekBack'),
     remoteSeekForward: document.getElementById('remoteSeekForward'),
-    remoteSeekFiveMin: document.getElementById('remoteSeekFiveMin')
+    remoteSeekFiveMin: document.getElementById('remoteSeekFiveMin'),
+
+    // Chat elements
+    chatMessages: document.getElementById('chat-messages'),
+    chatInput: document.getElementById('chat-input'),
+    sendBtn: document.getElementById('send-btn'),
+    emojiBtn: document.getElementById('emoji-btn'),
+    chatTypingIndicator: document.getElementById('chat-typing-indicator')
 };
 
 let localPeerId = null;
@@ -92,6 +99,11 @@ let errorToken = 0;
 let forceSyncDone = false;
 let connectionErrorTimer = null;
 let pendingConnectionErrorMsg = null;
+
+// Chat state (reserved for future implementation)
+let _chatMessages = [];
+let _typingDebounce = null;
+let _readReceipts = new Map();
 
 function devToolsEnabled() {
     return elements.username && elements.username.value.trim() === 'KoalaDev';

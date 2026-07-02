@@ -46,3 +46,6 @@ website/www/
 
 # Temporary scratch files
 scratch/
+
+# Agent instructions (local only, never commit)
+AGENTS.md

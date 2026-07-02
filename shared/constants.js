@@ -59,7 +59,14 @@ export const EVENTS = {
 
     // Ping / Latency
     PING: "ping",  // { t: timestamp, target?: peerId } — empty target = server echo
-    PONG: "pong"   // server responds with same { t } for client RTT calculation
+    PONG: "pong",   // server responds with same { t } for client RTT calculation
+    
+    // Chat
+    CHAT_MESSAGE: "chat_message",
+    CHAT_TYPING: "chat_typing",
+    CHAT_READ: "chat_read",
+    CHAT_KICK: "chat_kick",
+    CHAT_SYSTEM: "chat_system"
 };
 
 // Room control modes (Host Control Mode feature).
