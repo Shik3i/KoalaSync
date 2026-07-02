@@ -298,30 +298,20 @@
         .chat-messages { flex: 1; overflow-y: auto; padding: 10px; }
         .message { margin: 8px 0; padding: 8px 12px; border-radius: 8px; }
         .message.own { background: #007bff; color: white; align-self: flex-end; }
-        .message.other { background: #e9ecef; color: var(--chat-text); }
+        .message.other { background: #ff1493; color: white; }
         .message.system { background: transparent; font-style: italic; text-align: center; }
-        .message-header { font-size: 0.75rem; opacity: 0.7; margin-bottom: 4px; }
+        .message-header { font-size: 0.75rem; opacity: 0.8; margin-bottom: 4px; }
         .message-text { word-break: break-word; }
-        .message-meta { font-size: 0.7rem; opacity: 0.5; margin-top: 4px; }
+        .message-meta { font-size: 0.7rem; opacity: 0.7; margin-top: 4px; }
         .chat-input-row { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #ddd; }
         #chat-input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
         .typing-indicator { font-size: 0.8rem; font-style: italic; color: #666; padding: 0 10px; }
         .read-receipt { font-size: 0.7rem; float: right; margin-left: 8px; }
 
         /* Dark Mode */
-        :root {
-          --chat-bg: #ffffff;
-          --chat-text: #333333;
-          --chat-message-own: #007bff;
-          --chat-message-other: #e9ecef;
-        }
         @media (prefers-color-scheme: dark) {
-          :root {
-            --chat-bg: #1a1a1a;
-            --chat-text: #e0e0e0;
-            --chat-message-own: #005cbf;
-            --chat-message-other: #333333;
-          }
+          .message.other { background: #8a2be2; color: white; }
+        }
         }
 
         /* Toggle Switch CSS */
