@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "Preferencje rozszerzenia",
   "TAB_STATUS": "Status",
   "TAB_STATUS_TOOLTIP": "Zaawansowana diagnostyka i logi",
+  "TAB_CHAT": "Czat",
+  "TAB_CHAT_TOOLTIP": "Czat z użytkownikami",
   "BTN_CREATE_ROOM": "+ Utwórz nowy pokój",
   "MANUAL_CONNECT_HEADER": "Połączenie ręczne / Zaawansowane",
   "LABEL_SERVER": "Serwer",

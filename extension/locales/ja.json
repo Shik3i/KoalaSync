@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "拡張機能の設定",
   "TAB_STATUS": "ステータス",
   "TAB_STATUS_TOOLTIP": "高度な診断とログ",
+  "TAB_CHAT": "チャット",
+  "TAB_CHAT_TOOLTIP": "ピアとチャット",
   "BTN_CREATE_ROOM": "+ 新規ルーム作成",
   "MANUAL_CONNECT_HEADER": "手動接続 / 詳細設定",
   "LABEL_SERVER": "サーバー",

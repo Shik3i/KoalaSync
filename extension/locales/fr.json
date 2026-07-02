@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "Préférences de l'extension",
   "TAB_STATUS": "Statut",
   "TAB_STATUS_TOOLTIP": "Diagnostics avancés & Journaux",
+  "TAB_CHAT": "Chat",
+  "TAB_CHAT_TOOLTIP": "Discuter avec les pairs",
   "BTN_CREATE_ROOM": "+ Créer un nouveau salon",
   "MANUAL_CONNECT_HEADER": "Connexion manuelle / Avancé",
   "LABEL_SERVER": "Serveur",

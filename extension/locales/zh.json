@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "扩展首选项",
   "TAB_STATUS": "状态",
   "TAB_STATUS_TOOLTIP": "高级诊断和日志",
+  "TAB_CHAT": "聊天",
+  "TAB_CHAT_TOOLTIP": "与对等方聊天",
   "BTN_CREATE_ROOM": "+ 创建新房间",
   "MANUAL_CONNECT_HEADER": "手动连接/高级",
   "LABEL_SERVER": "服务器",

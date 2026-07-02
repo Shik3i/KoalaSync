@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "Extensievoorkeuren",
   "TAB_STATUS": "Status",
   "TAB_STATUS_TOOLTIP": "Geavanceerde diagnostische gegevens & logs",
+  "TAB_CHAT": "Chat",
+  "TAB_CHAT_TOOLTIP": "Chat met peers",
   "BTN_CREATE_ROOM": "+ Nieuwe kamer maken",
   "MANUAL_CONNECT_HEADER": "Handmatig verbinden / Geavanceerd",
   "LABEL_SERVER": "Server",

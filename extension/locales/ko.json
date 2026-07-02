@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "확장 프로그램 기본 설정",
   "TAB_STATUS": "상태",
   "TAB_STATUS_TOOLTIP": "고급 진단 및 로그",
+  "TAB_CHAT": "채팅",
+  "TAB_CHAT_TOOLTIP": "피어와 채팅",
   "BTN_CREATE_ROOM": "+ 새 방 만들기",
   "MANUAL_CONNECT_HEADER": "수동 연결 / 고급",
   "LABEL_SERVER": "서버",

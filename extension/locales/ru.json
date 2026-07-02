@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "Настройки расширения",
   "TAB_STATUS": "Статус",
   "TAB_STATUS_TOOLTIP": "Дополнительная диагностика и журналы",
+  "TAB_CHAT": "Чат",
+  "TAB_CHAT_TOOLTIP": "Чат с участниками",
   "BTN_CREATE_ROOM": "+ Создать комнату",
   "MANUAL_CONNECT_HEADER": "Ручное подключение / Дополнительно",
   "LABEL_SERVER": "Сервер",

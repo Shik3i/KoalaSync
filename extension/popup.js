@@ -2725,6 +2725,9 @@ function sendChatMessage() {
         timestamp: Date.now()
     };
     
+    // Show own message immediately (local echo)
+    addMessageToUI(message, 'own');
+    
     // Send to background
     chrome.runtime.sendMessage({ 
         type: 'CHAT_MESSAGE', 
@@ -2762,3 +2765,50 @@ function initChatEventListeners() {
 
 // Initialize chat event listeners
 initChatEventListeners();
+
+// Chat Message Display
+function addMessageToUI(message, type = 'other') {
+    const container = elements.chatMessages;
+    if (!container) return;
+    
+    const div = document.createElement('div');
+    div.className = `message ${type}`;
+    div.dataset.messageId = message.id;
+    
+    const time = new Date(message.timestamp).toLocaleTimeString();
+    
+    div.innerHTML = `
+        <div class="message-header">${escapeHtml(message.username || 'Anonymous')} • ${time}</div>
+        <div class="message-text">${formatMessageText(message.text)}</div>
+    `;
+    
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function formatMessageText(text) {
+    if (!text) return '';
+    // Already escaped in escapeHtml, now apply markdown
+    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    return text;
+}
+
+// Receive chat messages from background
+chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === 'CHAT_MESSAGE_RECEIVED') {
+        // Determine if this is our own message or from another peer
+        const isOwn = msg.payload.senderId === localPeerId;
+        addMessageToUI(msg.payload, isOwn ? 'own' : 'other');
+    }
+});

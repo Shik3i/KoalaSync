@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "Preferencias de la extensión",
   "TAB_STATUS": "Estado",
   "TAB_STATUS_TOOLTIP": "Diagnósticos avanzados y registros",
+  "TAB_CHAT": "Chat",
+  "TAB_CHAT_TOOLTIP": "Chat con otros usuarios",
   "BTN_CREATE_ROOM": "+ Crear nueva sala",
   "MANUAL_CONNECT_HEADER": "Conexión manual / Avanzado",
   "LABEL_SERVER": "Servidor",

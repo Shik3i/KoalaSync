@@ -10,6 +10,8 @@
   "TAB_SETTINGS_TOOLTIP": "Eklenti tercihleri",
   "TAB_STATUS": "Durum",
   "TAB_STATUS_TOOLTIP": "Gelişmiş Teşhis ve Günlükler",
+  "TAB_CHAT": "Sohbet",
+  "TAB_CHAT_TOOLTIP": "Diğer kullanıcılarla sohbet",
   "BTN_CREATE_ROOM": "+ Yeni Oda Oluştur",
   "MANUAL_CONNECT_HEADER": "Manuel Bağlantı / Gelişmiş",
   "LABEL_SERVER": "Sunucu",
