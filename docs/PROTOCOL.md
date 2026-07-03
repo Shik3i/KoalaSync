@@ -111,6 +111,12 @@ peers in the room:
 - `episode_ready`
 - `episode_lobby_cancel`
 
+- `chat_message`
+- `chat_typing`
+- `chat_read`
+- `chat_kick`
+- `chat_system`
+
 Relayed payload fields are sanitized and may include:
 
 ```json
