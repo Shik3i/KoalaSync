@@ -410,6 +410,8 @@ io.on('connection', (socket) => {
                             peerIds: new Map(),
                             peerData: new Map(),
                             lastActivity: Date.now(),
+                            // Chat history for the room
+                            chatHistory: [],
                             // Host Control Mode: creator (first joiner) is the host/owner.
                             hostPeerId: peerId,
                             controlMode: CONTROL_MODES.EVERYONE,
@@ -510,7 +512,8 @@ io.on('connection', (socket) => {
                 hostPeerId: room.hostPeerId || null,
                 controlMode: room.controlMode || CONTROL_MODES.EVERYONE,
                 controllers: room.controllers ? Array.from(room.controllers) : [],
-                capabilities: SERVER_CAPABILITIES
+                capabilities: SERVER_CAPABILITIES,
+                chatHistory: room.chatHistory || []
             });
             log('ROOM', `Peer ${peerId} joined: ${roomId.substring(0, 3)}***`);
             } finally {
@@ -884,6 +887,14 @@ io.on('connection', (socket) => {
                 username,
                 timestamp
             };
+            
+            // Store message in chat history
+            room.chatHistory.push(relayPayload);
+            
+            // Trim chat history to 100 messages
+            if (room.chatHistory.length > 100) {
+                room.chatHistory.shift();
+            }
             
             // Broadcast to all other peers in room
             socket.to(mapping.roomId).emit(EVENTS.CHAT_MESSAGE, relayPayload);

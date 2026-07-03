@@ -1020,6 +1020,8 @@ function handleServerEvent(event, data) {
     }
     switch (event) {
         case EVENTS.ROOM_DATA:
+            // Forward ROOM_DATA to popup (includes chatHistory)
+            chrome.runtime.sendMessage({ type: 'ROOM_DATA', data }).catch(() => {});
             currentRoom = data;
             // Host Control Mode: adopt room role/mode on (re)join.
             controlMode = data.controlMode || CONTROL_MODES.EVERYONE;
@@ -2729,6 +2731,16 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 messageId: message.payload.messageId
             };
             emit(EVENTS.CHAT_READ, payload);
+            sendResponse({ status: 'ok' });
+        } else {
+            sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
+        }
+    } else if (message.type === 'CHAT_MESSAGE') {
+        // Forward CHAT_MESSAGE from popup to server
+        if (currentRoom && message.payload) {
+            const settings = await getSettings();
+            const outboundPayload = withTitlePrivacy(message.payload, settings, ['mediaTitle']);
+            emit(EVENTS.CHAT_MESSAGE, { ...outboundPayload, peerId });
             sendResponse({ status: 'ok' });
         } else {
             sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });

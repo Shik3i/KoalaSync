@@ -2726,6 +2726,7 @@ function sendChatMessage() {
     };
     
     // Show own message immediately (local echo)
+    console.log('Sending chat message:', message);
     addMessageToUI(message, 'own');
     
     // Send to background
@@ -2768,8 +2769,16 @@ initChatEventListeners();
 
 // Chat Message Display
 function addMessageToUI(message, type = 'other') {
+    console.log('Adding message to UI:', message, 'type:', type);
     const container = elements.chatMessages;
-    if (!container) return;
+    if (!container) {
+        console.warn('Chat messages container not found');
+        return;
+    }
+    
+    // Check for duplicate message
+    const existing = document.querySelector(`[data-message-id="${message.id}"]`);
+    if (existing) return;
     
     const div = document.createElement('div');
     div.className = `message ${type}`;
@@ -2784,6 +2793,7 @@ function addMessageToUI(message, type = 'other') {
     
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
+    console.log('Message added successfully');
 }
 
 function escapeHtml(text) {
@@ -2807,8 +2817,12 @@ function formatMessageText(text) {
 // Receive chat messages from background
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'CHAT_MESSAGE_RECEIVED') {
-        // Determine if this is our own message or from another peer
-        const isOwn = msg.payload.senderId === localPeerId;
-        addMessageToUI(msg.payload, isOwn ? 'own' : 'other');
+        try {
+            // Determine if this is our own message or from another peer
+            const isOwn = msg.payload.senderId === localPeerId;
+            addMessageToUI(msg.payload, isOwn ? 'own' : 'other');
+        } catch (error) {
+            console.error('Error processing chat message:', error);
+        }
     }
 });
