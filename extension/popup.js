@@ -2767,6 +2767,9 @@ function initChatEventListeners() {
 // Initialize chat event listeners
 initChatEventListeners();
 
+// Chat state
+const messageReadReceipts = new Map(); // messageId → { senderId, read: boolean }
+
 // Chat Message Display
 function addMessageToUI(message, type = 'other') {
     console.log('Adding message to UI:', message, 'type:', type);
@@ -2789,11 +2792,28 @@ function addMessageToUI(message, type = 'other') {
     div.innerHTML = `
         <div class="message-header">${escapeHtml(message.username || 'Anonymous')} • ${time}</div>
         <div class="message-text">${formatMessageText(message.text)}</div>
+        <div class="message-meta" id="receipt-${message.id}"></div>
     `;
     
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
     console.log('Message added successfully');
+}
+
+function updateReadReceipt(messageId, senderId) {
+    const receiptDiv = document.getElementById(`receipt-${messageId}`);
+    if (receiptDiv) {
+        // For own messages, show read status from other peers
+        if (senderId !== localPeerId) {
+            // Count how many peers have read this message
+            const receiptData = messageReadReceipts.get(messageId) || { readBy: new Set() };
+            receiptData.readBy.add(senderId);
+            messageReadReceipts.set(messageId, receiptData);
+            
+            const readCount = receiptData.readBy.size;
+            receiptDiv.textContent = `✓${'✓'.repeat(Math.min(readCount, 3))}`;
+        }
+    }
 }
 
 function escapeHtml(text) {
@@ -2821,8 +2841,22 @@ chrome.runtime.onMessage.addListener((msg) => {
             // Determine if this is our own message or from another peer
             const isOwn = msg.payload.senderId === localPeerId;
             addMessageToUI(msg.payload, isOwn ? 'own' : 'other');
+            
+            // Send read receipt for messages from others
+            if (!isOwn) {
+                chrome.runtime.sendMessage({
+                    type: 'CHAT_READ',
+                    payload: {
+                        messageId: msg.payload.id,
+                        targetId: msg.payload.senderId
+                    }
+                }).catch(() => {});
+            }
         } catch (error) {
             console.error('Error processing chat message:', error);
         }
+    } else if (msg.type === 'CHAT_READ_RECEIVED') {
+        // Update read receipt when another peer reads our message
+        updateReadReceipt(msg.payload.messageId, msg.payload.senderId);
     }
 });
