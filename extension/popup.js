@@ -225,6 +225,8 @@ async function init() {
     }
 
     await loadLocale(activeLang);
+    chrome.storage.sync.set({ onboardingComplete: true }).catch(() => {});
+    resetOnboardingOverlay();
     translateDOM();
     
     if (elements.langSelector) elements.langSelector.value = activeLang;
@@ -329,10 +331,8 @@ async function init() {
     // Debug Info Refresh
     popupIntervals.push(setInterval(refreshDebugInfo, 2000));
 
-    // Show onboarding on first visit
-    chrome.storage.sync.get(['onboardingComplete'], (data) => {
-        if (!data.onboardingComplete) showOnboarding();
-    });
+    // Keep the onboarding tour manual-only. Auto-starting it can obscure the
+    // popup after UI state restoration, especially when returning to saved tabs.
 }
 
 // --- UI Logic ---
@@ -1367,6 +1367,8 @@ elements.serverUrl.addEventListener('change', () => {
 
 elements.tabs.forEach(btn => {
     btn.addEventListener('click', () => {
+        if (!onboardingActive) resetOnboardingOverlay();
+
         elements.tabs.forEach(b => b.classList.remove('active'));
         elements.contents.forEach(c => c.classList.remove('active'));
         btn.classList.add('active');
@@ -1377,6 +1379,9 @@ elements.tabs.forEach(btn => {
         targetContent.classList.remove('tab-active-animate');
         void targetContent.offsetWidth; // Force reflow to restart animation
         targetContent.classList.add('tab-active-animate');
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
         
         isDevTabVisible = btn.dataset.tab === 'tab-dev';
         if (isDevTabVisible) refreshLogs();
@@ -2497,10 +2502,39 @@ function showSelectVideoHint() {
 
 let onboardingStep = 0;
 let onboardingTimeout = null;
+let onboardingActive = false;
+
+function resetOnboardingOverlay() {
+    if (onboardingTimeout) {
+        clearTimeout(onboardingTimeout);
+        onboardingTimeout = null;
+    }
+
+    const overlay = document.getElementById('onboarding-overlay');
+    const spotlight = document.getElementById('onboarding-spotlight');
+    const card = document.getElementById('onboarding-card');
+    const arrow = document.getElementById('onboarding-arrow');
+
+    if (overlay) overlay.style.display = 'none';
+    if (spotlight) {
+        spotlight.style.display = 'none';
+        spotlight.style.opacity = '0';
+    }
+    if (card) {
+        card.style.display = 'none';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(0.9)';
+    }
+    if (arrow) {
+        arrow.style.borderColor = 'transparent';
+    }
+    document.body.style.minHeight = '';
+}
 
 function showOnboarding() {
     const overlay = document.getElementById('onboarding-overlay');
     if (!overlay) return;
+    onboardingActive = true;
     document.body.style.minHeight = '420px';
     overlay.style.display = 'block';
     onboardingStep = 0;
@@ -2669,6 +2703,7 @@ function renderOnboardingStep() {
 
 function completeOnboarding() {
     if (onboardingTimeout) clearTimeout(onboardingTimeout);
+    onboardingActive = false;
     
     const overlay = document.getElementById('onboarding-overlay');
     const spotlight = document.getElementById('onboarding-spotlight');
