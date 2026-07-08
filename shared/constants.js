@@ -65,7 +65,8 @@ export const EVENTS = {
     CHAT_MESSAGE: "chat_message",
     CHAT_TYPING: "chat_typing",
     CHAT_READ: "chat_read",
-    CHAT_KICK: "chat_kick",
+    CHAT_BAN: "chat_ban",
+    CHAT_UNBAN: "chat_unban",
     CHAT_SYSTEM: "chat_system"
 };
 
@@ -84,7 +85,8 @@ export const CONTROL_MODES = {
 // simply ignore the field. Add a flag here as each server-gated feature lands.
 export const CAPABILITIES = {
     HOST_CONTROL: 'host-control',
-    CO_HOST: 'co-host'  // owner promotes guests to additional controllers
+    CO_HOST: 'co-host',  // owner promotes guests to additional controllers
+    CHAT: 'chat'
 };
 
 export const HEARTBEAT_INTERVAL = 15000; // 15s

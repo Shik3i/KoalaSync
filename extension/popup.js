@@ -82,6 +82,7 @@ const elements = {
     chatInput: document.getElementById('chat-input'),
     sendBtn: document.getElementById('send-btn'),
     emojiBtn: document.getElementById('emoji-btn'),
+    chatStatus: document.getElementById('chat-status'),
     chatTypingIndicator: document.getElementById('chat-typing-indicator')
 };
 
@@ -100,10 +101,12 @@ let forceSyncDone = false;
 let connectionErrorTimer = null;
 let pendingConnectionErrorMsg = null;
 
-// Chat state (reserved for future implementation)
-let _chatMessages = [];
-let _typingDebounce = null;
-let _readReceipts = new Map();
+let chatMessages = [];
+let chatTypingDebounce = null;
+let chatTypingClearTimer = null;
+let chatReadReceipts = new Map();
+let chatSupported = false;
+let chatBannedPeerIds = new Set();
 
 function devToolsEnabled() {
     return elements.username && elements.username.value.trim() === 'KoalaDev';
@@ -287,10 +290,11 @@ async function init() {
             reconnectSlowMode = res.reconnectSlowMode || false;
             applyConnectionStatus(res.status);
             updatePingDisplay(res.ping);
-            updatePeerList(res.peers);
-            lastKnownPeers = res.peers || [];
-            updateHostControlUI({ controlMode: res.controlMode, amHost: res.amHost, amController: res.amController, controllers: res.controllers, hostPeerId: res.hostPeerId, hostControlSupported: res.hostControlSupported, coHostSupported: res.coHostSupported, inRoom: res.status === 'connected' });
-            if (res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
+             updatePeerList(res.peers);
+             lastKnownPeers = res.peers || [];
+             updateHostControlUI({ controlMode: res.controlMode, amHost: res.amHost, amController: res.amController, controllers: res.controllers, hostPeerId: res.hostPeerId, hostControlSupported: res.hostControlSupported, coHostSupported: res.coHostSupported, inRoom: res.status === 'connected' });
+             applyChatRoomState({ chatSupported: res.chatSupported, chatHistory: res.chatHistory, chatBannedPeerIds: res.chatBannedPeerIds });
+             if (res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
 
             // If user has a room configured but background is not connected (disconnected or idle),
             // trigger connection now — the popup opening is explicit user intent.
@@ -668,7 +672,8 @@ function updatePeerList(peers) {
         media: p.mediaTitle,
         state: p.playbackState,
         vol: p.volume,
-        muted: p.muted
+        muted: p.muted,
+        chatBanned: chatBannedPeerIds.has(p.peerId || p)
     }));
     const currentPeersJson = JSON.stringify(stateToHash);
     if (currentPeersJson === lastPeersJson) return;
@@ -778,6 +783,21 @@ function updatePeerList(peers) {
                     });
                     rightGroup.appendChild(btn);
                 }
+            }
+
+            if (chatSupported && (hcmAmOwner || hcmControllers.includes(localPeerId)) && pId !== localPeerId) {
+                const chatBanned = chatBannedPeerIds.has(pId);
+                const chatBtn = document.createElement('button');
+                chatBtn.style.cssText = `font-size:10px; padding:3px 9px; border-radius:6px; cursor:pointer; white-space:nowrap; font-weight:600; border:1px solid ${chatBanned ? 'var(--success)' : 'var(--error)'}; background:transparent; color:${chatBanned ? 'var(--success)' : 'var(--error)'};`;
+                chatBtn.textContent = chatBanned ? 'Unban chat' : 'Ban chat';
+                chatBtn.title = chatBtn.textContent;
+                chatBtn.addEventListener('click', () => {
+                    chrome.runtime.sendMessage({
+                        type: chatBanned ? 'CHAT_UNBAN' : 'CHAT_BAN',
+                        payload: { targetId: pId }
+                    }).catch(() => {});
+                });
+                rightGroup.appendChild(chatBtn);
             }
 
             if (rightGroup.childNodes.length) header.appendChild(rightGroup);
@@ -2750,32 +2770,70 @@ elements.restartTourBtn?.addEventListener('click', () => {
 // Chat Functions
 function sendChatMessage() {
     const text = elements.chatInput?.value;
-    if (!text || !text.trim()) return;
-    
-    const message = {
-        id: Date.now().toString(),
-        senderId: localPeerId,
-        username: elements.username?.value || 'Anonymous',
-        text: text.trim(),
-        timestamp: Date.now()
-    };
-    
-    // Show own message immediately (local echo)
-    console.log('Sending chat message:', message);
-    addMessageToUI(message, 'own');
-    
-    // Send to background
+    if (!text || !text.trim() || !canUseChat()) return;
+
     chrome.runtime.sendMessage({ 
         type: 'CHAT_MESSAGE', 
-        payload: message 
+        payload: {
+            username: elements.username?.value || 'Anonymous',
+            text: text.trim()
+        }
     }).catch(err => {
         console.error('Failed to send chat message:', err);
     });
-    
-    // Clear input
+
     if (elements.chatInput) {
         elements.chatInput.value = '';
     }
+    sendChatTyping(false);
+}
+
+function canUseChat() {
+    return chatSupported && localPeerId && !chatBannedPeerIds.has(localPeerId);
+}
+
+function setChatAvailability() {
+    const available = canUseChat();
+    if (elements.chatInput) elements.chatInput.disabled = !available;
+    if (elements.sendBtn) elements.sendBtn.disabled = !available;
+    if (!elements.chatStatus) return;
+    if (!chatSupported) {
+        elements.chatStatus.textContent = 'Chat is disabled or unsupported on this server.';
+        elements.chatStatus.style.display = 'block';
+    } else if (localPeerId && chatBannedPeerIds.has(localPeerId)) {
+        elements.chatStatus.textContent = 'You are muted in chat by the host.';
+        elements.chatStatus.style.display = 'block';
+    } else {
+        elements.chatStatus.textContent = '';
+        elements.chatStatus.style.display = 'none';
+    }
+}
+
+function sendChatTyping(isTyping) {
+    if (!chatSupported || !localPeerId || chatBannedPeerIds.has(localPeerId)) return;
+    chrome.runtime.sendMessage({
+        type: 'CHAT_TYPING',
+        payload: {
+            username: elements.username?.value || 'Anonymous',
+            isTyping
+        }
+    }).catch(() => {});
+}
+
+function applyChatRoomState(state = {}) {
+    chatSupported = state.chatSupported === true;
+    chatBannedPeerIds = new Set(Array.isArray(state.chatBannedPeerIds) ? state.chatBannedPeerIds : []);
+    setChatAvailability();
+    renderChatHistory(Array.isArray(state.chatHistory) ? state.chatHistory : []);
+    lastPeersJson = '';
+    if (activePeers) updatePeerList(activePeers);
+}
+
+function renderChatHistory(messages) {
+    chatMessages = [];
+    chatReadReceipts = new Map();
+    if (elements.chatMessages) elements.chatMessages.replaceChildren();
+    messages.forEach(message => addMessageToUI(message, message.senderId === localPeerId ? 'own' : 'other'));
 }
 
 // Chat Event Listeners
@@ -2792,6 +2850,13 @@ function initChatEventListeners() {
     elements.sendBtn?.addEventListener('click', () => {
         sendChatMessage();
     });
+
+    elements.chatInput?.addEventListener('input', () => {
+        if (!canUseChat()) return;
+        sendChatTyping(true);
+        if (chatTypingDebounce) clearTimeout(chatTypingDebounce);
+        chatTypingDebounce = setTimeout(() => sendChatTyping(false), 1200);
+    });
     
     // Emoji button click (placeholder - shows toast for now)
     elements.emojiBtn?.addEventListener('click', () => {
@@ -2802,37 +2867,33 @@ function initChatEventListeners() {
 // Initialize chat event listeners
 initChatEventListeners();
 
-// Chat state
-const messageReadReceipts = new Map(); // messageId → { senderId, read: boolean }
-
 // Chat Message Display
 function addMessageToUI(message, type = 'other') {
-    console.log('Adding message to UI:', message, 'type:', type);
     const container = elements.chatMessages;
-    if (!container) {
-        console.warn('Chat messages container not found');
-        return;
-    }
-    
-    // Check for duplicate message
-    const existing = document.querySelector(`[data-message-id="${message.id}"]`);
-    if (existing) return;
-    
+    if (!container || !message || !message.id) return;
+    if (chatMessages.some(existing => existing.id === message.id)) return;
+    chatMessages.push(message);
+
     const div = document.createElement('div');
     div.className = `message ${type}`;
     div.dataset.messageId = message.id;
-    
-    const time = new Date(message.timestamp).toLocaleTimeString();
-    
-    div.innerHTML = `
-        <div class="message-header">${escapeHtml(message.username || 'Anonymous')} • ${time}</div>
-        <div class="message-text">${formatMessageText(message.text)}</div>
-        <div class="message-meta" id="receipt-${message.id}"></div>
-    `;
-    
+
+    const header = document.createElement('div');
+    header.className = 'message-header';
+    const name = message.username || message.senderId || 'Anonymous';
+    header.textContent = `${name} • ${new Date(message.timestamp || Date.now()).toLocaleTimeString()}`;
+
+    const text = document.createElement('div');
+    text.className = 'message-text';
+    text.textContent = message.text || '';
+
+    const meta = document.createElement('div');
+    meta.className = 'message-meta';
+    meta.id = `receipt-${message.id}`;
+
+    div.append(header, text, meta);
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
-    console.log('Message added successfully');
 }
 
 function updateReadReceipt(messageId, senderId) {
@@ -2841,9 +2902,9 @@ function updateReadReceipt(messageId, senderId) {
         // For own messages, show read status from other peers
         if (senderId !== localPeerId) {
             // Count how many peers have read this message
-            const receiptData = messageReadReceipts.get(messageId) || { readBy: new Set() };
+            const receiptData = chatReadReceipts.get(messageId) || { readBy: new Set() };
             receiptData.readBy.add(senderId);
-            messageReadReceipts.set(messageId, receiptData);
+            chatReadReceipts.set(messageId, receiptData);
             
             const readCount = receiptData.readBy.size;
             receiptDiv.textContent = `✓${'✓'.repeat(Math.min(readCount, 3))}`;
@@ -2851,27 +2912,15 @@ function updateReadReceipt(messageId, senderId) {
     }
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-function formatMessageText(text) {
-    if (!text) return '';
-    // Already escaped in escapeHtml, now apply markdown
-    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    return text;
-}
-
 // Receive chat messages from background
 chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'CHAT_MESSAGE_RECEIVED') {
+    if (msg.type === 'ROOM_DATA') {
+        applyChatRoomState({
+            chatSupported: Array.isArray(msg.data?.capabilities) && msg.data.capabilities.includes('chat'),
+            chatHistory: msg.data?.chatHistory,
+            chatBannedPeerIds: msg.data?.chatBannedPeerIds
+        });
+    } else if (msg.type === 'CHAT_MESSAGE_RECEIVED') {
         try {
             // Determine if this is our own message or from another peer
             const isOwn = msg.payload.senderId === localPeerId;
@@ -2893,5 +2942,25 @@ chrome.runtime.onMessage.addListener((msg) => {
     } else if (msg.type === 'CHAT_READ_RECEIVED') {
         // Update read receipt when another peer reads our message
         updateReadReceipt(msg.payload.messageId, msg.payload.senderId);
+    } else if (msg.type === 'CHAT_TYPING_RECEIVED') {
+        if (elements.chatTypingIndicator && msg.payload.senderId !== localPeerId && msg.payload.isTyping) {
+            elements.chatTypingIndicator.textContent = `${msg.payload.username || msg.payload.senderId} is typing...`;
+            if (chatTypingClearTimer) clearTimeout(chatTypingClearTimer);
+            chatTypingClearTimer = setTimeout(() => {
+                if (elements.chatTypingIndicator) elements.chatTypingIndicator.textContent = '';
+            }, 1500);
+        }
+    } else if (msg.type === 'CHAT_BAN_RECEIVED' || msg.type === 'CHAT_UNBAN_RECEIVED') {
+        chatBannedPeerIds = new Set(Array.isArray(msg.payload.chatBannedPeerIds) ? msg.payload.chatBannedPeerIds : []);
+        setChatAvailability();
+        lastPeersJson = '';
+        if (activePeers) updatePeerList(activePeers);
+    } else if (msg.type === 'CHAT_SYSTEM_RECEIVED') {
+        addMessageToUI({
+            id: msg.payload.id || `system-${Date.now()}`,
+            text: msg.payload.text || '',
+            timestamp: msg.payload.timestamp || Date.now(),
+            username: 'System'
+        }, 'system');
     }
 });

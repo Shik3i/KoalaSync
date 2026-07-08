@@ -66,4 +66,14 @@ assert.match(
   /function\s+resetOnboardingOverlay\(\)[\s\S]*document\.body\.style\.minHeight\s*=\s*''/,
   'popup should clear any leftover onboarding overlay layout state'
 );
+assert.equal(
+  /div\.innerHTML\s*=/.test(popupScript),
+  false,
+  'popup chat rendering should not assign user-controlled message markup through innerHTML'
+);
+assert.match(
+  popupScript,
+  /function\s+addMessageToUI\(message,\s*type\s*=\s*'other'\)[\s\S]*textContent/,
+  'chat messages should be rendered through textContent-based DOM construction'
+);
 console.log('popup css parse test passed');

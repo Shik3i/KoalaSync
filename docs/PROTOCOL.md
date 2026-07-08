@@ -69,7 +69,9 @@ Payload:
   "hostPeerId": "string or null",
   "controlMode": "everyone | host-only",
   "controllers": ["peerId"],
-  "capabilities": ["host-control", "co-host"]
+  "capabilities": ["host-control", "co-host", "chat"],
+  "chatHistory": ["chat message objects"],
+  "chatBannedPeerIds": ["peerId"]
 }
 ```
 
@@ -111,12 +113,6 @@ peers in the room:
 - `episode_ready`
 - `episode_lobby_cancel`
 
-- `chat_message`
-- `chat_typing`
-- `chat_read`
-- `chat_kick`
-- `chat_system`
-
 Relayed payload fields are sanitized and may include:
 
 ```json
@@ -141,6 +137,96 @@ Relayed payload fields are sanitized and may include:
 ```
 
 Undefined fields are removed before relay. Raw client payloads are not forwarded.
+
+## Chat
+
+Chat is advertised with `CAPABILITIES.CHAT` (`"chat"`). If the capability is
+absent, clients should disable chat UI. The relay omits this capability when
+`CHAT_HISTORY_LIMIT=0`, which disables chat entirely server-side.
+
+Chat events are handled by dedicated server handlers, not the generic relay
+loop:
+
+- `chat_message`
+- `chat_typing`
+- `chat_read`
+- `chat_ban`
+- `chat_unban`
+- `chat_system`
+
+### `chat_message`
+
+Client payload:
+
+```json
+{
+  "username": "string, max 30, optional",
+  "text": "string, max 500"
+}
+```
+
+Server relay payload:
+
+```json
+{
+  "id": "string",
+  "senderId": "peerId of sender",
+  "username": "string or null",
+  "text": "string, max 500",
+  "timestamp": "number"
+}
+```
+
+The server owns `id`, `senderId`, and `timestamp`. The sanitized message is
+sent back to the sender and to other peers. The relay stores the message in
+RAM-only room history capped by `CHAT_HISTORY_LIMIT`.
+
+### `chat_typing`
+
+Broadcasts transient typing state to other room peers. Chat-banned peers cannot
+send typing events.
+
+### `chat_read`
+
+Relays a read receipt only when sender and target are in the same room.
+
+Payload:
+
+```json
+{
+  "senderId": "peerId of reader, server-set",
+  "targetId": "peerId of original sender",
+  "messageId": "chat message id"
+}
+```
+
+### `chat_ban` / `chat_unban`
+
+Host/controllers can ban or unban a peer from chat without removing them from
+the sync room.
+
+Client payload:
+
+```json
+{
+  "targetId": "peerId"
+}
+```
+
+Server broadcast payload:
+
+```json
+{
+  "senderId": "host/controller peerId",
+  "targetId": "peerId",
+  "chatBannedPeerIds": ["peerId"],
+  "timestamp": "number"
+}
+```
+
+### `chat_system`
+
+Server-generated only. Clients cannot broadcast arbitrary system messages.
 
 ## Media Control
 

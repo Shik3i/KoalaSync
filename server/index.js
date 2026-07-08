@@ -62,6 +62,16 @@ const MIN_VERSION = process.env.MIN_VERSION || '1.0.0';
 const ADMIN_METRICS_TOKEN = process.env.ADMIN_METRICS_TOKEN || '';
 const HEALTH_RESPONSE_CACHE_TTL_MS = 60000;
 
+function parseChatHistoryLimit(value) {
+    if (value === undefined || value === null || value === '') return 100;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return 100;
+    return Math.max(0, Math.min(500, parsed));
+}
+
+const CHAT_HISTORY_LIMIT = parseChatHistoryLimit(process.env.CHAT_HISTORY_LIMIT);
+const CHAT_ENABLED = CHAT_HISTORY_LIMIT > 0;
+
 if (!isAdminMetricsTokenStrong(ADMIN_METRICS_TOKEN)) {
     console.warn('[SECURITY] ADMIN_METRICS_TOKEN is set but shorter than 32 characters. Use a long random token.');
 }
@@ -172,6 +182,7 @@ const HOST_ONLY_GATED_EVENTS = new Set([
 // enable matching UI/behavior only when the server actually backs it. Append a
 // flag here when a new server-gated feature ships (e.g. co-host promotion).
 const SERVER_CAPABILITIES = [CAPABILITIES.HOST_CONTROL, CAPABILITIES.CO_HOST];
+if (CHAT_ENABLED) SERVER_CAPABILITIES.push(CAPABILITIES.CHAT);
 
 // M-4: minimum interval between CONTROL_MODE changes per room. Stops a rapidly
 // toggling host from thrashing every guest's UI (locked/unlocked/locked...) and
@@ -410,8 +421,9 @@ io.on('connection', (socket) => {
                             peerIds: new Map(),
                             peerData: new Map(),
                             lastActivity: Date.now(),
-                            // Chat history for the room
                             chatHistory: [],
+                            chatBannedPeerIds: new Set(),
+                            nextChatMessageSeq: 0,
                             // Host Control Mode: creator (first joiner) is the host/owner.
                             hostPeerId: peerId,
                             controlMode: CONTROL_MODES.EVERYONE,
@@ -513,7 +525,8 @@ io.on('connection', (socket) => {
                 controlMode: room.controlMode || CONTROL_MODES.EVERYONE,
                 controllers: room.controllers ? Array.from(room.controllers) : [],
                 capabilities: SERVER_CAPABILITIES,
-                chatHistory: room.chatHistory || []
+                chatHistory: CHAT_ENABLED ? (room.chatHistory || []) : [],
+                chatBannedPeerIds: CHAT_ENABLED && room.chatBannedPeerIds ? Array.from(room.chatBannedPeerIds) : []
             });
             log('ROOM', `Peer ${peerId} joined: ${roomId.substring(0, 3)}***`);
             } finally {
@@ -534,8 +547,7 @@ io.on('connection', (socket) => {
         EVENTS.PEER_STATUS, EVENTS.FORCE_SYNC_PREPARE, 
         EVENTS.FORCE_SYNC_ACK, EVENTS.FORCE_SYNC_EXECUTE,
         EVENTS.EPISODE_LOBBY, EVENTS.EPISODE_READY,
-        EVENTS.EPISODE_LOBBY_CANCEL,
-        EVENTS.CHAT_MESSAGE, EVENTS.CHAT_TYPING, EVENTS.CHAT_READ, EVENTS.CHAT_KICK, EVENTS.CHAT_SYSTEM
+        EVENTS.EPISODE_LOBBY_CANCEL
     ];
 
     relayEvents.forEach(eventName => {
@@ -848,7 +860,38 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Chat Event Handlers
+    function chatContext() {
+        if (!CHAT_ENABLED) return null;
+        const mapping = socketToRoom.get(socket.id);
+        if (!mapping) return null;
+        const room = rooms.get(mapping.roomId);
+        if (!room) return null;
+        room.lastActivity = Date.now();
+        if (!room.chatBannedPeerIds) room.chatBannedPeerIds = new Set();
+        if (!Array.isArray(room.chatHistory)) room.chatHistory = [];
+        return { mapping, room };
+    }
+
+    function sanitizeChatText(text, max) {
+        return typeof text === 'string' ? text.trim().substring(0, max) : '';
+    }
+
+    function sanitizeChatId(value) {
+        return typeof value === 'string' && /^[a-zA-Z0-9:_-]{1,80}$/.test(value) ? value : null;
+    }
+
+    function isChatController(room, peerId) {
+        return peerId === room.hostPeerId || (room.controllers && room.controllers.has(peerId));
+    }
+
+    function emitChatSystem(roomId, text) {
+        io.to(roomId).emit(EVENTS.CHAT_SYSTEM, {
+            id: `system-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+            text,
+            timestamp: Date.now()
+        });
+    }
+
     socket.on(EVENTS.CHAT_MESSAGE, (data) => {
         try {
             if (!checkEventRate(socket.id)) {
@@ -856,48 +899,28 @@ io.on('connection', (socket) => {
                 socket.disconnect(true);
                 return;
             }
-            
             if (!data || typeof data !== 'object') return;
-            
-            const mapping = socketToRoom.get(socket.id);
-            if (!mapping) return;
-            
-            const room = rooms.get(mapping.roomId);
-            if (!room) return;
-            
-            // Sanitize payload: text (max 500 chars, HTML-escaped), senderId, username, timestamp
-            const sanitizeText = (text) => {
-                if (!text || typeof text !== 'string') return '';
-                // HTML escape
-                return text
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .substring(0, 500);
+            const ctx = chatContext();
+            if (!ctx || ctx.room.chatBannedPeerIds.has(ctx.mapping.peerId)) return;
+
+            const text = sanitizeChatText(data.text, 500);
+            if (!text) return;
+            const username = sanitizeChatText(data.username, 30) || null;
+            const nextSeq = (ctx.room.nextChatMessageSeq || 0) + 1;
+            ctx.room.nextChatMessageSeq = nextSeq;
+            const relayPayload = {
+                id: `chat-${Date.now()}-${nextSeq}`,
+                senderId: ctx.mapping.peerId,
+                username,
+                text,
+                timestamp: Date.now()
             };
 
-            const sanitizedText = sanitizeText(data.text);
-            const senderId = mapping.peerId;
-            const username = data.username || null;
-            const timestamp = data.timestamp || Date.now();
-            
-            const relayPayload = {
-                senderId,
-                text: sanitizedText,
-                username,
-                timestamp
-            };
-            
-            // Store message in chat history
-            room.chatHistory.push(relayPayload);
-            
-            // Trim chat history to 100 messages
-            if (room.chatHistory.length > 100) {
-                room.chatHistory.shift();
-            }
-            
-            // Broadcast to all other peers in room
-            socket.to(mapping.roomId).emit(EVENTS.CHAT_MESSAGE, relayPayload);
+            ctx.room.chatHistory.push(relayPayload);
+            while (ctx.room.chatHistory.length > CHAT_HISTORY_LIMIT) ctx.room.chatHistory.shift();
+
+            socket.emit(EVENTS.CHAT_MESSAGE, relayPayload);
+            socket.to(ctx.mapping.roomId).emit(EVENTS.CHAT_MESSAGE, relayPayload);
         } catch (err) {
             log('ERROR', `CHAT_MESSAGE handler error: ${err.message}`);
         }
@@ -910,17 +933,12 @@ io.on('connection', (socket) => {
                 socket.disconnect(true);
                 return;
             }
-            
-            const mapping = socketToRoom.get(socket.id);
-            if (!mapping) return;
-            
-            const room = rooms.get(mapping.roomId);
-            if (!room) return;
-            
-            // Broadcast to all other peers
-            socket.to(mapping.roomId).emit(EVENTS.CHAT_TYPING, {
-                senderId: mapping.peerId,
-                username: data?.username || null
+            const ctx = chatContext();
+            if (!ctx || ctx.room.chatBannedPeerIds.has(ctx.mapping.peerId)) return;
+            socket.to(ctx.mapping.roomId).emit(EVENTS.CHAT_TYPING, {
+                senderId: ctx.mapping.peerId,
+                username: sanitizeChatText(data?.username, 30) || null,
+                isTyping: data?.isTyping === true
             });
         } catch (err) {
             log('ERROR', `CHAT_TYPING handler error: ${err.message}`);
@@ -929,92 +947,82 @@ io.on('connection', (socket) => {
 
     socket.on(EVENTS.CHAT_READ, (data) => {
         try {
-            if (!data || typeof data !== 'object') return;
-            
-            const mapping = socketToRoom.get(socket.id);
-            if (!mapping) return;
-            
-            const room = rooms.get(mapping.roomId);
-            if (!room) return;
-            
-            // Relay only to targetId (read receipt)
-            const targetSocketId = peerToSocket.get(data.targetId);
-            if (targetSocketId) {
-                io.to(targetSocketId).emit(EVENTS.CHAT_READ, {
-                    senderId: mapping.peerId,
-                    targetId: data.targetId,
-                    messageId: data.messageId
-                });
+            if (!checkEventRate(socket.id)) {
+                log('SECURITY', `Event rate limit exceeded for socket (CHAT_READ): ${socket.id}`);
+                socket.disconnect(true);
+                return;
             }
+            if (!data || typeof data !== 'object') return;
+            const ctx = chatContext();
+            if (!ctx || ctx.room.chatBannedPeerIds.has(ctx.mapping.peerId)) return;
+
+            const targetId = sanitizeChatId(data.targetId);
+            const messageId = sanitizeChatId(data.messageId);
+            if (!targetId || !messageId) return;
+            const targetSocketId = peerToSocket.get(targetId);
+            const targetMapping = targetSocketId ? socketToRoom.get(targetSocketId) : null;
+            if (!targetSocketId || !targetMapping || targetMapping.roomId !== ctx.mapping.roomId) return;
+
+            io.to(targetSocketId).emit(EVENTS.CHAT_READ, {
+                senderId: ctx.mapping.peerId,
+                targetId,
+                messageId
+            });
         } catch (err) {
             log('ERROR', `CHAT_READ handler error: ${err.message}`);
         }
     });
 
-    socket.on(EVENTS.CHAT_KICK, (data) => {
+    function handleChatModeration(data, banned) {
+        if (!checkEventRate(socket.id)) {
+            log('SECURITY', `Event rate limit exceeded for socket (${banned ? 'CHAT_BAN' : 'CHAT_UNBAN'}): ${socket.id}`);
+            socket.disconnect(true);
+            return;
+        }
+        if (!data || typeof data !== 'object') return;
+        const ctx = chatContext();
+        if (!ctx) return;
+        if (!isChatController(ctx.room, ctx.mapping.peerId)) {
+            log('AUTH', `Non-controller ${ctx.mapping.peerId} tried to ${banned ? 'ban' : 'unban'} chat in ${ctx.mapping.roomId.substring(0, 3)}***`);
+            return;
+        }
+        const targetId = sanitizeChatId(data.targetId);
+        if (!targetId || targetId === ctx.mapping.peerId) return;
+        const targetSocketId = peerToSocket.get(targetId);
+        const targetMapping = targetSocketId ? socketToRoom.get(targetSocketId) : null;
+        if (!targetSocketId || !targetMapping || targetMapping.roomId !== ctx.mapping.roomId) return;
+
+        if (banned) ctx.room.chatBannedPeerIds.add(targetId);
+        else ctx.room.chatBannedPeerIds.delete(targetId);
+
+        const payload = {
+            senderId: ctx.mapping.peerId,
+            targetId,
+            chatBannedPeerIds: Array.from(ctx.room.chatBannedPeerIds),
+            timestamp: Date.now()
+        };
+        io.to(ctx.mapping.roomId).emit(banned ? EVENTS.CHAT_BAN : EVENTS.CHAT_UNBAN, payload);
+        emitChatSystem(ctx.mapping.roomId, `${targetId} was ${banned ? 'banned from' : 'restored to'} chat by ${ctx.mapping.peerId}`);
+    }
+
+    socket.on(EVENTS.CHAT_BAN, (data) => {
         try {
-            if (!checkEventRate(socket.id)) {
-                log('SECURITY', `Event rate limit exceeded for socket (CHAT_KICK): ${socket.id}`);
-                socket.disconnect(true);
-                return;
-            }
-            
-            if (!data || typeof data !== 'object') return;
-            
-            const mapping = socketToRoom.get(socket.id);
-            if (!mapping) return;
-            
-            const room = rooms.get(mapping.roomId);
-            if (!room) return;
-            
-            // Verify sender is host or controller (check controlMode and controllers)
-            const isHost = mapping.peerId === room.hostPeerId;
-            const isController = room.controllers && room.controllers.has(mapping.peerId);
-            if (!isHost && !isController) {
-                log('AUTH', `Non-controller ${mapping.peerId} tried to kick in ${mapping.roomId.substring(0, 3)}***`);
-                return;
-            }
-            
-            const targetId = data.targetId;
-            if (!targetId) return;
-            
-            // Remove peer from room
-            const targetSocketId = peerToSocket.get(targetId);
-            if (targetSocketId) {
-                // Remove the target peer from the room
-                const targetMapping = socketToRoom.get(targetSocketId);
-                if (targetMapping && targetMapping.roomId === mapping.roomId) {
-                    socket.to(mapping.roomId).emit(EVENTS.CHAT_SYSTEM, {
-                        text: `${targetId} was kicked by ${mapping.peerId}`
-                    });
-                    removePeerFromRoom(targetSocketId, mapping.roomId, 'kick');
-                }
-            }
+            handleChatModeration(data, true);
         } catch (err) {
-            log('ERROR', `CHAT_KICK handler error: ${err.message}`);
+            log('ERROR', `CHAT_BAN handler error: ${err.message}`);
         }
     });
 
-    socket.on(EVENTS.CHAT_SYSTEM, (data) => {
+    socket.on(EVENTS.CHAT_UNBAN, (data) => {
         try {
-            if (!data || typeof data !== 'object') return;
-            
-            const mapping = socketToRoom.get(socket.id);
-            if (!mapping) return;
-            
-            const room = rooms.get(mapping.roomId);
-            if (!room) return;
-            
-            // For system messages, we can just broadcast them to all peers
-            const relayPayload = {
-                text: data.text || '',
-                timestamp: data.timestamp || Date.now()
-            };
-            
-            socket.to(mapping.roomId).emit(EVENTS.CHAT_SYSTEM, relayPayload);
+            handleChatModeration(data, false);
         } catch (err) {
-            log('ERROR', `CHAT_SYSTEM handler error: ${err.message}`);
+            log('ERROR', `CHAT_UNBAN handler error: ${err.message}`);
         }
+    });
+
+    socket.on(EVENTS.CHAT_SYSTEM, () => {
+        // System messages are server-generated only.
     });
 
     socket.on('disconnect', () => {

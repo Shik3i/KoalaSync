@@ -1,59 +1,81 @@
-# KoalaSync Chat (soonTMChat)
+# KoalaSync Chat
 
-In-Room Text-Chat für synchronisierte Watch-Parties.
+In-room text chat for synchronized watch parties.
 
----
+## Status
 
-## Overview
+- Storage: RAM-only per room.
+- Persistence: none across room deletion or server restart.
+- Rendering: plain text plus Unicode emoji characters typed by the user.
+- Markdown, image sharing, files, private messages, and link previews are out of scope.
 
-Der Chat ermöglicht es Room-Mitgliedern, Textnachrichten auszutauschen, ohne die Video-Synchronisation zu unterbrechen.
+## Server Configuration
 
-**Status:** MVP (seit v2.6.0)  
-**Privacy:** RAM-only, keine Persistenz
+`CHAT_HISTORY_LIMIT` controls chat availability and room history size.
 
----
+| Value | Behavior |
+|-------|----------|
+| unset / invalid | Defaults to `100` messages per room |
+| `0` | Disables chat entirely on the server |
+| `1..500` | Enables chat and caps room history at that many messages |
+| `>500` | Clamped to `500` |
+
+Docker/self-hosted deployments can set this as a normal server environment variable.
 
 ## Features
 
-| Feature | Beschreibung |
-|---------|--------------|
-| **Text-Nachrichten** | Senden/Empfangen von Chat-Nachrichten an alle Room-Peers |
-| **Emoji-Support** | Unicode-Emoji-Picker für schnelle Reaktionen |
-| **Markdown-Formatting** | `**fett**` → **fett**, `*kursiv*` → *kursiv* |
-| **Typing Indicator** | "X schreibt..." wird nach 1s Tippen angezeigt |
-| **Read Receipts** | ⚪⚪ (gesendet) → ✓✓ (gelesen) |
-| **Host-Kick** | Host kann Peers aus dem Chat kicken |
-| **Dark Mode** | Automatisches Umschalten via `prefers-color-scheme` |
-| **Rate-Limiting** | 10 Nachrichten/10s pro Peer (Spam-Schutz) |
+| Feature | Behavior |
+|---------|----------|
+| Text messages | Room-wide plain-text messages |
+| Chat history | Last `CHAT_HISTORY_LIMIT` messages, sent in `room_data` |
+| Typing indicator | Broadcasts transient typing state to other room peers |
+| Read receipts | Recipient sends `chat_read` to the original sender |
+| Chat ban | Host/controller can ban a peer from chat without removing them from sync |
+| Chat unban | Host/controller can restore chat access |
+| System messages | Server-generated moderation messages |
 
----
-
-## Technical Implementation
-
-### Protocol Events
+## Protocol Events
 
 ```javascript
-// shared/constants.js
-EVENTS.CHAT_MESSAGE    // "chat_message"    - User-Nachricht
-EVENTS.CHAT_TYPING     // "chat_typing"     - Tippt gerade
-EVENTS.CHAT_READ       // "chat_read"       - Read Receipt
-EVENTS.CHAT_KICK       // "chat_kick"       - Peer kicken
-EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
+EVENTS.CHAT_MESSAGE  // "chat_message"
+EVENTS.CHAT_TYPING   // "chat_typing"
+EVENTS.CHAT_READ     // "chat_read"
+EVENTS.CHAT_BAN      // "chat_ban"
+EVENTS.CHAT_UNBAN    // "chat_unban"
+EVENTS.CHAT_SYSTEM   // "chat_system"
 ```
 
-### Payloads
+The relay advertises chat support with `CAPABILITIES.CHAT` (`"chat"`). If the capability is absent, clients must disable chat UI.
 
-**chat_message:**
+## Payloads
+
+### `chat_message`
+
+Client sends:
+
 ```json
 {
+  "username": "Alice",
+  "text": "Hello everyone"
+}
+```
+
+Server relays to sender and room peers:
+
+```json
+{
+  "id": "chat-1719950400000-1",
   "senderId": "a1b2c3d4",
   "username": "Alice",
-  "text": "Hallo **Welt**!",
+  "text": "Hello everyone",
   "timestamp": 1719950400000
 }
 ```
 
-**chat_typing:**
+The server owns `id`, `senderId`, and `timestamp`.
+
+### `chat_typing`
+
 ```json
 {
   "senderId": "a1b2c3d4",
@@ -62,171 +84,85 @@ EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
 }
 ```
 
-**chat_read:**
+### `chat_read`
+
 ```json
 {
   "senderId": "b2c3d4e5",
   "targetId": "a1b2c3d4",
-  "messageId": "msg-123"
+  "messageId": "chat-1719950400000-1"
 }
 ```
 
-**chat_kick:**
+The server only relays read receipts when sender and target are in the same room.
+
+### `chat_ban` / `chat_unban`
+
+Client sends:
+
+```json
+{
+  "targetId": "b2c3d4e5"
+}
+```
+
+Server broadcasts:
+
 ```json
 {
   "senderId": "host-peer-id",
-  "targetId": "a1b2c3d4"
+  "targetId": "b2c3d4e5",
+  "chatBannedPeerIds": ["b2c3d4e5"],
+  "timestamp": 1719950400000
 }
 ```
 
-**chat_system:**
+Only host/controllers may send these events. A banned peer remains in the sync room but cannot send chat messages, typing events, or read receipts.
+
+### `chat_system`
+
+Server-generated only:
+
 ```json
 {
-  "type": "join",
-  "username": "Bob",
-  "text": "Bob joined the room"
+  "id": "system-1719950400000-abc123",
+  "text": "b2c3d4e5 was banned from chat by host-peer-id",
+  "timestamp": 1719950400000
 }
 ```
 
-### Server-Side Security
+Clients cannot broadcast arbitrary system messages.
 
-| Maßnahme | Umsetzung |
-|----------|-----------|
-| **Rate-Limiting** | 10 Nachrichten/10s pro Socket, Disconnect bei Überschreitung |
-| **XSS-Prävention** | HTML-Escaping: `<` → `&lt;`, `>` → `&gt;`, `&` → `&amp;` |
-| **Host Control** | `chat_kick` nur für Host/Controller in `host-only` mode |
-| **Payload-Sanitization** | Text max. 500 chars, Username max. 30 chars |
+## `room_data` Additions
 
-### Client-Side Security
-
-| Maßnahme | Umsetzung |
-|----------|-----------|
-| **XSS-Prävention** | HTML-Escaping VOR Markdown-Parsing |
-| **Input-Validation** | `maxlength="500"` am Input-Feld |
-| **No Persistence** | Nachrichten nur im RAM, keine Speicherung |
-
----
-
-## User Flow
-
-### Nachricht senden
-1. User tippt Text ins Chat-Input-Feld
-2. Nach 1s Tippen: "X schreibt..." wird bei Peers angezeigt
-3. User drückt Enter oder Klick auf Send-Button
-4. Nachricht wird an Server gerelayt
-5. Server sanitized + broadcast an alle Peers
-6. Empfänger rendern Nachricht im Chat
-
-### Read Receipt
-1. Nachricht wird empfangen
-2. Popup sendet `chat_read` an Server
-3. Server relayt an `targetId` (Original-Sender)
-4. Sender sieht Update: ⚪⚪ → ✓✓
-
-### Host-Kick
-1. Host klickt auf Kick-Button neben Peer-Name
-2. `chat_kick` wird an Server gesendet
-3. Server validiert: Host/Controller?
-4. `removePeerFromRoom()` wird aufgerufen
-5. System-Nachricht: "X was kicked by Y"
-6. Gekickter Peer verliert Room-Zugang
-
----
-
-## UI Components
-
-### Chat Tab Structure
-```
-┌─────────────────────────────────┐
-│  [Chat-Nachrichten Container]   │
-│  ┌───────────────────────────┐  │
-│  │ Alice: Hallo Welt!        │  │
-│  │ Bob: **Hi**!               │  │
-│  │ [System] Bob joined       │  │
-│  └───────────────────────────┘  │
-│  [Typing Indicator: "Alice schreibt..."]
-│  ┌───────────────────────────┐  │
-│  │ 😀 │ Type a message... │ ➤│  │
-│  └───────────────────────────┘  │
-└─────────────────────────────────┘
+```json
+{
+  "capabilities": ["host-control", "co-host", "chat"],
+  "chatHistory": [],
+  "chatBannedPeerIds": []
+}
 ```
 
-### Read Receipt States
-| Zustand | Symbol | Bedeutung |
-|---------|--------|-----------|
-| Gesendet | ⚪⚪ | Nachricht beim Server |
-| Gelesen | ✓✓ | Empfänger hat Nachricht gesehen |
+`chatHistory` is empty when chat is disabled or no messages have been sent.
 
----
+## Security
 
-## Testing
+- Chat is disabled if the relay does not advertise `CAPABILITIES.CHAT`.
+- Server rate limits chat events using the existing per-socket event limiter.
+- Server rejects chat activity from chat-banned peers.
+- Server validates same-room delivery for read receipts.
+- Popup rendering uses DOM APIs and `textContent`, not raw user-controlled `innerHTML`.
+- Server never trusts client-provided `senderId`.
 
-### Manual Test Plan
+## Manual Test Plan
 
-**Setup:**
-- 2 Browser-Profile (oder Chrome + Firefox)
-- Beide verbinden zum gleichen Room
-
-**Test Cases:**
-
-| # | Test | Erwartet |
-|---|------|----------|
-| 1 | Nachricht senden | Empfänger sieht sie |
-| 2 | Emoji einfügen | Emoji wird gerendert |
-| 3 | `**fett**` `*kursiv*` | Formatting funktioniert |
-| 4 | Tippen | "X schreibt..." erscheint |
-| 5 | Nachricht lesen | Read Receipt aktualisiert |
-| 6 | 10+ Nachrichten in 10s | Rate-Limit kickt |
-| 7 | `<script>alert('xss')</script>` | Escaped output |
-| 8 | Host kickt Peer | Peer wird entfernt |
-| 9 | Dark Mode | Chat-Styling passt sich an |
-
----
-
-## Privacy & Security
-
-### Data Retention
-
-| Datentyp | Retention | Löschung |
-|----------|-----------|----------|
-| Chat-Nachrichten | Session-Dauer | Beim Verlassen des Rooms |
-| Read Receipts | Session-Dauer | Beim Verlassen des Rooms |
-| Typing-Status | 1s | Automatisch |
-
-### Threat Model
-
-**Geschützt gegen:**
-- ✅ Spam/DoS (Rate-Limiting)
-- ✅ XSS (HTML-Escaping)
-- ✅ Guest-Disruption (Host Control Mode)
-
-**Nicht geschützt gegen:**
-- ⚠️ Modifizierte Clients (kann eigene Nachrichten manipulieren)
-- ⚠️ Social Engineering (Nutzer kann eigene Nachrichten schreiben)
-
-→ Siehe [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) für Details.
-
----
-
-## Known Issues
-
-| Issue | Status | Workaround |
-|-------|--------|------------|
-| Private Messages | Out of Scope | N/A |
-| File/Image Sharing | Out of Scope | N/A |
-| Chat-History | Out of Scope | N/A |
-| Advanced Formatting | Backlog | N/A |
-
----
-
-## Related Documentation
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Kommunikationsflüsse, Host Control Mode
-- [PROTOCOL.md](PROTOCOL.md) — WebSocket-Event-Referenz
-- [host-control-mode.md](host-control-mode.md) — Host-Kick Berechtigungen
-- [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) — NOFIX-Einträge
-
----
-
-**Implementation:** soonTMChat (v2.6.0)  
-**Last Updated:** 2026-07-02
+1. Join one room from two browser profiles.
+2. Send a message from profile A and verify profile B receives it.
+3. Rejoin with profile C and verify history loads.
+4. Send `<script>alert(1)</script>` and verify it renders as text.
+5. Verify typing indicator appears while another peer types.
+6. Verify read receipt appears on the sender side.
+7. As host/controller, ban profile B from chat.
+8. Verify profile B remains in sync room but chat input is disabled and messages do not relay.
+9. Unban profile B and verify chat works again.
+10. Start server with `CHAT_HISTORY_LIMIT=0` and verify chat UI reports server-disabled chat.

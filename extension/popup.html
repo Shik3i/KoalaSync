@@ -364,6 +364,12 @@
             font-size: 11px;
             font-style: italic;
         }
+        .chat-status {
+            display: none;
+            padding: 0 12px 8px;
+            color: var(--text-muted);
+            font-size: 11px;
+        }
         .chat-input-row {
             display: grid;
             grid-template-columns: 34px minmax(0, 1fr) 38px;
@@ -761,6 +767,7 @@
         <div class="chat-container">
             <div class="chat-messages" id="chat-messages"></div>
             <div class="chat-typing-indicator" id="chat-typing-indicator"></div>
+            <div class="chat-status" id="chat-status"></div>
             <div class="chat-input-row">
                 <button id="emoji-btn" type="button" title="Emoji" aria-label="Emoji">😀</button>
                 <input type="text" id="chat-input" placeholder="Type a message..." maxlength="500">

@@ -73,6 +73,74 @@ try {
     close();
     resetConnectionRate();
 
+    // --- Chat: capability + authoritative message relay + history ---
+    const chatRid = 'chat-'+Date.now();
+    const ch1 = await c(), ch2 = await c(), ch3 = await c();
+    await j(ch1, chatRid, 'chatHost'); await j(ch2, chatRid, 'chatGuest');
+    ch1._m.length = ch2._m.length = 0;
+    s(ch1, 'chat_message', { username: 'Host', text: '<b>Hello</b>' });
+    const [msgEv, msgData] = await a(ch1);
+    assert.equal(msgEv, 'chat_message');
+    assert.equal(msgData.senderId, 'chatHost');
+    assert.equal(msgData.username, 'Host');
+    assert.equal(msgData.text, '<b>Hello</b>');
+    assert.ok(typeof msgData.id === 'string' && msgData.id.length > 0);
+    assert.ok(typeof msgData.timestamp === 'number');
+    const [peerMsgEv, peerMsgData] = await a(ch2);
+    assert.equal(peerMsgEv, 'chat_message');
+    assert.deepEqual(peerMsgData, msgData);
+    s(ch3, 'join_room', { roomId: chatRid, peerId: 'lateJoiner', protocolVersion: '1.0.0' });
+    const [historyEv, historyData] = await a(ch3);
+    assert.equal(historyEv, 'room_data');
+    assert.ok(historyData.capabilities.includes('chat'));
+    assert.deepEqual(historyData.chatHistory, [msgData]);
+    assert.deepEqual(historyData.chatBannedPeerIds, []);
+    close();
+    resetConnectionRate();
+
+    // --- Chat moderation: ban/unban is chat-only and server-enforced ---
+    const banRid = 'chat-ban-'+Date.now();
+    const banHost = await c(), banGuest = await c();
+    await j(banHost, banRid, 'banHost'); await j(banGuest, banRid, 'banGuest');
+    banHost._m.length = banGuest._m.length = 0;
+    s(banHost, 'chat_ban', { targetId: 'banGuest' });
+    let banState = null;
+    const banStart = Date.now();
+    while (Date.now() - banStart < 1000 && !banState) {
+        for (let i = 0; i < banGuest._m.length; i++) {
+            const raw = banGuest._m[i];
+            if (!raw.startsWith('42')) continue;
+            const [eventName, payload] = JSON.parse(raw.substring(2));
+            if (eventName === 'chat_ban') { banGuest._m.splice(i, 1); banState = payload; break; }
+        }
+        await new Promise(r => setTimeout(r, 30));
+    }
+    assert.ok(banState && banState.targetId === 'banGuest');
+    banHost._m.length = banGuest._m.length = 0;
+    s(banGuest, 'chat_message', { text: 'blocked' });
+    let bannedMessageRelayed = false;
+    try { await w(banHost, 'chat_message', 500); bannedMessageRelayed = true; } catch { bannedMessageRelayed = false; }
+    assert.equal(bannedMessageRelayed, false, 'chat-banned peer cannot send messages');
+    s(banHost, 'chat_unban', { targetId: 'banGuest' });
+    await w(banGuest, 'chat_unban');
+    banHost._m.length = banGuest._m.length = 0;
+    s(banGuest, 'chat_message', { text: 'allowed' });
+    await w(banHost, 'chat_message');
+    close();
+    resetConnectionRate();
+
+    // --- Chat read receipts cannot cross rooms ---
+    const rr1 = await c(), rr2 = await c();
+    await j(rr1, 'rr-a-'+Date.now(), 'readerA');
+    await j(rr2, 'rr-b-'+Date.now(), 'readerB');
+    rr1._m.length = rr2._m.length = 0;
+    s(rr1, 'chat_read', { targetId: 'readerB', messageId: 'msg-1' });
+    let crossRoomReadRelayed = false;
+    try { await w(rr2, 'chat_read', 500); crossRoomReadRelayed = true; } catch { crossRoomReadRelayed = false; }
+    assert.equal(crossRoomReadRelayed, false, 'chat_read cannot cross rooms');
+    close();
+    resetConnectionRate();
+
     // --- Default 'everyone' mode does NOT gate anyone (host-control OFF = unchanged) ---
     // Confirms that with host-only off, a non-host guest can still drive every
     // room-moving event exactly like before the feature existed.

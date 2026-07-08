@@ -1404,6 +1404,7 @@ function handleServerEvent(event, data) {
                 const messagePayload = {
                     type: 'CHAT_MESSAGE_RECEIVED',
                     payload: {
+                        id: data.id,
                         senderId: data.senderId,
                         username: data.username,
                         text: data.text,
@@ -1442,36 +1443,31 @@ function handleServerEvent(event, data) {
             }
             break;
         case EVENTS.CHAT_SYSTEM:
-            if (currentRoom && currentRoom.peers && data.message) {
+            if (currentRoom && currentRoom.peers && data.text) {
                 // Forward to popup
                 const systemPayload = {
                     type: 'CHAT_SYSTEM_RECEIVED',
                     payload: {
-                        message: data.message,
+                        id: data.id,
+                        text: data.text,
                         timestamp: data.timestamp
                     }
                 };
                 chrome.runtime.sendMessage(systemPayload).catch(() => {});
             }
             break;
-        case EVENTS.CHAT_KICK:
-            // Only host/controller can kick
+        case EVENTS.CHAT_BAN:
             if (currentRoom && currentRoom.peers && data.senderId && data.targetId) {
-                // Validate permissions first
-                if (!amHost() && !amController()) {
-                    addLog(`Ignored CHAT_KICK from non-controller ${data.senderId} (host-only)`, 'warn');
-                    break;
-                }
-                
-                // Forward to popup
-                const kickPayload = {
-                    type: 'CHAT_KICK_RECEIVED',
-                    payload: {
-                        senderId: data.senderId,
-                        targetId: data.targetId
-                    }
-                };
-                chrome.runtime.sendMessage(kickPayload).catch(() => {});
+                currentRoom.chatBannedPeerIds = Array.isArray(data.chatBannedPeerIds) ? data.chatBannedPeerIds : [];
+                if (storageInitialized) chrome.storage.session.set({ currentRoom });
+                chrome.runtime.sendMessage({ type: 'CHAT_BAN_RECEIVED', payload: data }).catch(() => {});
+            }
+            break;
+        case EVENTS.CHAT_UNBAN:
+            if (currentRoom && currentRoom.peers && data.senderId && data.targetId) {
+                currentRoom.chatBannedPeerIds = Array.isArray(data.chatBannedPeerIds) ? data.chatBannedPeerIds : [];
+                if (storageInitialized) chrome.storage.session.set({ currentRoom });
+                chrome.runtime.sendMessage({ type: 'CHAT_UNBAN_RECEIVED', payload: data }).catch(() => {});
             }
             break;
         default:
@@ -2048,7 +2044,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             amHost: amHost(),
             amController: amController(),
             hostControlSupported: serverSupports(CAPABILITIES.HOST_CONTROL),
-            coHostSupported: serverSupports(CAPABILITIES.CO_HOST)
+            coHostSupported: serverSupports(CAPABILITIES.CO_HOST),
+            chatSupported: serverSupports(CAPABILITIES.CHAT),
+            chatHistory: currentRoom ? (currentRoom.chatHistory || []) : [],
+            chatBannedPeerIds: currentRoom ? (currentRoom.chatBannedPeerIds || []) : []
         });
     } else if (message.type === 'SET_CONTROL_MODE') {
         // Popup (host) toggles the room control mode. Server validates host authority
@@ -2699,10 +2698,8 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         // Forward chat message to the server
         if (currentRoom && message.payload && message.payload.text) {
             const payload = {
-                senderId: peerId,
                 username: message.payload.username,
-                text: message.payload.text,
-                timestamp: message.payload.timestamp
+                text: message.payload.text
             };
             emit(EVENTS.CHAT_MESSAGE, payload);
             sendResponse({ status: 'ok' });
@@ -2713,7 +2710,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         // Forward typing indicator to the server
         if (currentRoom && message.payload) {
             const payload = {
-                senderId: peerId,
                 username: message.payload.username,
                 isTyping: message.payload.isTyping
             };
@@ -2726,7 +2722,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         // Forward read receipt to the server
         if (currentRoom && message.payload) {
             const payload = {
-                senderId: peerId,
                 targetId: message.payload.targetId,
                 messageId: message.payload.messageId
             };
@@ -2735,30 +2730,16 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         } else {
             sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
         }
-    } else if (message.type === 'CHAT_MESSAGE') {
-        // Forward CHAT_MESSAGE from popup to server
-        if (currentRoom && message.payload) {
-            const settings = await getSettings();
-            const outboundPayload = withTitlePrivacy(message.payload, settings, ['mediaTitle']);
-            emit(EVENTS.CHAT_MESSAGE, { ...outboundPayload, peerId });
-            sendResponse({ status: 'ok' });
-        } else {
-            sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
-        }
-    } else if (message.type === 'CHAT_KICK') {
-        // Only host/controller can kick
+    } else if (message.type === 'CHAT_BAN' || message.type === 'CHAT_UNBAN') {
         if (!amHost() && !amController()) {
             sendResponse({ status: 'error', message: 'Insufficient permissions' });
             return;
         }
-        
-        // Forward kick command to the server
         if (currentRoom && message.payload) {
             const payload = {
-                senderId: peerId,
                 targetId: message.payload.targetId
             };
-            emit(EVENTS.CHAT_KICK, payload);
+            emit(message.type === 'CHAT_BAN' ? EVENTS.CHAT_BAN : EVENTS.CHAT_UNBAN, payload);
             sendResponse({ status: 'ok' });
         } else {
             sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
