@@ -306,11 +306,18 @@
         .chat-input-row { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #ddd; }
         #chat-input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
         .typing-indicator { font-size: 0.8rem; font-style: italic; color: #666; padding: 0 10px; }
+        .emoji-wrap { position: relative; }
+        .emoji-palette { position: absolute; z-index: 20; bottom: calc(100% + 8px); left: 0; display: grid; grid-template-columns: repeat(5, 34px); gap: 4px; padding: 8px; border: 1px solid #ddd; border-radius: 10px; background: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+        .emoji-palette[hidden] { display: none; }
+        .emoji-option { padding: 5px; border: 0; border-radius: 6px; background: transparent; font-size: 18px; line-height: 1; }
+        .emoji-option:hover, .emoji-option:focus-visible { background: rgba(0,123,255,.14); }
         .read-receipt { font-size: 0.7rem; float: right; margin-left: 8px; }
 
         /* Dark Mode */
         @media (prefers-color-scheme: dark) {
           .message.other { background: #8a2be2; color: white; }
+          .emoji-palette { background: #24262b; border-color: #555; }
+          #chat-input { background: #1d1f23; color: #fff; border-color: #555; }
         }
         }
 
@@ -676,9 +683,12 @@
             <div class="chat-messages" id="chat-messages"></div>
             <div class="chat-typing-indicator" id="chat-typing-indicator"></div>
             <div class="chat-input-row">
-                <button id="emoji-btn" title="Emoji">😀</button>
-                <input type="text" id="chat-input" placeholder="Type a message..." maxlength="500">
-                <button id="send-btn" title="Send">➤</button>
+                <div class="emoji-wrap">
+                    <button id="emoji-btn" type="button" title="Emoji" data-i18n-title="CHAT_EMOJI_BUTTON" aria-haspopup="true" aria-expanded="false" aria-controls="emoji-palette">😀</button>
+                    <div id="emoji-palette" class="emoji-palette" role="menu" aria-label="Emoji" data-i18n-aria-label="CHAT_EMOJI_PALETTE" hidden></div>
+                </div>
+                <input type="text" id="chat-input" placeholder="Type a message..." data-i18n-placeholder="CHAT_INPUT_PLACEHOLDER" maxlength="500" autocomplete="off">
+                <button id="send-btn" type="button" title="Send" data-i18n-title="CHAT_SEND_BUTTON">➤</button>
             </div>
         </div>
     </div>

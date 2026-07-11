@@ -3,6 +3,7 @@ import { BLACKLIST_DOMAINS } from './shared/blacklist.js';
 import { getAvatarForName, generateUsername, USERNAME_ADJECTIVES, USERNAME_NOUNS } from './shared/names.js';
 import { loadLocale, translateDOM, getMessage, getSystemLanguage } from './i18n.js';
 import { TITLE_PRIVACY_MODES, normalizeSendTabTitle, normalizeTabTitle } from './title-privacy.js';
+import { createReceiptTracker, createRemoteTypingTracker, createTypingTracker, formatChatText, insertEmoji } from './chat.js';
 
 
 const elements = {
@@ -82,6 +83,7 @@ const elements = {
     chatInput: document.getElementById('chat-input'),
     sendBtn: document.getElementById('send-btn'),
     emojiBtn: document.getElementById('emoji-btn'),
+    emojiPalette: document.getElementById('emoji-palette'),
     chatTypingIndicator: document.getElementById('chat-typing-indicator')
 };
 
@@ -100,10 +102,10 @@ let forceSyncDone = false;
 let connectionErrorTimer = null;
 let pendingConnectionErrorMsg = null;
 
-// Chat state (reserved for future implementation)
-let _chatMessages = [];
-let _typingDebounce = null;
-let _readReceipts = new Map();
+const chatReceipts = createReceiptTracker();
+const sentReadReceipts = new Set();
+let currentChatRoomId = null;
+const CHAT_EMOJIS = ['😀', '😂', '😍', '🥳', '😢', '😮', '👍', '👏', '❤️', '🔥', '🎉', '🍿', '🐨', '📺', '✨'];
 
 function devToolsEnabled() {
     return elements.username && elements.username.value.trim() === 'KoalaDev';
@@ -287,6 +289,7 @@ async function init() {
             updatePingDisplay(res.ping);
             updatePeerList(res.peers);
             lastKnownPeers = res.peers || [];
+            renderChatHistory(res.chatHistory, res.roomId);
             updateHostControlUI({ controlMode: res.controlMode, amHost: res.amHost, amController: res.amController, controllers: res.controllers, hostPeerId: res.hostPeerId, hostControlSupported: res.hostControlSupported, coHostSupported: res.coHostSupported, inRoom: res.status === 'connected' });
             if (res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
 
@@ -778,6 +781,20 @@ function updatePeerList(peers) {
                     });
                     rightGroup.appendChild(btn);
                 }
+            }
+
+            if (pId !== localPeerId && (hcmAmOwner || hcmControllers.includes(localPeerId))) {
+                const kickBtn = document.createElement('button');
+                kickBtn.className = 'chat-kick-btn';
+                kickBtn.style.cssText = 'font-size:10px; padding:3px 7px; border-radius:6px; cursor:pointer; border:1px solid var(--error); background:transparent; color:var(--error);';
+                kickBtn.textContent = getMessage('CHAT_KICK_BUTTON') || 'Kick';
+                kickBtn.title = getMessage('CHAT_KICK_TOOLTIP') || 'Remove peer from room';
+                kickBtn.addEventListener('click', () => {
+                    chrome.runtime.sendMessage({ type: 'CHAT_KICK', payload: { targetId: pId } }, (response) => {
+                        if (response?.status === 'error') showError(response.message);
+                    });
+                });
+                rightGroup.appendChild(kickBtn);
             }
 
             if (rightGroup.childNodes.length) header.appendChild(rightGroup);
@@ -1515,6 +1532,7 @@ elements.leaveBtn.addEventListener('click', async () => {
     elements.roomId.value = '';
     elements.password.value = '';
     lastKnownPeers = [];
+    clearChat();
     updateUI(null, null);
     isProcessingConnection = false;
 });
@@ -2712,151 +2730,171 @@ elements.restartTourBtn?.addEventListener('click', () => {
     showOnboarding();
 });
 
-// Chat Functions
+function emitTyping(isTyping) {
+    chrome.runtime.sendMessage({
+        type: 'CHAT_TYPING',
+        payload: { username: elements.username?.value || null, isTyping }
+    }).catch(() => {});
+}
+
+const typingTracker = createTypingTracker({ emit: emitTyping, timeoutMs: 1500 });
+
 function sendChatMessage() {
-    const text = elements.chatInput?.value;
-    if (!text || !text.trim()) return;
-    
+    const text = elements.chatInput?.value?.trim();
+    if (!text || !localPeerId) return;
     const message = {
-        id: Date.now().toString(),
+        id: globalThis.crypto.randomUUID(),
         senderId: localPeerId,
-        username: elements.username?.value || 'Anonymous',
-        text: text.trim(),
+        username: elements.username?.value || null,
+        text,
         timestamp: Date.now()
     };
-    
-    // Show own message immediately (local echo)
-    console.log('Sending chat message:', message);
-    addMessageToUI(message, 'own');
-    
-    // Send to background
-    chrome.runtime.sendMessage({ 
-        type: 'CHAT_MESSAGE', 
-        payload: message 
-    }).catch(err => {
-        console.error('Failed to send chat message:', err);
+    chrome.runtime.sendMessage({ type: 'CHAT_MESSAGE', payload: message }, (response) => {
+        if (chrome.runtime.lastError || response?.status !== 'ok') {
+            showError(response?.message || getMessage('CHAT_SEND_FAILED') || 'Message could not be sent');
+        }
     });
-    
-    // Clear input
-    if (elements.chatInput) {
-        elements.chatInput.value = '';
+    elements.chatInput.value = '';
+    typingTracker.stop();
+}
+
+function addMessageToUI(message, type = 'other') {
+    if (!elements.chatMessages || !message?.id) return;
+    const existing = Array.from(elements.chatMessages.children)
+        .some((node) => node.dataset.messageId === message.id);
+    if (existing) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = `message ${type}`;
+    wrapper.dataset.messageId = message.id;
+
+    const header = document.createElement('div');
+    header.className = 'message-header';
+    const timestamp = Number.isFinite(message.timestamp) ? message.timestamp : Date.now();
+    header.textContent = `${message.username || getMessage('CHAT_ANONYMOUS') || 'Anonymous'} • ${new Date(timestamp).toLocaleTimeString()}`;
+
+    const text = document.createElement('div');
+    text.className = 'message-text';
+    text.innerHTML = formatChatText(message.text);
+
+    const receipt = document.createElement('div');
+    receipt.className = 'message-meta';
+    receipt.id = `receipt-${message.id}`;
+    if (type === 'own') receipt.textContent = '○○';
+
+    wrapper.append(header, text, receipt);
+    elements.chatMessages.appendChild(wrapper);
+    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+}
+
+function addSystemMessage(message) {
+    if (!elements.chatMessages || !message?.text) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message system';
+    wrapper.textContent = message.text;
+    elements.chatMessages.appendChild(wrapper);
+    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+}
+
+function sendReadReceipt(message) {
+    if (!message?.id || message.senderId === localPeerId || sentReadReceipts.has(message.id)) return;
+    sentReadReceipts.add(message.id);
+    chrome.runtime.sendMessage({
+        type: 'CHAT_READ',
+        payload: { messageId: message.id, targetId: message.senderId }
+    }).catch(() => sentReadReceipts.delete(message.id));
+}
+
+function renderChatHistory(history, roomId = null) {
+    if (roomId !== currentChatRoomId) {
+        sentReadReceipts.clear();
+        currentChatRoomId = roomId;
+    }
+    if (elements.chatMessages) elements.chatMessages.replaceChildren();
+    chatReceipts.clear();
+    for (const message of Array.isArray(history) ? history : []) {
+        addMessageToUI(message, message.senderId === localPeerId ? 'own' : 'other');
+        sendReadReceipt(message);
     }
 }
 
-// Chat Event Listeners
+function clearChat() {
+    if (elements.chatMessages) elements.chatMessages.replaceChildren();
+    if (elements.chatTypingIndicator) elements.chatTypingIndicator.textContent = '';
+    remoteTypingTracker.clear();
+    chatReceipts.clear();
+    sentReadReceipts.clear();
+    currentChatRoomId = null;
+    typingTracker.stop();
+}
+
+function updateTypingIndicator(names) {
+    if (!elements.chatTypingIndicator) return;
+    elements.chatTypingIndicator.textContent = names.length
+        ? (getMessage('CHAT_TYPING', { name: names.join(', ') }) || `${names.join(', ')} is typing…`)
+        : '';
+}
+
+const remoteTypingTracker = createRemoteTypingTracker({ onChange: updateTypingIndicator, timeoutMs: 2500 });
+
+function initEmojiPalette() {
+    if (!elements.emojiPalette) return;
+    for (const emoji of CHAT_EMOJIS) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'emoji-option';
+        button.role = 'menuitem';
+        button.textContent = emoji;
+        button.addEventListener('click', () => {
+            const input = elements.chatInput;
+            if (!input) return;
+            const result = insertEmoji(input.value, emoji, input.selectionStart, input.selectionEnd);
+            input.value = result.value;
+            input.focus();
+            input.setSelectionRange(result.caret, result.caret);
+            elements.emojiPalette.hidden = true;
+            elements.emojiBtn.setAttribute('aria-expanded', 'false');
+            typingTracker.activity();
+        });
+        elements.emojiPalette.appendChild(button);
+    }
+}
+
 function initChatEventListeners() {
-    // Enter key sends message
-    elements.chatInput?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
+    elements.chatInput?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
             sendChatMessage();
         }
     });
-    
-    // Send button click
-    elements.sendBtn?.addEventListener('click', () => {
-        sendChatMessage();
-    });
-    
-    // Emoji button click (placeholder - shows toast for now)
+    elements.chatInput?.addEventListener('input', () => typingTracker.activity());
+    elements.chatInput?.addEventListener('blur', () => typingTracker.stop());
+    elements.sendBtn?.addEventListener('click', sendChatMessage);
     elements.emojiBtn?.addEventListener('click', () => {
-        showToast('Emoji picker coming soon!', 'info');
+        const opening = elements.emojiPalette.hidden;
+        elements.emojiPalette.hidden = !opening;
+        elements.emojiBtn.setAttribute('aria-expanded', String(opening));
+        if (opening) elements.emojiPalette.querySelector('button')?.focus();
     });
+    initEmojiPalette();
 }
 
-// Initialize chat event listeners
 initChatEventListeners();
 
-// Chat state
-const messageReadReceipts = new Map(); // messageId → { senderId, read: boolean }
-
-// Chat Message Display
-function addMessageToUI(message, type = 'other') {
-    console.log('Adding message to UI:', message, 'type:', type);
-    const container = elements.chatMessages;
-    if (!container) {
-        console.warn('Chat messages container not found');
-        return;
-    }
-    
-    // Check for duplicate message
-    const existing = document.querySelector(`[data-message-id="${message.id}"]`);
-    if (existing) return;
-    
-    const div = document.createElement('div');
-    div.className = `message ${type}`;
-    div.dataset.messageId = message.id;
-    
-    const time = new Date(message.timestamp).toLocaleTimeString();
-    
-    div.innerHTML = `
-        <div class="message-header">${escapeHtml(message.username || 'Anonymous')} • ${time}</div>
-        <div class="message-text">${formatMessageText(message.text)}</div>
-        <div class="message-meta" id="receipt-${message.id}"></div>
-    `;
-    
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-    console.log('Message added successfully');
-}
-
-function updateReadReceipt(messageId, senderId) {
-    const receiptDiv = document.getElementById(`receipt-${messageId}`);
-    if (receiptDiv) {
-        // For own messages, show read status from other peers
-        if (senderId !== localPeerId) {
-            // Count how many peers have read this message
-            const receiptData = messageReadReceipts.get(messageId) || { readBy: new Set() };
-            receiptData.readBy.add(senderId);
-            messageReadReceipts.set(messageId, receiptData);
-            
-            const readCount = receiptData.readBy.size;
-            receiptDiv.textContent = `✓${'✓'.repeat(Math.min(readCount, 3))}`;
-        }
-    }
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-function formatMessageText(text) {
-    if (!text) return '';
-    // Already escaped in escapeHtml, now apply markdown
-    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    return text;
-}
-
-// Receive chat messages from background
 chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'CHAT_MESSAGE_RECEIVED') {
-        try {
-            // Determine if this is our own message or from another peer
-            const isOwn = msg.payload.senderId === localPeerId;
-            addMessageToUI(msg.payload, isOwn ? 'own' : 'other');
-            
-            // Send read receipt for messages from others
-            if (!isOwn) {
-                chrome.runtime.sendMessage({
-                    type: 'CHAT_READ',
-                    payload: {
-                        messageId: msg.payload.id,
-                        targetId: msg.payload.senderId
-                    }
-                }).catch(() => {});
-            }
-        } catch (error) {
-            console.error('Error processing chat message:', error);
-        }
+    if (msg.type === 'ROOM_DATA') {
+        renderChatHistory(msg.data?.chatHistory, msg.data?.roomId);
+    } else if (msg.type === 'CHAT_MESSAGE_RECEIVED') {
+        const isOwn = msg.payload.senderId === localPeerId;
+        addMessageToUI(msg.payload, isOwn ? 'own' : 'other');
+        if (!isOwn) sendReadReceipt(msg.payload);
+    } else if (msg.type === 'CHAT_TYPING_RECEIVED') {
+        if (msg.payload?.senderId !== localPeerId) remoteTypingTracker.update(msg.payload);
     } else if (msg.type === 'CHAT_READ_RECEIVED') {
-        // Update read receipt when another peer reads our message
-        updateReadReceipt(msg.payload.messageId, msg.payload.senderId);
+        const count = chatReceipts.markRead(msg.payload.messageId, msg.payload.senderId);
+        const receipt = document.getElementById(`receipt-${msg.payload.messageId}`);
+        if (receipt) receipt.textContent = count > 0 ? '✓✓' : '○○';
+    } else if (msg.type === 'CHAT_SYSTEM_RECEIVED') {
+        addSystemMessage(msg.payload);
     }
 });

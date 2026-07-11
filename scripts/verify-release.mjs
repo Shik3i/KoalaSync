@@ -16,6 +16,8 @@ const checks = [
   ['episode-utils unit tests', 'node', ['scripts/test-episode-utils.mjs']],
   ['title privacy unit tests', 'node', ['scripts/test-title-privacy.mjs']],
   ['server WebSocket integration', 'node', ['scripts/test-server-ws.mjs']],
+  ['server chat integration', 'node', ['scripts/test-server-chat.mjs']],
+  ['extension chat integration', 'node', ['scripts/test-chat-extension.mjs']],
   ['names generator', 'node', ['scripts/test-names.mjs']],
   ['content video finder', 'node', ['scripts/test-content-video-finder.cjs']],
   ['audio settings', 'node', ['scripts/test-audio-settings.mjs']],
@@ -38,9 +40,15 @@ const checks = [
 function runCheck([label, command, args, options = {}]) {
   return new Promise((resolve, reject) => {
     console.log(`\n==> ${label}`);
+    const childEnv = { ...process.env, ...(options.env || {}) };
+    // npm promotes the global allow-scripts config into npm_config_allow_scripts
+    // while running package scripts. npm audit rejects that project-scoped value,
+    // even though it does not execute install scripts, so do not inherit it.
+    delete childEnv.npm_config_allow_scripts;
+    delete childEnv.NPM_CONFIG_ALLOW_SCRIPTS;
     const child = spawn(command, args, {
       cwd: options.cwd || repoRoot,
-      env: { ...process.env, ...(options.env || {}) },
+      env: childEnv,
       stdio: 'inherit',
       shell: process.platform === 'win32'
     });

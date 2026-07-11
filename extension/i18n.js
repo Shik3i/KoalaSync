@@ -117,6 +117,11 @@ export function translateDOM() {
         const key = el.getAttribute('data-i18n-placeholder');
         el.setAttribute('placeholder', getMessage(key));
     });
+
+    document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+        const key = el.getAttribute('data-i18n-aria-label');
+        el.setAttribute('aria-label', getMessage(key));
+    });
 }
 
 /**

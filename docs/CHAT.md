@@ -46,6 +46,7 @@ EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
 **chat_message:**
 ```json
 {
+  "id": "msg-123",
   "senderId": "a1b2c3d4",
   "username": "Alice",
   "text": "Hallo **Welt**!",
@@ -82,9 +83,9 @@ EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
 **chat_system:**
 ```json
 {
-  "type": "join",
-  "username": "Bob",
-  "text": "Bob joined the room"
+  "type": "kick",
+  "text": "Bob was kicked by Alice",
+  "timestamp": 1719950400000
 }
 ```
 
@@ -93,15 +94,15 @@ EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
 | Maßnahme | Umsetzung |
 |----------|-----------|
 | **Rate-Limiting** | 10 Nachrichten/10s pro Socket, Disconnect bei Überschreitung |
-| **XSS-Prävention** | HTML-Escaping: `<` → `&lt;`, `>` → `&gt;`, `&` → `&amp;` |
-| **Host Control** | `chat_kick` nur für Host/Controller in `host-only` mode |
-| **Payload-Sanitization** | Text max. 500 chars, Username max. 30 chars |
+| **XSS-Prävention** | Längen-/Typvalidierung plus kontextgerechtes Escaping unmittelbar vor der DOM-Ausgabe |
+| **Host Control** | Host darf alle anderen entfernen; Controller nur normale Gäste, niemals Host/andere Controller |
+| **Payload-Sanitization** | Text max. 500 Unicode-Zeichen, Username max. 30 Unicode-Zeichen, sichere Message-ID |
 
 ### Client-Side Security
 
 | Maßnahme | Umsetzung |
 |----------|-----------|
-| **XSS-Prävention** | HTML-Escaping VOR Markdown-Parsing |
+| **XSS-Prävention** | HTML-Escaping VOR begrenztem Markdown-Parsing; kein ungeprüftes HTML |
 | **Input-Validation** | `maxlength="500"` am Input-Feld |
 | **No Persistence** | Nachrichten nur im RAM, keine Speicherung |
 
@@ -111,10 +112,10 @@ EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
 
 ### Nachricht senden
 1. User tippt Text ins Chat-Input-Feld
-2. Nach 1s Tippen: "X schreibt..." wird bei Peers angezeigt
+2. Beim Tippen: "X schreibt..." wird bei Peers angezeigt; nach 1,5s Inaktivität endet der Status
 3. User drückt Enter oder Klick auf Send-Button
 4. Nachricht wird an Server gerelayt
-5. Server sanitized + broadcast an alle Peers
+5. Server validiert und ergänzt autoritative Identität, ID und Zeitstempel
 6. Empfänger rendern Nachricht im Chat
 
 ### Read Receipt
@@ -181,6 +182,13 @@ EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
 | 8 | Host kickt Peer | Peer wird entfernt |
 | 9 | Dark Mode | Chat-Styling passt sich an |
 
+### Automated release coverage
+
+- Unit-Tests für Server-Validierung, History, sichere Markdown-Ausgabe, Emoji-Einfügung, Typing und Receipts
+- Echte Zwei-Client-WebSocket-Tests für Nachrichten, Identität, History, Typing, Receipts, Room-Isolation und Kick-Rechte
+- Extension-Integrationschecks für verlustfreien Background-Transport und vollständige Popup-Verdrahtung
+- Alle Chat-Suiten sind Bestandteil von `npm run verify`
+
 ---
 
 ## Privacy & Security
@@ -189,9 +197,9 @@ EVENTS.CHAT_SYSTEM     // "chat_system"     - System-Nachricht
 
 | Datentyp | Retention | Löschung |
 |----------|-----------|----------|
-| Chat-Nachrichten | Session-Dauer | Beim Verlassen des Rooms |
-| Read Receipts | Session-Dauer | Beim Verlassen des Rooms |
-| Typing-Status | 1s | Automatisch |
+| Chat-Nachrichten | Bis zu 100 Nachrichten solange der Room existiert | Beim Löschen des Rooms/Serverneustart |
+| Read Receipts | Nur im geöffneten Popup | Beim Schließen/Verlassen des Rooms |
+| Typing-Status | 1,5s Inaktivität; Empfänger-Fallback 2,5s | Automatisch |
 
 ### Threat Model
 

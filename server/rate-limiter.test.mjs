@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
     checkLeaveRoomRate,
+    checkChatMessageRate,
+    checkChatReadRate,
+    CHAT_MESSAGE_RATE_LIMIT,
+    CHAT_MESSAGE_RATE_WINDOW_MS,
+    chatMessageCounts,
+    chatReadCounts,
     LEAVE_ROOM_RATE_LIMIT,
     LEAVE_ROOM_RATE_WINDOW_MS,
     rateLimitDenied,
@@ -96,6 +102,43 @@ describe('LEAVE_ROOM Rate Limiter', () => {
 
         clearRateLimitMaps();
         expect(leaveRoomCounts.size).toBe(0);
+    });
+});
+
+describe('CHAT_MESSAGE Rate Limiter', () => {
+    const socketId = 'chat-socket';
+
+    beforeEach(() => clearRateLimitMaps());
+    afterEach(() => clearRateLimitMaps());
+
+    it('allows ten messages per ten seconds and rejects the eleventh', () => {
+        for (let index = 0; index < CHAT_MESSAGE_RATE_LIMIT; index += 1) {
+            expect(checkChatMessageRate(socketId)).toBe(true);
+        }
+        expect(checkChatMessageRate(socketId)).toBe(false);
+        expect(CHAT_MESSAGE_RATE_LIMIT).toBe(10);
+        expect(CHAT_MESSAGE_RATE_WINDOW_MS).toBe(10000);
+    });
+
+    it('resets and clears chat message counters', () => {
+        checkChatMessageRate(socketId);
+        chatMessageCounts.get(socketId).resetTime = Date.now() - 1;
+        expect(checkChatMessageRate(socketId)).toBe(true);
+        clearRateLimitMaps();
+        expect(chatMessageCounts.size).toBe(0);
+    });
+});
+
+describe('CHAT_READ Rate Limiter', () => {
+    const socketId = 'history-reader';
+    beforeEach(() => clearRateLimitMaps());
+    afterEach(() => clearRateLimitMaps());
+
+    it('allows receipts for a full 100-message history but still caps abuse', () => {
+        for (let index = 0; index < 100; index += 1) expect(checkChatReadRate(socketId)).toBe(true);
+        for (let index = 100; index < 120; index += 1) expect(checkChatReadRate(socketId)).toBe(true);
+        expect(checkChatReadRate(socketId)).toBe(false);
+        expect(chatReadCounts.get(socketId).count).toBe(121);
     });
 });
 

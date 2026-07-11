@@ -1400,10 +1400,12 @@ function handleServerEvent(event, data) {
             break;
         case EVENTS.CHAT_MESSAGE:
             if (currentRoom && currentRoom.peers && data.senderId && data.text) {
+                currentRoom.chatHistory = [...(currentRoom.chatHistory || []), data].slice(-100);
                 // Forward to popup
                 const messagePayload = {
                     type: 'CHAT_MESSAGE_RECEIVED',
                     payload: {
+                        id: data.id,
                         senderId: data.senderId,
                         username: data.username,
                         text: data.text,
@@ -1442,12 +1444,13 @@ function handleServerEvent(event, data) {
             }
             break;
         case EVENTS.CHAT_SYSTEM:
-            if (currentRoom && currentRoom.peers && data.message) {
+            if (currentRoom && currentRoom.peers && data.text) {
                 // Forward to popup
                 const systemPayload = {
                     type: 'CHAT_SYSTEM_RECEIVED',
                     payload: {
-                        message: data.message,
+                        type: data.type,
+                        text: data.text,
                         timestamp: data.timestamp
                     }
                 };
@@ -2032,6 +2035,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             status, 
             peerId, 
             peers: currentRoom ? currentRoom.peers : [],
+            chatHistory: currentRoom?.chatHistory || [],
             lastActionState,
             targetTabId: currentTabId,
             episodeLobby: episodeLobby,
@@ -2699,7 +2703,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         // Forward chat message to the server
         if (currentRoom && message.payload && message.payload.text) {
             const payload = {
-                senderId: peerId,
+                id: message.payload.id,
                 username: message.payload.username,
                 text: message.payload.text,
                 timestamp: message.payload.timestamp
@@ -2731,16 +2735,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 messageId: message.payload.messageId
             };
             emit(EVENTS.CHAT_READ, payload);
-            sendResponse({ status: 'ok' });
-        } else {
-            sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
-        }
-    } else if (message.type === 'CHAT_MESSAGE') {
-        // Forward CHAT_MESSAGE from popup to server
-        if (currentRoom && message.payload) {
-            const settings = await getSettings();
-            const outboundPayload = withTitlePrivacy(message.payload, settings, ['mediaTitle']);
-            emit(EVENTS.CHAT_MESSAGE, { ...outboundPayload, peerId });
             sendResponse({ status: 'ok' });
         } else {
             sendResponse({ status: 'error', message: 'Not in a room or invalid payload' });
