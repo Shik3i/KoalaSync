@@ -22,6 +22,7 @@ const checks = [
   ['content video finder', 'node', ['scripts/test-content-video-finder.cjs']],
   ['audio settings', 'node', ['scripts/test-audio-settings.mjs']],
   ['popup refresh cooldown', 'node', ['scripts/test-popup-refresh-cooldown.mjs']],
+  ['popup CSS layout regression', 'node', ['scripts/test-popup-css-parse.mjs']],
   ['server syntax index', 'node', ['-c', 'server/index.js']],
   ['server syntax ops', 'node', ['-c', 'server/ops.js']],
   ['server syntax rate-limiter', 'node', ['-c', 'server/rate-limiter.js']],
