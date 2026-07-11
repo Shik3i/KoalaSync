@@ -1,74 +1,101 @@
 # KoalaSync Website & Invitation Bridge
 
-This directory contains the KoalaSync website. It serves a dual purpose: it is both the **marketing landing page** and the **technical bridge** for joining synchronized rooms.
+This directory contains the static KoalaSync website. It is both the public marketing/onboarding site and the browser-side invitation bridge for joining sync rooms.
+
+## Where You Are
+
+- `template.html`, `style.css`, `app.js`, `lang-init.js`, and `locales/*.json` are source files.
+- `build.cjs` compiles the static site into `website/www/`.
+- `website/www/` is generated output. Do not edit files there directly.
+- `join.html` handles room-invite links and communicates with the extension through `bridge.js`.
+- `llms.txt` gives crawlers and AI tools a compact project overview.
+- `alternatives/` contains comparison pages for users evaluating KoalaSync against other watch-party approaches.
 
 ## Core Roles
 
 ### 1. Marketing & Onboarding
-Provides a premium, multi-language (EN/DE/FR/ES/PT-BR/RU/IT/PL/TR/NL/JA/KO/PT) overview of features, setup instructions, and direct links to the extension stores.
 
-### 2. The Invitation Bridge (`join.html`)
-The website handles incoming invitation links. When a user clicks a link like `sync.koalastuff.net/join.html#join:roomID:pass`, the website:
-- **Detects the Extension**: Verifies if KoalaSync is installed via the `bridge.js` content script.
-- **Privacy-First Handshake**: The room credentials (ID/Password) are stored in the **URL Hash (#)**. This ensures the sensitive credentials **never reach the web server** and are processed entirely within the user's browser.
-- **Auto-Join**: If the extension is detected, it automatically triggers the join flow without requiring user input.
+The site explains KoalaSync, links to browser stores, documents self-hosting, and provides localized user-facing copy in 15 languages:
+
+`en`, `de`, `fr`, `es`, `it`, `nl`, `pl`, `pt`, `pt-BR`, `tr`, `ru`, `ja`, `ko`, `zh`, and `uk`.
+
+### 2. Invitation Bridge (`join.html`)
+
+When a user opens an invitation such as `https://sync.koalastuff.net/join.html#join:roomID:pass`, the page:
+
+- detects whether the KoalaSync extension is installed via the extension's `bridge.js` content script,
+- keeps room credentials inside the URL hash so they are not sent to the web server,
+- asks the extension to join the target room automatically when possible.
 
 ## Architecture
 
-The website is 100% **Static HTML, CSS, and JS**. 
-- **Static i18n Compiler**: The site uses a lightweight, zero-dependency Node.js compiler (`build.cjs`) to parse dictionary files inside `/locales/` against a single source-of-truth template (`template.html`), outputting the fully deployable static folder to `/www/`.
-- **Build-time Minification**: `build.cjs` automatically minifies CSS and JS during compilation using a built-in state-machine tokenizer (no npm dependencies). Source files are written unminified (`style.css`, `app.js`, `lang-init.js`) — always edit source files, never the generated `.min.*` files in `www/`.
-- **Zero Backend**: No Node.js, PHP, or databases are required to host the compiled website.
-- **Zero Tracking**: All assets (fonts, icons) are self-hosted to prevent third-party tracking.
-- **Responsive**: Fully optimized for mobile with a native-feel hamburger menu.
+The website is 100% static HTML, CSS, and JavaScript.
+
+- **Static i18n compiler**: `build.cjs` combines `template.html` with dictionaries in `locales/`.
+- **Build-time minification**: Source CSS/JS stays readable; generated output uses `.min.css` and `.min.js`.
+- **Zero backend**: The compiled site can be hosted by any static file server.
+- **Zero external assets**: Fonts, icons, scripts, and images must remain self-hosted.
+- **Generated SEO/runtime files**: `version.json`, sitemap, robots, clean URLs, localized pages, and minified assets are copied or generated into `www/`.
+
+## Local Development & Compilation
+
+From the repository root:
+```bash
+node website/build.cjs
+npx serve -l 5000 website/www
+```
+
+Then open:
+
+- `http://localhost:5000/` for the default page.
+- `http://localhost:5000/de/` for a localized page.
+- `http://localhost:5000/join.html#join:test-room:test-pass` to test the invitation bridge path.
+
+Focused verification:
+```bash
+node scripts/test-website-locales.mjs
+node --check website/www/app.min.js
+node --check website/www/lang-init.min.js
+```
+
+Full verification:
+```bash
+npm run verify
+```
 
 ## Hosting with Caddy
 
-Caddy is the recommended web server. It provides automatic HTTPS and high-performance static file serving.
+Caddy is the recommended production server because it handles HTTPS and static file serving cleanly. For a complete website plus relay reverse-proxy setup, use the root [Caddyfile.example](../examples/Caddyfile.example).
 
-### Recommended Caddyfile
-
-For a more comprehensive configuration that includes the Relay Server reverse proxy, see the root [Caddyfile.example](../examples/Caddyfile.example).
-
+Minimal static-site block:
 ```caddy
 sync.koalastuff.net {
     root * /var/www/koalasync/website/www
+    try_files {path} {path}.html {path}/
     file_server
     encode zstd gzip
 
-    # Static Caching for high-performance PageSpeed (1 year with validation)
     @static {
         file
-        path *.ico *.css *.js *.png *.svg *.webp
+        path *.ico *.css *.js *.png *.svg *.webp *.avif
     }
     header @static Cache-Control "public, max-age=31536000, must-revalidate"
 
-    # Security Headers & Content Security Policy (CSP)
     header {
-        # Strict Content Security Policy (restricts scripts and connections to self, forbids frames)
-        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none';"
-        # Prevent FLoC tracking
-        Permissions-Policy interest-cohort=()
-        # Security best practices
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none';"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        Referrer-Policy no-referrer-when-downgrade
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
     }
 }
 ```
 
-## Local Development & Compilation
+## Do Not Break
 
-1. Run the compilation script from the repository root to generate the `/website/www` folder:
-   ```bash
-   node website/build.cjs
-   ```
-2. Serve the compiled `/www` directory using any local development server:
-   ```bash
-   npx serve website/www
-   ```
-3. To test the invitation flow locally, navigate to `http://localhost:5000/join.html#join:test-room:test-pass`.
-
-> [!IMPORTANT]
-> **Never edit files inside `website/www/` directly.** This directory is fully auto-generated by `build.cjs`. Always edit source files (`template.html`, `style.css`, `app.js`, `lang-init.js`, locale files in `locales/`) and re-run `node website/build.cjs` to apply changes. CSS and JS are output as `style.min.css`, `app.min.js`, and `lang-init.min.js` — the `.min.*` naming makes it visually obvious these are build artifacts. Editing minified files in `www/` will result in lost changes on the next build.
+- Do not edit `website/www/` manually; rebuild it from sources.
+- Do not add external CDNs, fonts, analytics, or third-party scripts.
+- Keep invite credentials in the URL hash, not query parameters.
+- Keep locale files synchronized with `website/build.cjs` and `scripts/test-website-locales.mjs`.
+- Commit source changes and regenerated `www/` output together when website output changes.

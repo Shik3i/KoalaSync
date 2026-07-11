@@ -25,6 +25,22 @@
     }
     </script>
 
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "Datenschutzerklärung",
+      "url": "https://sync.koalastuff.net/de/datenschutz",
+      "description": "Datenschutzerklärung von KoalaSync - Wir nehmen Datenschutz ernst. Erfahre mehr über unseren Ansatz ohne Tracking, ohne Logs und ohne Cookies.",
+      "inLanguage": "de",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "KoalaSync",
+        "url": "https://sync.koalastuff.net/de/"
+      }
+    }
+    </script>
+
     <!-- Mobile Browser Theme Styling -->
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -90,14 +106,28 @@
             </p>
 
             <section>
-                <h2>1. Hosting & Logfiles</h2>
+                <h2>1. Kontakt</h2>
                 <p>
-                    Diese Seite wird auf einem privaten Server gehostet. Zur Gewährleistung der Stabilität werden standardmäßige Server-Logs (IP, Browser, Zeit) erhoben, aber nicht mit Personen verknüpft und nach 7 Tagen automatisch gelöscht.
+                    KoalaSync wird von Timo Schmidt betrieben.<br>
+                    Für datenschutzbezogene Fragen: <span class="email-reveal" data-user="koalasync" data-domain="koalastuff.net" style="color: var(--accent); cursor: pointer; text-decoration: underline;">[E-Mail anzeigen]</span>
                 </p>
             </section>
 
             <section>
-                <h2>2. Keine Drittanbieter & Open Source</h2>
+                <h2>2. Website-Hosting & Access Logs</h2>
+                <p>
+                    KoalaSync wird auf Infrastruktur der Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Deutschland, gehostet. Der Serverstandort ist Finnland und damit innerhalb der EU/des EWR. Mit Hetzner besteht ein Auftragsverarbeitungsvertrag gemäß Art. 28 DSGVO.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Beim Aufruf dieser Website können Standard-Access-Logs Ihre IP-Adresse, Browser/User-Agent und Zeitpunkt enthalten. Diese Logs werden ausschließlich für Sicherheit, Stabilität und Missbrauchsprävention verwendet und nach 7 Tagen automatisch gelöscht.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse am sicheren Betrieb der Website, an Stabilität und Missbrauchsprävention.
+                </p>
+            </section>
+
+            <section>
+                <h2>3. Keine Drittanbieter & Open Source</h2>
                 <p>
                     KoalaSync verzichtet bewusst auf Analyse-Tools, Tracking-Cookies oder Werbenetzwerke. Wir laden keine Ressourcen von Drittanbietern (wie Google Fonts) nach, um Ihre Privatsphäre maximal zu schützen.
                 </p>
@@ -107,26 +137,41 @@
             </section>
 
             <section>
-                <h2>3. Relay-Server Architektur</h2>
+                <h2>4. Offizieller Relay-Server & Raumdaten</h2>
                 <p>
-                    Unser Relay-Server arbeitet ausschließlich im Arbeitsspeicher (RAM). Nachrichten zwischen Teilnehmern werden nicht auf Festplatten gespeichert und sind flüchtig. Sobald ein Raum geschlossen wird, werden alle zugehörigen Metadaten sofort gelöscht. Wir tracken Sie nicht. Wir überwachen lediglich unseren Server auf Basis von aggregierten, anonymen, nicht-personenbezogenen System-Leistungsmetriken.
+                    Der offizielle KoalaSync-Relay-Server führt keine persistenten Logs. Er speichert keine Raumhistorie, keinen Sync-Verlauf, keinen Wiedergabeverlauf, keine Raumnachrichten, keine Playback-Events, keine Tab-Titel und keine Medientitel auf Festplatte.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Zur Bereitstellung der Raumfunktion verarbeitet der Relay Raum- und Synchronisationsdaten temporär im Arbeitsspeicher, solange ein Raum aktiv ist. Dazu können Room-ID, Peer-ID, Anzeigename, Wiedergabestatus, Sync-Events und – abhängig von den Titel-Privatsphäre-Einstellungen – Tab-/Medientitel gehören. Diese Daten werden nur an Teilnehmer desselben Raums weitergeleitet und aus dem Arbeitsspeicher entfernt, wenn der Raum abläuft oder geschlossen wird.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse an der Bereitstellung der gewünschten Synchronisationsfunktion, Sicherheit und Missbrauchsprävention.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Raum- und Peer-Zahlen sind aggregierte Betriebsmetriken zur Überwachung des Serverstatus.
                 </p>
             </section>
 
             <section>
-                <h2>4. Browser-Erweiterung (Extension)</h2>
+                <h2>5. Browser-Erweiterung & lokaler Speicher</h2>
                 <p>
-                    Um die geräteübergreifende Synchronisation zu ermöglichen, erfasst die KoalaSync Browser-Erweiterung temporär Daten des aktuell aktiven Video-Tabs (z. B. Tab-Titel, Medien-Metadaten wie den Videotitel sowie den Wiedergabestatus). Diese Daten werden ausschließlich zur Synchronisation an die anderen Teilnehmer in Ihrem Raum gesendet. Es wird ausdrücklich <strong>kein allgemeiner Browserverlauf (Browsing History)</strong> ausgelesen, gespeichert oder übermittelt.
+                    Zur Synchronisierung der Wiedergabe zwischen Teilnehmern desselben Raums erfasst die KoalaSync Browser-Erweiterung temporär Daten des aktuell aktiven Video-Tabs (z. B. Tab-Titel, Medien-Metadaten wie den Videotitel sowie den Wiedergabestatus). Tab- oder Medientitel können je nach Inhalt potenziell personenbezogen sein. Sie werden nur für die Synchronisationsfunktion verarbeitet, können über die Privatsphäre-Einstellungen der Erweiterung eingeschränkt oder deaktiviert werden, werden nur an Teilnehmer desselben Raums weitergeleitet und vom Relay nicht protokolliert oder dauerhaft gespeichert.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Die Erweiterung speichert nur für den Betrieb erforderliche Einstellungen lokal im Browser, z. B. Anzeigename, Server-URL, aktuelle Raumdaten, Sprache, Titel-Privatsphäre-Einstellungen, Benachrichtigungseinstellungen und Audio-Processing-Einstellungen. KoalaSync speichert keinen allgemeinen Browserverlauf und keinen persistenten Wiedergabeverlauf.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Die Erweiterung verbindet sich nur mit dem Relay-Server, während Sie sich aktiv in einem Raum befinden. Es wird keine dauerhafte Hintergrundverbindung aufrechterhalten, sodass Ihre IP-Adresse dem Server nicht offengelegt wird, wenn Sie die Erweiterung nicht nutzen.
                 </p>
             </section>
 
             <section>
-                <h2>5. Berechtigungen der Erweiterung</h2>
+                <h2>6. Berechtigungen der Erweiterung</h2>
                 <p>
-                    Um ihre technischen Zweck zu erfüllen, benötigt die Browser-Erweiterung bestimmte Berechtigungen. Jede Berechtigung wird ausschließlich für die Kernfunktionalität genutzt:
+                    Um ihren technischen Zweck zu erfüllen, benötigt die Browser-Erweiterung bestimmte Berechtigungen. Jede Berechtigung wird ausschließlich für die Kernfunktionalität genutzt:
                 </p>
                 <ul style="margin-left: 1.5rem; margin-top: 0.5rem; color: var(--text-muted); font-size: 0.9rem; list-style-type: disc; display: flex; flex-direction: column; gap: 0.35rem;">
-                    <li><strong>storage</strong>: Erlaubt das lokale Speichern von Benutzernamen, Server-URLs und Raum-Zugangsdaten im Browser, damit Sie sich nicht jedes Mal neu anmelden müssen.</li>
+                    <li><strong>storage</strong>: Ermöglicht die lokale Speicherung von Anzeigename, Server-URL, Raumdaten und Einstellungen im Browser, damit diese zwischen Sitzungen erhalten bleiben.</li>
                     <li><strong>tabs</strong>: Wird benötigt, um geöffnete Tabs im Dropdown der Erweiterung aufzulisten und deren Titel auszulesen, damit Sie bequem den richtigen Video-Tab auswählen können.</li>
                     <li><strong>scripting</strong>: Erforderlich, um das Synchronisationsskript (content.js) sicher in den von Ihnen ausgewählten Videotab zu injizieren.</li>
                     <li><strong>alarms</strong>: Verhindert, dass der Hintergrunddienst der Erweiterung (Service Worker) während einer aktiven Synchronisationssitzung vom Browser in den Ruhezustand versetzt wird.</li>
@@ -137,18 +182,49 @@
             </section>
 
             <section>
-                <h2>6. Brute-Force Schutz</h2>
+                <h2>7. Brute-Force & Rate-Limit-Schutz</h2>
                 <p>
-                    Zur Sicherheit unserer Nutzer speichern wir fehlgeschlagene Login-Versuche (IP-Adresse und Raum-ID) für maximal 15 Minuten im RAM, um automatisierte Angriffe zu verhindern. Diese Daten werden danach rückstandslos gelöscht.
+                    Zur Missbrauchsprävention können fehlgeschlagene Beitritts-/Login-Versuche die IP-Adresse und Room-ID für bis zu 15 Minuten im Arbeitsspeicher halten. Diese Daten werden nicht auf Festplatte geschrieben, nicht öffentlich zugänglich gemacht und automatisch gelöscht. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse an der Verhinderung von Brute-Force-Angriffen und Missbrauch.
                 </p>
             </section>
 
             <section>
-                <h2>7. Ihre Rechte</h2>
+                <h2>8. Empfänger & Dritte</h2>
                 <p>
-                    Sie haben das Recht auf Auskunft, Berichtigung oder Löschung Ihrer Daten. Da wir jedoch keine personenbezogenen Daten dauerhaft speichern, ist eine Zuordnung zu Ihrer Person in der Regel technisch nicht möglich.
+                    Technische Hosting- und Verbindungsdaten können durch Hetzner als Hosting-Anbieter im Auftrag des Betreibers verarbeitet werden. Raum-Synchronisationsdaten werden nur an Teilnehmer desselben Raums weitergeleitet. KoalaSync verwendet keine Analytics-Anbieter, Werbenetzwerke oder Tracking-Dienste.
                 </p>
-                <p>Kontakt bei Fragen: <span class="email-reveal" data-user="koalasync_datenschutz" data-domain="koalamail.rocks" style="color: var(--accent); cursor: pointer; text-decoration: underline;">[E-Mail anzeigen]</span></p>
+            </section>
+
+            <section>
+                <h2>9. Erforderliche & optionale Daten</h2>
+                <p>
+                    Die Bereitstellung technischer Verbindungsdaten ist erforderlich, um die Website aufzurufen und den Relay zu nutzen. Raumdaten und Sync-Events sind erforderlich, um die Raumsynchronisation zu verwenden. Das Teilen von Tab-/Medientitel ist optional und kann über die Privatsphäre-Einstellungen der Erweiterung eingeschränkt werden.
+                </p>
+            </section>
+
+            <section>
+                <h2>10. Rechte der betroffenen Person</h2>
+                <p>
+                    Nach der DSGVO können Ihnen Rechte auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit, Widerspruch sowie das Recht auf Beschwerde bei einer Aufsichtsbehörde zustehen.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    Da KoalaSync keine Nutzerkonten verwendet und keine persistenten Raumlogs oder Wiedergabeverläufe speichert, sind viele Datenpunkte entweder kurzlebig oder nach ihrer Löschung keiner bestimmten Person mehr zuordenbar. KoalaSync erhebt oder speichert außerdem keine zusätzlichen Identifikationsdaten nur um Nutzer für Betroffenenanfragen zu identifizieren.
+                </p>
+                <p style="margin-top: 0.5rem;">Kontakt für Datenschutzanfragen: <span class="email-reveal" data-user="koalasync" data-domain="koalastuff.net" style="color: var(--accent); cursor: pointer; text-decoration: underline;">[E-Mail anzeigen]</span></p>
+            </section>
+
+            <section>
+                <h2>11. Kein Profiling & automatisierte Entscheidungsfindung</h2>
+                <p>
+                    KoalaSync verwendet kein Profiling und keine automatisierte Entscheidungsfindung im Sinne von Art. 22 DSGVO.
+                </p>
+            </section>
+
+            <section>
+                <h2>12. Drittlandstransfers</h2>
+                <p>
+                    Das reguläre Hosting befindet sich innerhalb der EU/des EWR. Eine regelmäßige Übermittlung personenbezogener Daten in Drittländer findet nicht statt.
+                </p>
             </section>
         </div>
     </main>
@@ -156,7 +232,7 @@
     <footer>
         <div class="container">
             <p>&copy; 2026 KoalaSync. Open Source unter der MIT-Lizenz.</p>
-            <p style="font-size: 0.8rem; margin-top: 0.5rem;">Keine Daten werden auf unseren Servern gespeichert. Reines RAM-basiertes Relay.</p>
+            <p style="font-size: 0.8rem; margin-top: 0.5rem;">Keine Relay-Logs. Kein Tracking. Website-Access-Logs werden nach 7 Tagen gelöscht.</p>
             <div style="margin-top: 1.5rem; font-size: 0.8rem; display: flex; justify-content: center; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
                 <a href="impressum" style="color: var(--text-muted); text-decoration: none;">Impressum</a>
                 <a href="datenschutz" style="color: var(--text-muted); text-decoration: none;">Datenschutz</a>

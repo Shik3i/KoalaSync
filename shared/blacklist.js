@@ -53,10 +53,6 @@ export const BLACKLIST_DOMAINS = [
     'docs.google.com',
     'sheets.google.com',
     'slides.google.com',
-    'drive.google.com',
-    'dropbox.com',
-    'onedrive.live.com',
-    'icloud.com',
 
     // Messengers
     'web.whatsapp.com',
@@ -117,7 +113,6 @@ export const BLACKLIST_DOMAINS = [
     'status.koalastuff.net',
     'sync.koalastuff.net',
     'timer.koalastuff.net',
-    'localhost',
     'zoom.us',
     'teams.microsoft.com',
     'meet.google.com',

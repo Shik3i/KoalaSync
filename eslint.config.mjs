@@ -1,6 +1,6 @@
 export default [
   {
-    ignores: ["coverage/**", "dist/**", "node_modules/**", "scratch/**"]
+    ignores: ["coverage/**", "dist/**", "node_modules/**", "scratch/**", "website/www/**"]
   },
   {
     languageOptions: {
@@ -18,6 +18,8 @@ export default [
         setInterval: "readonly",
         clearTimeout: "readonly",
         clearInterval: "readonly",
+        requestAnimationFrame: "readonly",
+        cancelAnimationFrame: "readonly",
         fetch: "readonly",
         CustomEvent: "readonly",
         MutationObserver: "readonly",

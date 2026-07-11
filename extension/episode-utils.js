@@ -1,6 +1,6 @@
 /**
  * KoalaSync Episode Title Utilities
- * Single source of truth — synced to content.js by build-extension.js.
+ * Single source of truth — synced to content.js by build-extension.cjs.
  * Keep in sync with the injection block in content.js!
  */
 

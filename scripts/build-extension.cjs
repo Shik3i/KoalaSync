@@ -36,6 +36,13 @@ console.log('✓ constants.js, blacklist.js, names.js, and README.md synced to e
 // Read the base manifest
 const baseManifest = JSON.parse(fs.readFileSync(baseManifestPath, 'utf8'));
 
+function replaceRequiredBlock(content, pattern, replacement, description) {
+  if (!pattern.test(content)) {
+    throw new Error(`CRITICAL: ${description} markers not found. Aborting build to prevent stale artifacts.`);
+  }
+  return content.replace(pattern, replacement);
+}
+
 // Helper to copy files, ignoring manifest.json and manifest.base.json
 // Also injects shared constants into content.js
 function copyExtensionFiles(targetDir, browserName) {
@@ -79,11 +86,7 @@ function copyExtensionFiles(targetDir, browserName) {
         const ePattern = new RegExp(`${eStart}[\\s\\S]+?${eEnd}`);
         const eRep = `${eStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n    const EVENTS = ${eventsObject};\n    ${eEnd}`;
         
-        if (ePattern.test(content)) {
-          content = content.replace(ePattern, eRep);
-        } else {
-          console.warn('⚠️ WARNING: Event markers not found in content.js');
-        }
+        content = replaceRequiredBlock(content, ePattern, eRep, 'Event injection');
 
         // 2. Inject Heartbeat
         const hStart = '// --- SHARED_HEARTBEAT_INJECT_START ---';
@@ -91,30 +94,23 @@ function copyExtensionFiles(targetDir, browserName) {
         const hPattern = new RegExp(`${hStart}[\\s\\S]+?${hEnd}`);
         const hRep = `${hStart}\n    const HEARTBEAT_INTERVAL_VAL = ${heartbeatVal};\n    ${hEnd}`;
         
-        if (hPattern.test(content)) {
-          content = content.replace(hPattern, hRep);
-        } else {
-          console.warn('⚠️ WARNING: Heartbeat markers not found in content.js');
-        }
+        content = replaceRequiredBlock(content, hPattern, hRep, 'Heartbeat injection');
 
         // 3. Inject Episode Utils
         const euStart = '// --- SHARED_EPISODE_UTILS_INJECT_START ---';
         const euEnd = '// --- SHARED_EPISODE_UTILS_INJECT_END ---';
         const euPattern = new RegExp(euStart.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]+?' + euEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
         const euPath = path.join(rootDir, 'extension', 'episode-utils.js');
-        if (fs.existsSync(euPath)) {
-          const euContent = fs.readFileSync(euPath, 'utf8');
-          const stripped = euContent
-            .replace(/^\/\*\*[\s\S]*?\*\/\s*/m, '')
-            .replace(/export function /g, 'function ')
-            .trim();
-          const euRep = `${euStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n${stripped.split('\n').map(l => '    ' + l).join('\n')}\n    ${euEnd}`;
-          if (euPattern.test(content)) {
-            content = content.replace(euPattern, euRep);
-          } else {
-            console.warn('⚠ WARNING: Episode utils markers not found in content.js');
-          }
+        if (!fs.existsSync(euPath)) {
+          throw new Error(`CRITICAL: Episode utils source missing: ${euPath}. Aborting build.`);
         }
+        const euContent = fs.readFileSync(euPath, 'utf8');
+        const stripped = euContent
+          .replace(/^\/\*\*[\s\S]*?\*\/\s*/m, '')
+          .replace(/export function /g, 'function ')
+          .trim();
+        const euRep = `${euStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n${stripped.split('\n').map(l => '    ' + l).join('\n')}\n    ${euEnd}`;
+        content = replaceRequiredBlock(content, euPattern, euRep, 'Episode utils injection');
 
         fs.writeFileSync(destPath, content);
         console.log('✓ Injected shared constants into content.js');
@@ -132,17 +128,16 @@ function copyExtensionFiles(targetDir, browserName) {
         uRep += `        const BROWSER_TYPE = "${browserName}";\n`;
         uRep += `        ${uEnd}`;
         
-        if (uPattern.test(content)) {
-          content = content.replace(uPattern, uRep);
-        } else {
-          console.warn('⚠️ WARNING: Uninstall URL markers not found in background.js');
-        }
+        content = replaceRequiredBlock(content, uPattern, uRep, 'Uninstall URL injection');
 
         fs.writeFileSync(destPath, content);
         console.log(`✓ Injected uninstall URL constants for ${browserName} into background.js`);
       } else if (item === 'popup.html') {
         let content = fs.readFileSync(srcPath, 'utf8');
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+        if (!content.includes('__BUILD_TIMESTAMP__')) {
+          throw new Error('CRITICAL: Build timestamp placeholder not found in popup.html. Aborting build.');
+        }
         content = content.replace(/__BUILD_TIMESTAMP__/g, timestamp);
         fs.writeFileSync(destPath, content);
         console.log(`✓ Injected build timestamp into popup.html: ${timestamp}`);

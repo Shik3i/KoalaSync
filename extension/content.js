@@ -15,7 +15,7 @@
     window.koalaSyncInjected = true;
 
     // --- SHARED_EVENTS_INJECT_START ---
-    // This block is automatically updated by /scripts/build-extension.js
+    // This block is automatically updated by /scripts/build-extension.cjs
     const EVENTS = {
         PLAY: "play",
         PAUSE: "pause",
@@ -717,7 +717,7 @@
     // Handles: S01E01, S1E1, S01 - E01, Season 1 Episode 1, "Folge 5", "Episode 5", "Ep. 5", "#5"
     // Returns null if no episode pattern found.
     // --- SHARED_EPISODE_UTILS_INJECT_START ---
-    // This block is automatically replaced by /scripts/build-extension.js
+    // This block is automatically replaced by /scripts/build-extension.cjs
     function extractEpisodeId(title) {
         if (!title || typeof title !== 'string') return null;
         const se = title.match(/S(?:eason\s*)?(\d+)[^a-zA-Z0-9]*E(?:pisode\s*)?(\d+)/i);

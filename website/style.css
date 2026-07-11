@@ -17,6 +17,30 @@
     --success: #22c55e;
     --glass: rgba(30, 41, 59, 0.4);
     --glass-border: rgba(255, 255, 255, 0.05);
+    --section-tint: transparent;
+    --section-tint-strong: rgba(15, 23, 42, 0.28);
+    --card-surface: rgba(30, 41, 59, 0.45);
+    --card-border: rgba(255, 255, 255, 0.08);
+    color-scheme: dark;
+}
+
+.extension-mockup,
+.illus-popup-card,
+.illus-player-card {
+    --bg: #0f172a !important;
+    --card: #1e293b !important;
+    --accent: #6366f1 !important;
+    --accent-glow: rgba(99, 102, 241, 0.3) !important;
+    --text: #f8fafc !important;
+    --text-muted: #cbd5e1 !important;
+    --success: #22c55e !important;
+    --error: #ef4444 !important;
+    --glass: rgba(30, 41, 59, 0.4) !important;
+    --glass-border: rgba(255, 255, 255, 0.05) !important;
+    --section-tint: rgba(255, 255, 255, 0.02) !important;
+    --section-tint-strong: rgba(15, 23, 42, 0.4) !important;
+    --card-surface: rgba(30, 41, 59, 0.45) !important;
+    --card-border: rgba(255, 255, 255, 0.08) !important;
 }
 
 .invite-banner {
@@ -83,7 +107,10 @@ body {
     height: 100%;
     z-index: -1;
     overflow: hidden;
-    background: radial-gradient(circle at 50% 50%, #1e1b4b 0%, #0f172a 100%);
+    background:
+        radial-gradient(circle at 18% 10%, rgba(99, 102, 241, 0.18), transparent 34rem),
+        radial-gradient(circle at 78% 68%, rgba(168, 85, 247, 0.12), transparent 38rem),
+        linear-gradient(180deg, #0f172a 0%, #111827 45%, #0f172a 100%);
 }
 
 .blob {
@@ -93,8 +120,8 @@ body {
     background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
     filter: blur(80px);
     border-radius: 50%;
-    opacity: 0.5;
-    animation: move 25s infinite alternate ease-in-out;
+    opacity: 0.22;
+    animation: move 40s infinite alternate ease-in-out;
 }
 
 .blob-1 { top: -100px; left: -100px; animation-delay: 0s; }
@@ -119,9 +146,12 @@ section {
     padding: 6rem 0;
 }
 
+#how-it-works {
+    padding: 4.5rem 0;
+}
+
 /* Content-visibility for offscreen sections to improve INP */
 .use-cases-section,
-#features,
 #self-hosting,
 .comparison-section {
     content-visibility: auto;
@@ -138,6 +168,16 @@ nav {
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--glass-border);
     padding: 1rem 0;
+    transition: padding 0.3s ease, background 0.3s ease;
+}
+
+nav.nav-scrolled {
+    padding: 0.75rem 0;
+    background: rgba(15, 23, 42, 0.9);
+}
+
+html.theme-light nav.nav-scrolled {
+    background: rgba(241, 245, 249, 0.92);
 }
 
 .nav-content {
@@ -214,49 +254,289 @@ nav {
     flex-shrink: 0;
 }
 
+/* --- Theme Toggle (sun/moon) --- */
+.theme-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.3s, transform 0.3s;
+    overflow: hidden;
+}
+
+.theme-toggle:hover {
+    color: var(--accent);
+    transform: scale(1.15);
+}
+
+.theme-toggle:active {
+    transform: scale(0.9);
+}
+
+.theme-toggle svg {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease;
+}
+
+/* Default (Dark mode): Sun visible, Moon hidden & rotated */
+.theme-toggle .theme-icon-sun {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+}
+
+.theme-toggle .theme-icon-moon {
+    opacity: 0;
+    transform: scale(0) rotate(-90deg);
+}
+
+/* Light mode: Moon visible, Sun hidden & rotated */
+html.theme-light .theme-toggle .theme-icon-sun {
+    opacity: 0;
+    transform: scale(0) rotate(90deg);
+}
+
+html.theme-light .theme-toggle .theme-icon-moon {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+}
+
+/* --- Light Theme --- */
+html.theme-light {
+    --bg: #f1f5f9;
+    --card: #ffffff;
+    --accent: #5b5de8;
+    --accent-glow: rgba(91, 93, 232, 0.25);
+    --text: #0f172a;
+    --text-muted: #475569;
+    --glass: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(15, 23, 42, 0.08);
+    --section-tint: transparent;
+    --section-tint-strong: rgba(226, 232, 240, 0.5);
+    --card-surface: rgba(255, 255, 255, 0.75);
+    --card-border: rgba(15, 23, 42, 0.08);
+    color-scheme: light;
+}
+
+html.theme-light .bg-blobs {
+    background:
+        radial-gradient(circle at 16% 10%, rgba(99, 102, 241, 0.16), transparent 34rem),
+        radial-gradient(circle at 78% 68%, rgba(168, 85, 247, 0.1), transparent 38rem),
+        linear-gradient(180deg, #f8fafc 0%, #eef2ff 46%, #f8fafc 100%);
+}
+
+html.theme-light .blob {
+    opacity: 0.16;
+}
+
+html.theme-light .feature-card,
+html.theme-light .faq-item {
+    background: var(--card-surface);
+    border-color: var(--card-border);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+html.theme-light .feature-card::before {
+    background: linear-gradient(to bottom right, rgba(15, 23, 42, 0.08), transparent);
+}
+
+html.theme-light .use-case-card {
+    background: var(--card-surface);
+}
+
+html.theme-light .use-case-card h3 {
+    color: var(--text);
+}
+
+html.theme-light .use-case-card:hover {
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+    border-color: rgba(15, 23, 42, 0.15);
+}
+
+html.theme-light .faq-item[open] {
+    background: #ffffff;
+}
+
+html.theme-light .faq-item p {
+    border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+html.theme-light .btn-secondary {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.12);
+}
+
+html.theme-light .btn-secondary:hover {
+    background: #e2e8f0;
+}
+
+html.theme-light .btn-firefox {
+    background: #f97316;
+    color: #ffffff;
+    box-shadow: 0 10px 18px rgba(249, 115, 22, 0.24);
+}
+
+html.theme-light .btn-firefox:hover {
+    background: #ea580c;
+    box-shadow: 0 18px 26px rgba(249, 115, 22, 0.28);
+}
+
+html.theme-light .btn-firefox img {
+    filter: brightness(0) saturate(100%) invert(13%) sepia(38%) saturate(1084%) hue-rotate(177deg) brightness(89%) contrast(96%);
+}
+
+html.theme-light .btn-firefox-secondary img {
+    filter: brightness(0) saturate(100%) invert(13%) sepia(38%) saturate(1084%) hue-rotate(177deg) brightness(89%) contrast(96%);
+}
+
+html.theme-light .comparison-section {
+    background: transparent;
+}
+
+html.theme-light .comparison-table-wrapper {
+    background: rgba(255, 255, 255, 0.75);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+html.theme-light .comparison-table th {
+    background: rgba(15, 23, 42, 0.06);
+    color: var(--text);
+}
+
+html.theme-light .comparison-table th,
+html.theme-light .comparison-table td {
+    border-bottom-color: rgba(15, 23, 42, 0.08);
+}
+
+html.theme-light .comparison-table tbody tr:hover {
+    background: rgba(15, 23, 42, 0.03);
+}
+
+html.theme-light .feat-name strong {
+    color: var(--text);
+}
+
+html.theme-light .table-footnotes {
+    background: rgba(15, 23, 42, 0.04);
+    border-top-color: rgba(15, 23, 42, 0.06);
+}
+
+@media (max-width: 900px) {
+    html.theme-light .comparison-table tbody tr {
+        background: rgba(255, 255, 255, 0.85);
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+    }
+    html.theme-light .comparison-table td.feat-name {
+        background: rgba(15, 23, 42, 0.05);
+    }
+    html.theme-light .comparison-table td {
+        border-bottom-color: rgba(15, 23, 42, 0.08);
+    }
+}
+
+html.theme-light .compat-logo img,
+html.theme-light .compat-logo {
+    filter: none;
+}
+
 /* --- Hero Section --- */
 .hero {
     min-height: 100vh;
     display: flex;
-    align-items: center;
-    padding-top: 8rem;
-    padding-bottom: 4rem;
+    align-items: flex-start;
+    padding-top: clamp(8rem, 12vh, 10rem);
+    padding-bottom: clamp(2rem, 5vh, 4rem);
 }
 
 .hero-grid {
     display: grid;
-    grid-template-columns: 1.2fr 1fr;
+    /* Single column until the interactive demo appears (1024px). Below that the
+       headline gets the full width and the install CTAs stay prominent while the
+       demo stacks underneath, matching the demo's own 1024px breakpoint. */
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    /* Keep the whole hero vertically centered. Do not use grid alignment to fix
+       the demo top edge; that moves the headline and breaks the hero balance. */
     align-items: center;
-    gap: 4rem;
+    gap: 3rem;
     text-align: left;
     width: 100%;
+    min-height: calc(100svh - 12.5rem);
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 1200px;
+    }
+    .hero-grid {
+        grid-template-columns: 1.35fr 1fr;
+        gap: 3.5rem;
+    }
+    .cta-group {
+        gap: 0.75rem;
+    }
+    .cta-group .btn {
+        padding: 0.8rem 1.35rem;
+    }
 }
 
 .hero-text h1 {
-    font-size: 4.5rem;
+    font-size: clamp(2.9rem, 4.1vw, 4rem);
     font-weight: 800;
-    line-height: 1.1;
-    margin-bottom: 1.5rem;
+    line-height: 1.12;
+    margin-bottom: 1.4rem;
     padding-bottom: 0.1em;
-    background: linear-gradient(to bottom, #fff 40%, #6366f1);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--text);
+    letter-spacing: -0.02em;
 }
 
-.hero-text h1 .hero-line2 {
-    display: block;
-    margin-top: 0.2em;
+.hero-text h1 .hero-highlight {
+    background: linear-gradient(90deg, #6366f1, #a855f7, #38bdf8, #6366f1);
+    background-size: 300% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    white-space: nowrap;
+    animation: hero-gradient-pan 10s linear infinite;
+    /* background-clip: text only paints inside the layout box; with the
+       negative h1 letter-spacing the last glyph overhangs it and gets cut
+       off. Invisible padding extends the paint area without moving text. */
+    padding-right: 0.08em;
+    margin-right: -0.08em;
+}
+
+@keyframes hero-gradient-pan {
+    from { background-position: 0% 50%; }
+    to { background-position: 300% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-text h1 .hero-highlight {
+        animation: none;
+    }
 }
 
 .hero-text p, .hero-subtitle {
     font-size: 1.25rem;
     color: var(--text-muted);
-    margin-bottom: 2.5rem;
+    margin-bottom: 1.9rem;
     max-width: 600px;
     font-weight: 400;
     line-height: 1.6;
 }
+
 .hero-mascot-container {
+    position: relative;
     display: block;
     margin-bottom: -0.5rem;
     margin-left: 2.2rem;
@@ -268,11 +548,128 @@ nav {
     height: auto;
 }
 
+/* Changelog link as the koala's comic speech bubble. Absolutely positioned
+   so it never moves the koala out of its spot above the install buttons. */
+.koala-speech-bubble {
+    position: absolute;
+    left: 108px;
+    top: 0.2rem;
+    width: max-content;
+    max-width: min(240px, calc(100% - 120px));
+    display: block;
+    text-decoration: none;
+    text-align: left;
+    background: rgba(30, 41, 59, 0.95);
+    border: 1px solid rgba(99, 102, 241, 0.45);
+    border-radius: 14px;
+    border-bottom-left-radius: 4px;
+    padding: 0.6rem 0.9rem;
+    line-height: 1.35;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    animation: bubble-float 4s ease-in-out infinite;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Tail: outline triangle + fill triangle so it reads as part of the bubble */
+.koala-speech-bubble::before,
+.koala-speech-bubble::after {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+}
+
+.koala-speech-bubble::before {
+    left: -11px;
+    bottom: 10px;
+    border-top: 8px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-right: 11px solid rgba(99, 102, 241, 0.45);
+}
+
+.koala-speech-bubble::after {
+    left: -9px;
+    bottom: 11px;
+    border-top: 7px solid transparent;
+    border-bottom: 3px solid transparent;
+    border-right: 10px solid rgba(30, 41, 59, 0.95);
+}
+
+.koala-speech-bubble:hover {
+    border-color: rgba(99, 102, 241, 0.85);
+    box-shadow: 0 8px 28px rgba(99, 102, 241, 0.35);
+}
+
+.koala-speech-bubble .version-text-en,
+.koala-speech-bubble .version-text-de {
+    display: block;
+}
+
+.koala-speech-bubble .bubble-title {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+
+.koala-speech-bubble .bubble-sub {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 2px;
+}
+
+html.theme-light .koala-speech-bubble {
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+html.theme-light .koala-speech-bubble::after {
+    border-right-color: rgba(255, 255, 255, 0.96);
+}
+
+@keyframes bubble-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .koala-speech-bubble {
+        animation: none;
+    }
+}
+
 @media (max-width: 768px) {
+    /* The koala keeps standing on the active install CTA; app.js updates the
+       offset from the real button geometry when the row wraps. */
     .hero-mascot-container {
+        --hero-mascot-offset: 0px;
         margin-left: 0;
         display: flex;
         justify-content: center;
+    }
+    .hero-lookdown-mascot {
+        transform: translateX(var(--hero-mascot-offset));
+    }
+    .koala-speech-bubble {
+        left: calc(50% + var(--hero-mascot-offset) + 50px);
+        right: 0.75rem;
+        top: 0.3rem;
+        max-width: 240px;
+        padding: 0.5rem 0.75rem;
+    }
+    .koala-speech-bubble .bubble-title {
+        font-size: 0.8rem;
+    }
+    .koala-speech-bubble .bubble-sub {
+        font-size: 0.68rem;
+    }
+    /* The relative release time is too much text for the small mobile bubble */
+    .koala-speech-bubble .bubble-ago {
+        display: none;
     }
 }
 
@@ -280,6 +677,19 @@ nav {
     display: flex;
     gap: 1rem;
     flex-wrap: wrap;
+}
+
+/* Quiet trust line under the install buttons; answers "is it free, is it
+   legit, do I need an account" right at the moment of the click decision. */
+.hero-text .cta-trust {
+    margin-top: 0.85rem;
+    margin-bottom: 0;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    opacity: 0.75;
+    letter-spacing: 0.01em;
+    max-width: none;
 }
 
 .btn {
@@ -327,6 +737,32 @@ nav {
     transform: translateY(-2px);
 }
 
+.btn-demo-mobile {
+    display: none;
+    border: 1px solid rgba(99, 102, 241, 0.34);
+    cursor: pointer;
+    font: inherit;
+}
+
+.btn-demo-mobile svg {
+    flex-shrink: 0;
+}
+
+/* Install buttons: compact by default (just the browser name) so all three
+   CTAs fit one line; the detected browser expands to the full call to action.
+   The GitHub button stays compact always. */
+.btn-label-full { display: none; }
+
+.btn-install:not(.is-detected),
+.btn-compact {
+    padding: 0.62rem 1.05rem;
+    font-size: 0.9rem;
+    gap: 0.4rem;
+}
+
+.btn-install.is-detected .btn-label-short { display: none; }
+.btn-install.is-detected .btn-label-full { display: inline; }
+
 .version-badge {
     display: inline-block;
     background: rgba(99, 102, 241, 0.1);
@@ -341,6 +777,11 @@ nav {
     text-transform: uppercase;
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.version-badge-below {
+    margin-bottom: 0;
+    margin-top: 1.5rem;
 }
 
 .version-badge:hover {
@@ -360,7 +801,7 @@ nav {
 .extension-mockup {
     width: 100%;
     max-width: 320px;
-    height: 520px;
+    height: 528px;
     background: #0f172a;
     border-radius: 20px;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -371,7 +812,7 @@ nav {
     overflow: hidden;
     position: relative;
     user-select: none;
-    padding: 16px;
+    padding: 14px;
     padding-bottom: 0;
     box-sizing: border-box;
 }
@@ -379,7 +820,7 @@ nav {
 .mock-header-row {
     display: flex;
     align-items: center;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     flex-shrink: 0;
 }
 
@@ -424,13 +865,42 @@ nav {
     color: var(--accent);
 }
 
+/* Close button for the hero demo popup (hidden in the static mobile mockup) */
+.mock-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 8px;
+    padding: 0;
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+}
+
+.mock-close-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 1024px) {
+    .mock-close-btn {
+        display: none;
+    }
+}
+
 .mock-tabs {
     display: flex;
     gap: 4px;
     background: #1e293b;
     padding: 4px;
     border-radius: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 14px;
     flex-shrink: 0;
 }
 
@@ -441,7 +911,7 @@ nav {
     color: var(--text-muted);
     font-size: 0.75rem;
     font-weight: 600;
-    padding: 8px 4px;
+    padding: 7px 4px;
     cursor: pointer;
     border-radius: 8px;
     transition: color 0.2s, background-color 0.2s;
@@ -461,7 +931,7 @@ nav {
     flex: 1;
     overflow-y: auto;
     padding: 0;
-    padding-bottom: 16px;
+    padding-bottom: 12px;
     display: flex;
     flex-direction: column;
     font-size: 0.8rem;
@@ -475,7 +945,7 @@ nav {
 .mock-screen {
     display: none;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
 }
 
 .mock-screen.active {
@@ -487,7 +957,7 @@ nav {
     background: #1e293b;
     border: 1px solid #334155;
     border-radius: 8px;
-    padding: 12px;
+    padding: 10px;
 }
 
 .mock-label {
@@ -496,7 +966,7 @@ nav {
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.3rem;
 }
 
 .mock-section-label {
@@ -564,7 +1034,7 @@ nav {
 
 .mock-invite-box {
     display: flex;
-    gap: 0.4rem;
+    gap: 0.35rem;
 }
 
 .mock-invite-box input {
@@ -574,10 +1044,47 @@ nav {
     white-space: nowrap;
 }
 
+.demo-room-empty {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px 10px;
+    text-align: center;
+}
+.demo-room-empty img {
+    border-radius: 10px;
+    opacity: 0.85;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+}
+.demo-room-empty-text {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+.demo-create-room-btn {
+    background: var(--accent);
+    border: none;
+    color: white;
+    font-weight: 700;
+    padding: 10px 18px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.demo-create-room-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+.demo-create-room-btn:active {
+    transform: scale(0.96);
+}
+
 .mock-peer-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.4rem;
 }
 
 .mock-peer-item {
@@ -586,14 +1093,14 @@ nav {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.03);
     border-radius: 8px;
-    padding: 0.5rem 0.6rem;
+    padding: 0.45rem 0.55rem;
 }
 
 .mock-peer-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.2rem;
 }
 
 .mock-peer-name {
@@ -647,6 +1154,63 @@ nav {
 .mock-btn-pause { background: #ef4444; }
 .mock-btn-pause:hover { background: #dc2626; }
 .mock-btn-force { background: var(--accent); grid-column: span 2; }
+
+/* Contrast-safe palette for the decorative hero demo. Lighthouse/axe audits
+   sighted text contrast even inside aria-hidden, so every walkthrough state
+   must meet WCAG AA. Accent shown as text gets a lighter indigo; buttons that
+   put white text on a colour get a darker shade (these beat inline styles). */
+.hero-demo-scene {
+    --accent: #a5b4fc;
+}
+.hero-demo-scene .mock-tab.active,
+.hero-demo-scene .mock-btn-force,
+.hero-demo-scene #demo-force-sync,
+.hero-demo-scene .demo-create-room-btn {
+    background: #4338ca !important;
+    color: #fff;
+}
+.hero-demo-scene .mock-btn-play {
+    background: #15803d !important;
+}
+.hero-demo-scene .mock-btn-pause,
+.hero-demo-scene #demo-room-joined > button.mock-btn {
+    background: #b91c1c !important;
+}
+.hero-demo-scene .mock-version-link {
+    opacity: 0.85;
+}
+
+html.theme-light .hero-demo-scene {
+    --accent: #4f46e5;
+}
+
+
+html.theme-light .hero-demo-scene .demo-tab-card {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.1);
+    box-shadow: 0 18px 38px rgba(15, 23, 42, 0.14);
+}
+
+html.theme-light .hero-demo-scene .demo-tab-titlebar {
+    background: #f8fafc;
+    border-bottom-color: #e2e8f0;
+    color: #475569;
+}
+
+html.theme-light .hero-demo-scene .demo-tab-dots i {
+    background: #cbd5e1;
+}
+
+html.theme-light .hero-demo-scene .demo-ext-launcher {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+html.theme-light .hero-demo-scene .demo-sync-chip {
+    background: rgba(22, 163, 74, 0.1);
+    border-color: rgba(22, 163, 74, 0.26);
+    color: #166534;
+}
 
 .mock-status-display {
     display: flex;
@@ -772,6 +1336,24 @@ input:checked + .mock-slider:before {
     grid-template-columns: repeat(3, 1fr);
     gap: 1.5rem;
     margin-top: 4rem;
+}
+
+.feature-card.feature-card-compact {
+    padding: 1.8rem;
+    border-radius: 16px;
+}
+
+.feature-card.feature-card-compact::before {
+    border-radius: 16px;
+}
+
+.feature-card.feature-card-compact h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+}
+
+.feature-card.feature-card-compact p {
+    font-size: 0.9rem;
 }
 
 .feature-card {
@@ -911,11 +1493,13 @@ input:checked + .mock-slider:before {
 
 @media (max-width: 900px) {
     .features-grid {
-        grid-template-columns: repeat(2, 1fr);
+        /* Keep the Why KoalaSync grid at either three columns or one column.
+           The two-column in-between makes compact cards stretch unevenly. */
+        grid-template-columns: 1fr;
         gap: 1.25rem;
     }
     .feature-card.bento-large {
-        grid-column: span 2;
+        grid-column: span 1;
         padding: 2.5rem;
         gap: 2rem;
     }
@@ -984,13 +1568,13 @@ input:checked + .mock-slider:before {
 .steps {
     display: flex;
     flex-direction: column;
-    gap: 6rem;
+    gap: 4rem;
 }
 
 .step {
     display: grid;
-    grid-template-columns: 1fr 1.1fr;
-    gap: 6rem;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
     align-items: center;
 }
 
@@ -999,38 +1583,79 @@ input:checked + .mock-slider:before {
 }
 
 .step-num {
-    font-size: 4rem;
-    font-weight: 800;
-    color: rgba(99, 102, 241, 0.15);
+    font-size: 3.25rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(168, 85, 247, 0.15));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
     line-height: 1;
     margin-bottom: 0.5rem;
+    font-family: inherit;
+    letter-spacing: 0;
 }
 
 .step-text h3 {
-    font-size: 1.85rem;
-    margin-bottom: 1rem;
-    font-weight: 800;
+    font-size: 1.65rem;
+    margin-bottom: 0.75rem;
+    font-weight: 850;
+    color: var(--text-main);
+    letter-spacing: 0;
 }
 
 .step-text p {
     color: var(--text-muted);
-    font-size: 1.05rem;
-    line-height: 1.6;
+    font-size: 1rem;
+    line-height: 1.55;
 }
 
 /* Custom CSS Mockups for step illustrations */
 .step-illustration-1, .step-illustration-2, .step-illustration-3 {
-    background: radial-gradient(circle at top left, #1e293b, #0f172a);
-    height: 280px; /* Slightly taller for more detail and breathing room */
-    border-radius: 24px;
-    border: 1px solid var(--glass-border);
+    background: radial-gradient(circle at 10% 10%, #1e1b4b, #030712);
+    height: 240px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
     position: relative;
     overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (max-width: 900px) {
+    #how-it-works {
+        padding: 3.5rem 0;
+    }
+
+    .steps {
+        gap: 2.75rem;
+    }
+
+    .step {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.1rem;
+        text-align: left;
+    }
+
+    #how-it-works .step .step-text {
+        order: 1;
+    }
+
+    #how-it-works .step-illustration-1,
+    #how-it-works .step-illustration-2,
+    #how-it-works .step-illustration-3 {
+        order: 2;
+        height: 220px;
+    }
+
+    .step-num {
+        font-size: 2.5rem;
+    }
+
+    .step-text h3 {
+        font-size: 1.45rem;
+    }
 }
 
 .step-illustration-1:hover, .step-illustration-2:hover, .step-illustration-3:hover {
@@ -1045,21 +1670,23 @@ input:checked + .mock-slider:before {
 .illus-browser-container {
     width: 90%;
     height: 80%;
-    background: #090d16;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: #050811;
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
 }
 
 .illus-browser-header {
-    background: #131924;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     padding: 0.6rem 0.8rem;
     display: flex;
     align-items: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .illus-browser-dots {
@@ -1255,13 +1882,13 @@ input:checked + .mock-slider:before {
     top: 0.6rem;
     right: 0.6rem;
     width: 145px;
-    background: rgba(30, 41, 59, 0.75);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(99, 102, 241, 0.25);
     border-radius: 12px;
     padding: 0.6rem 0.8rem;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.55), 0 0 15px rgba(99, 102, 241, 0.15);
     animation: popup-float 4s ease-in-out infinite;
     z-index: 5;
 }
@@ -1323,17 +1950,17 @@ input:checked + .mock-slider:before {
    Step 2 Illustration: Highly Realistic Extension Popup (Create Room View)
    ========================================================================== */
 .illus-popup-card {
-    width: 220px; /* Scaled up 16% for a bigger, much more detailed view */
-    background: rgba(30, 41, 59, 0.75);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    width: 220px;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 16px;
-    padding: 0.95rem; /* Slightly larger padding */
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    padding: 0.8rem;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
     display: flex;
     flex-direction: column;
-    gap: 0.75rem; /* Tighter vertical layout rhythm */
+    gap: 0.55rem;
     animation: popup-float 4s ease-in-out infinite;
     animation-delay: -1s;
 }
@@ -1388,17 +2015,17 @@ input:checked + .mock-slider:before {
 .illus-popup-body {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.55rem;
     position: relative;
 }
 
 .illus-popup-btn {
     background: linear-gradient(135deg, var(--accent), #8b5cf6);
     border-radius: 8px;
-    padding: 9px; /* Scaled up padding */
+    padding: 7px 9px;
     color: white;
     font-weight: 700;
-    font-size: 0.7rem; /* Scaled up font */
+    font-size: 0.68rem;
     text-align: center;
     box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
     position: relative;
@@ -1432,8 +2059,8 @@ input:checked + .mock-slider:before {
     background: rgba(9, 13, 22, 0.4);
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 8px;
-    padding: 7px 12px; /* Scaled up padding */
-    font-size: 0.56rem; /* Scaled up font */
+    padding: 6px 11px;
+    font-size: 0.54rem;
     color: var(--text-muted);
     font-weight: 700;
     text-transform: uppercase;
@@ -1452,13 +2079,13 @@ input:checked + .mock-slider:before {
 /* Floating Success Badge */
 .illus-floating-success {
     position: absolute;
-    bottom: -1.2rem;
+    bottom: -0.9rem;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(9, 13, 22, 0.9);
     border: 1px solid rgba(34, 197, 94, 0.3);
     border-radius: 20px;
-    padding: 3px 10px;
+    padding: 2px 9px;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -1498,11 +2125,13 @@ input:checked + .mock-slider:before {
 
 .illus-player-card {
     width: 145px;
-    background: rgba(15, 23, 42, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     padding: 6px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.5);
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -1560,7 +2189,14 @@ input:checked + .mock-slider:before {
 .player-video-overlay {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
-    background: radial-gradient(circle at center, rgba(139, 92, 246, 0.1) 0%, transparent 80%);
+    background: linear-gradient(to bottom, transparent, rgba(99, 102, 241, 0.15), transparent);
+    background-size: 100% 200%;
+    animation: playerScrollScanline 3s linear infinite;
+}
+
+@keyframes playerScrollScanline {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 0% 200%; }
 }
 
 .player-play-pulse {
@@ -1823,7 +2459,7 @@ input:checked + .mock-slider:before {
 /* --- Footer --- */
 footer {
     padding: 4rem 0;
-    border-top: 1px solid var(--glass-border);
+    border-top: 0;
     text-align: center;
     color: var(--text-muted);
 }
@@ -1911,12 +2547,28 @@ footer a:hover {
 }
 
 @media (max-width: 768px) {
-    .hero-grid, .step {
+    .hero {
+        align-items: center;
+        padding-top: 5.5rem;
+        padding-bottom: 3.5rem;
+        min-height: 100svh;
+    }
+
+    .hero-grid {
+        min-height: auto;
+    }
+
+    .hero-grid {
         grid-template-columns: minmax(0, 1fr);
         text-align: center;
     }
+    .step {
+        grid-template-columns: minmax(0, 1fr);
+        text-align: left;
+    }
     .hero-text h1 {
         font-size: 2.5rem;
+        max-width: none;
     }
     .cta-group {
         justify-content: center;
@@ -1975,6 +2627,17 @@ footer a:hover {
     }
     .legal-card {
         padding: 1.5rem;
+    }
+}
+
+@media (min-width: 769px) and (max-height: 920px) {
+    .hero {
+        padding-top: clamp(7.5rem, 10vh, 9rem);
+        padding-bottom: clamp(1.5rem, 3vh, 2.75rem);
+    }
+
+    .hero-grid {
+        min-height: calc(100svh - 9.5rem);
     }
 }
 
@@ -2114,21 +2777,21 @@ html:not(.lang-de) [lang="de"] {
 .feature-card:nth-child(8) { --card-accent: rgba(16, 185, 129, 0.06); }
 
 .feature-card {
-    background: linear-gradient(135deg, var(--card-accent, transparent), var(--card));
+    background: linear-gradient(135deg, var(--card-accent, transparent), rgba(30, 41, 59, 0.45));
 }
 
 /* --- Compatibility Section --- */
 .compat-section {
-    padding: 1rem 0 3.5rem 0;
+    padding: 0.5rem 0 2.5rem 0;
     text-align: center;
-    background: rgba(255,255,255,0.01);
-    border-bottom: 1px solid var(--glass-border);
+    background: transparent;
+    border-bottom: 0;
 }
 
 .compat-mascot {
     display: block;
-    margin: 0 auto 0.5rem auto;
-    max-width: 368px;
+    margin: 0 auto 0.3rem auto;
+    max-width: 270px;
     width: 100%;
     height: auto;
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -2144,14 +2807,14 @@ html:not(.lang-de) [lang="de"] {
     color: var(--text-muted);
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    margin-bottom: 2rem;
+    margin-bottom: 1.4rem;
 }
 
 .compat-row {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 3rem;
+    gap: 2.4rem 3rem;
     flex-wrap: wrap;
 }
 
@@ -2175,6 +2838,77 @@ html:not(.lang-de) [lang="de"] {
     width: 28px;
     height: 28px;
     display: block;
+}
+
+.compat-logo img.compat-logo-wide {
+    width: 52px;
+    height: 28px;
+    object-fit: contain;
+}
+
+.compat-logo img.compat-logo-disneyplus-mark {
+    width: 60px;
+    height: 30px;
+    object-fit: contain;
+    filter: brightness(0) saturate(100%) invert(63%) sepia(12%) saturate(621%) hue-rotate(203deg) brightness(92%) contrast(88%);
+}
+
+html.theme-light .compat-logo img.compat-logo-disneyplus-mark {
+    filter: none;
+}
+
+@media (max-width: 700px) {
+    .compat-section {
+        padding: 0 0 1.6rem;
+    }
+
+    .compat-mascot {
+        max-width: 220px;
+        margin-bottom: 0.1rem;
+    }
+
+    .compat-heading {
+        font-size: 0.92rem;
+        line-height: 1.55;
+        margin-bottom: 1rem;
+    }
+
+    .compat-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1.55rem 0.75rem;
+        align-items: start;
+    }
+
+    .compat-logo {
+        gap: 0.35rem;
+        font-size: 0.72rem;
+    }
+
+    .compat-logo img {
+        width: 26px;
+        height: 26px;
+    }
+
+    .compat-logo img.compat-logo-wide {
+        width: 48px;
+        height: 26px;
+    }
+
+    .compat-logo img.compat-logo-disneyplus-mark {
+        width: 56px;
+        height: 28px;
+    }
+
+    .compat-logo-jellyfin {
+        display: none;
+    }
+
+    .compat-more {
+        grid-column: 1 / -1;
+        justify-self: center;
+        white-space: nowrap;
+    }
 }
 
 .compat-more {
@@ -2277,7 +3011,7 @@ html:not(.lang-de) [lang="de"] {
 .use-cases-section {
     padding: 6rem 0;
     position: relative;
-    border-bottom: 1px solid var(--glass-border);
+    border-bottom: 0;
 }
 
 .use-cases-grid {
@@ -2285,6 +3019,24 @@ html:not(.lang-de) [lang="de"] {
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: 2rem;
     margin-top: 1rem;
+}
+
+.use-cases-feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+    .use-cases-feature-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1.25rem;
+    }
+}
+
+@media (max-width: 600px) {
+    .use-cases-feature-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1rem;
+    }
 }
 
 .use-case-card {
@@ -2399,8 +3151,19 @@ html:not(.lang-de) [lang="de"] {
 /* --- Comparison Section --- */
 .comparison-section {
     padding: 6rem 0;
-    background: rgba(255, 255, 255, 0.01);
-    border-bottom: 1px solid var(--glass-border);
+    background: transparent;
+    border-bottom: 0;
+}
+
+#self-hosting,
+#faq,
+#faq + section,
+footer {
+    background: var(--section-tint-strong);
+}
+
+#self-hosting {
+    border-top: 1px solid var(--glass-border);
 }
 
 .comparison-table-wrapper {
@@ -2586,6 +3349,34 @@ html:not(.lang-de) [lang="de"] {
     }
 }
 
+@media (max-width: 600px) {
+    html.theme-light .comparison-section {
+        background: transparent;
+    }
+
+    html.theme-light .comparison-table tbody tr {
+        background: #ffffff;
+        border-color: rgba(15, 23, 42, 0.1);
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+    }
+
+    html.theme-light .comparison-table tbody tr:hover {
+        background: #ffffff;
+    }
+
+    html.theme-light .comparison-table td {
+        border-bottom-color: rgba(15, 23, 42, 0.08);
+    }
+
+    html.theme-light .comparison-table td.feat-name {
+        background: #ffffff;
+    }
+
+    html.theme-light .comparison-table td.check.highlight {
+        background: rgba(91, 93, 232, 0.07);
+    }
+}
+
 /* --- Footnotes & Source Links --- */
 .source-link {
     color: var(--accent);
@@ -2615,6 +3406,28 @@ html:not(.lang-de) [lang="de"] {
     line-height: 1.5;
     opacity: 0.65;
     transition: opacity 0.2s ease;
+}
+
+/* Link from the comparison table to the fuller guides/alternatives hub */
+.comparison-guides-link {
+    text-align: center;
+    margin: 2rem 0 0;
+}
+
+.comparison-guides-link a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: gap 0.2s ease, opacity 0.2s ease;
+}
+
+.comparison-guides-link a:hover {
+    gap: 0.7rem;
+    opacity: 0.85;
 }
 
 .table-footnotes:hover {
@@ -2797,7 +3610,78 @@ html:not(.lang-de) [lang="de"] {
     box-shadow: 0 20px 25px -5px rgba(34, 197, 94, 0.4);
 }
 
+/* --- Section collapse (FAQ, self-hosting): closed by default to keep the page short --- */
+.section-collapse {
+    margin: 0 auto;
+}
+
+.faq-section-collapse {
+    max-width: 800px;
+}
+
+.collapse-summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    list-style: none;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--accent);
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 99px;
+    padding: 0.85rem 2rem;
+    max-width: 360px;
+    margin: 0 auto;
+    transition: background 0.3s, box-shadow 0.3s, transform 0.3s;
+}
+
+.collapse-summary::-webkit-details-marker {
+    display: none;
+}
+
+.collapse-summary:hover {
+    background: rgba(99, 102, 241, 0.16);
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.25);
+    transform: translateY(-2px);
+}
+
+.collapse-summary .collapse-chevron {
+    flex-shrink: 0;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.section-collapse[open] .collapse-chevron {
+    transform: rotate(180deg);
+}
+
+.collapse-label-hide { display: none; }
+.section-collapse[open] .collapse-label-show { display: none; }
+.section-collapse[open] .collapse-label-hide { display: inline; }
+
+.section-collapse[open] .collapse-summary {
+    margin-bottom: 2rem;
+}
+
+.section-collapse[open] .collapse-content {
+    animation: collapse-content-in 0.4s ease-out;
+}
+
+@keyframes collapse-content-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .section-collapse[open] .collapse-content {
+        animation: none;
+    }
+}
+
 /* --- FAQ Section --- */
+
 .faq-grid {
     display: flex;
     flex-direction: column;
@@ -2815,6 +3699,7 @@ html:not(.lang-de) [lang="de"] {
     padding: 1.5rem 2rem;
     cursor: pointer;
     transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    overflow: hidden;
 }
 
 .faq-item:hover {
@@ -2847,13 +3732,13 @@ html:not(.lang-de) [lang="de"] {
     font-size: 1.4rem;
     color: var(--accent);
     font-weight: 300;
-    transition: transform 0.3s ease;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     flex-shrink: 0;
+    transform-origin: center;
 }
 
 .faq-item[open] summary::after {
-    content: '−';
-    transform: rotate(180deg);
+    transform: rotate(45deg);
 }
 
 .faq-item p {
@@ -2964,3 +3849,1446 @@ header[id] {
     }
 }
 
+/* --- Hero Live Demo Scene (two synced tabs + extension popup) --- */
+.hero-mockup-wrapper {
+    flex-direction: column;
+    gap: 0.9rem;
+    container-type: inline-size;
+}
+
+/* Fixed height that already fits the open popup, so toggling it never changes
+   layout (the vertically centered hero never jumps). The empty lower area is
+   the invisible room the popup drops into.
+
+   Do not move .hero-mockup-wrapper down to align the headline and demo tops:
+   the extension popup is bottom-anchored inside this scene, so moving the whole
+   wrapper destroys the vertical balance and leaves no breathing room below. */
+.hero-demo-scene {
+    --demo-content-y: 0px;
+    position: relative;
+    width: 100%;
+    height: max(calc(59cqw + 100px), 548px);
+}
+
+.demo-tab-stack {
+    position: relative;
+    width: 100%;
+    height: calc(59cqw + 100px + var(--demo-content-y));
+}
+
+@media (min-width: 1025px) {
+    .hero-demo-scene {
+        /* Balance the demo inside the visible hero area below the fixed navbar.
+           Shift the scene content, not the hero text or grid. */
+        --demo-content-y: 2.75rem;
+    }
+}
+
+/* While initializing, suppress all transitions so the popup can start closed
+   without a visible open->closed animation on page load. */
+.hero-demo-scene.demo-no-anim,
+.hero-demo-scene.demo-no-anim * {
+    transition-duration: 0s !important;
+}
+
+/* Sync status chip: green "in sync" at rest, flashes the broadcast event */
+.demo-sync-chip {
+    position: absolute;
+    top: var(--demo-content-y);
+    left: 2px;
+    z-index: 8;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border-radius: 99px;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    color: #86efac;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: default;
+    transition: background 0.3s, border-color 0.3s, color 0.3s;
+}
+
+.demo-chip-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 8px #22c55e;
+    transition: background 0.3s, box-shadow 0.3s;
+}
+
+.demo-sync-chip .demo-chip-event { display: none; }
+
+.demo-sync-chip.event {
+    background: rgba(99, 102, 241, 0.14);
+    border-color: rgba(99, 102, 241, 0.45);
+    color: #c7d2fe;
+}
+
+.demo-sync-chip.event .demo-chip-dot {
+    background: #818cf8;
+    box-shadow: 0 0 8px #818cf8;
+}
+
+.demo-sync-chip.event .demo-chip-label-sync { display: none; }
+.demo-sync-chip.event .demo-chip-event { display: inline; }
+
+@keyframes demoBlink {
+    50% { opacity: 0.35; }
+}
+
+/* Video tab cards: a clean window cascade — the right one is in front */
+.demo-tab-card {
+    position: absolute;
+    width: 310px;
+    width: 70cqw;
+    background: #131c31;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 14px;
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    cursor: pointer;
+    user-select: none;
+    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.25s;
+}
+
+.demo-tab-card:hover,
+.demo-tab-card:focus-visible {
+    border-color: rgba(99, 102, 241, 0.55);
+}
+
+/* Card A = the foreground window at the top right ("your" browser,
+   hosts the extension icon in its toolbar) */
+.demo-tab-a {
+    top: calc(49px + var(--demo-content-y));
+    right: -3%;
+    transform: rotate(1.2deg);
+    transform-origin: top right;
+    z-index: 3;
+}
+
+.demo-tab-a:hover {
+    z-index: 4;
+    transform: rotate(1.2deg) scale(1.02);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.65), 0 0 20px rgba(99, 102, 241, 0.2);
+}
+
+/* Card B = the friend's window, lower left, tucked behind */
+.demo-tab-b {
+    top: 142px;
+    top: calc(20cqw + 67px + var(--demo-content-y));
+    left: -3%;
+    transform: rotate(-1.6deg);
+    transform-origin: top left;
+    z-index: 2;
+}
+
+.demo-tab-b:hover {
+    z-index: 4;
+    transform: rotate(-1.6deg) scale(1.02);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.65), 0 0 20px rgba(99, 102, 241, 0.2);
+}
+
+/* When the popup slides in from the right edge, the tabs step aside */
+.hero-demo-scene.popup-open .demo-tab-a {
+    top: calc(22px + var(--demo-content-y));
+    transform: rotate(1deg) translate(-44%, 20%) scale(0.88);
+}
+
+.hero-demo-scene.popup-open .demo-tab-a:hover {
+    z-index: 4;
+    transform: rotate(1deg) translate(-44%, 20%) scale(0.92);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.65), 0 0 20px rgba(99, 102, 241, 0.2);
+}
+
+.hero-demo-scene.popup-open .demo-tab-b {
+    top: calc(20cqw + 40px + var(--demo-content-y));
+    transform: rotate(-1.6deg) translate(0, 14%) scale(0.94);
+}
+
+.hero-demo-scene.popup-open .demo-tab-b:hover {
+    z-index: 4;
+    transform: rotate(-1.6deg) translate(0, 14%) scale(0.98);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.65), 0 0 20px rgba(99, 102, 241, 0.2);
+}
+
+.demo-tab-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px 10px;
+    background: #0b1222;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.demo-tab-dots {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.demo-tab-dots i {
+    display: block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #334155;
+}
+
+.demo-tab-title {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.demo-tab-title svg { flex-shrink: 0; }
+
+.demo-tab-user {
+    flex-shrink: 0;
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 99px;
+}
+
+.demo-user-a {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.demo-user-b {
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.12);
+}
+
+/* Extension launcher pinned in the foreground window's toolbar */
+.demo-ext-launcher {
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 7px;
+    background: #273449;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.15s;
+}
+
+.demo-ext-launcher img {
+    display: block;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+}
+
+.demo-ext-launcher:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.demo-ext-launcher:active {
+    transform: scale(0.94);
+}
+
+.hero-demo-scene.popup-open .demo-ext-launcher {
+    border-color: rgba(99, 102, 241, 0.7);
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.45);
+}
+
+.demo-ext-launcher::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6366f1;
+    box-shadow: 0 0 8px #6366f1;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.hero-demo-scene:not(.popup-open) .demo-ext-launcher:not(.demo-ext-static)::after {
+    opacity: 1;
+    animation: demoBlink 1.4s ease-in-out infinite;
+}
+
+/* Card B shows the same extension icon, purely to signal the friend has it
+   installed too. It is not interactive and does not blink or glow. */
+.demo-ext-static,
+.demo-ext-static:hover {
+    cursor: default;
+    border-color: rgba(255, 255, 255, 0.12);
+    transform: none;
+    box-shadow: none;
+}
+
+.demo-ext-static::after { display: none; }
+
+/* Abstract "video" artwork with a slow cinematic pan/zoom while playing */
+.demo-video {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: #020617;
+    overflow: hidden;
+}
+
+.demo-video-art {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 78% 22%, rgba(248, 250, 252, 0.28) 0 4%, transparent 5.5%),
+        radial-gradient(120% 90% at 70% 115%, #312e81 0%, transparent 60%),
+        radial-gradient(100% 80% at 12% 112%, #1e1b4b 0%, transparent 55%),
+        linear-gradient(160deg, #1e293b 0%, #0b1024 55%, #020617 100%);
+    transform-origin: 60% 40%;
+    animation:
+        demoKenBurns 9s ease-in-out infinite alternate,
+        demoArtShift 7s ease-in-out infinite alternate;
+    animation-play-state: paused;
+}
+
+/* Soft light drifting through the scene */
+.demo-video-art::before {
+    content: '';
+    position: absolute;
+    top: -25%;
+    left: -12%;
+    width: 70%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(129, 140, 248, 0.32), transparent 65%);
+    animation: demoGlowDrift 7s ease-in-out infinite alternate;
+    animation-play-state: paused;
+}
+
+.demo-video-art::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 30%, rgba(129, 140, 248, 0.14) 45%, rgba(56, 189, 248, 0.1) 55%, transparent 70%);
+    transform: translateX(-100%);
+    animation: demoSheen 2.8s linear infinite;
+    animation-play-state: paused;
+}
+
+/* Playing runs the animations; pausing freezes them mid-frame, so a synced
+   pause is visible at a glance */
+.demo-tab-card.playing .demo-video-art,
+.demo-tab-card.playing .demo-video-art::before,
+.demo-tab-card.playing .demo-video-art::after {
+    animation-play-state: running;
+}
+
+@keyframes demoKenBurns {
+    from { transform: scale(1) translate(0, 0); }
+    to { transform: scale(1.18) translate(-3%, 2%); }
+}
+
+@keyframes demoArtShift {
+    from { filter: hue-rotate(0deg) brightness(1); }
+    to { filter: hue-rotate(40deg) brightness(1.15); }
+}
+
+@keyframes demoGlowDrift {
+    from { transform: translate(0, 0); }
+    to { transform: translate(65%, 30%); }
+}
+
+@keyframes demoSheen {
+    to { transform: translateX(100%); }
+}
+
+/* Play / pause overlay */
+.demo-play-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 6, 23, 0.35);
+    transition: opacity 0.25s, background 0.25s;
+}
+
+.demo-icon-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: white;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    transition: transform 0.2s;
+}
+
+.demo-tab-card:hover .demo-icon-wrap { transform: scale(1.1); }
+
+.demo-play-overlay .icon-pause { display: none; }
+.demo-tab-card.playing .icon-play { display: none; }
+.demo-tab-card.playing .icon-pause { display: block; }
+
+.demo-tab-card.playing .demo-play-overlay {
+    opacity: 0;
+    background: transparent;
+}
+
+.demo-tab-card.playing:hover .demo-play-overlay,
+.demo-tab-card.playing:focus-visible .demo-play-overlay {
+    opacity: 1;
+}
+
+/* Timestamp + seekable progress bar */
+.demo-video-controls {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 10px 8px;
+    background: linear-gradient(transparent, rgba(2, 6, 23, 0.85));
+    font-size: 9.5px;
+    color: #e2e8f0;
+    z-index: 1;
+}
+
+.demo-time {
+    flex-shrink: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    font-variant-numeric: tabular-nums;
+}
+
+.demo-progress {
+    position: relative;
+    flex: 1;
+    height: 5px;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.18);
+    cursor: pointer;
+}
+
+/* Generous invisible hit area for seeking */
+.demo-progress::before {
+    content: '';
+    position: absolute;
+    inset: -8px 0;
+}
+
+.demo-progress-fill {
+    position: relative;
+    height: 100%;
+    width: 30%;
+    border-radius: 99px;
+    background: linear-gradient(90deg, #6366f1, #a855f7);
+    pointer-events: none;
+}
+
+/* Scrub thumb, revealed on hover */
+.demo-progress-fill::after {
+    content: '';
+    position: absolute;
+    right: -5px;
+    top: 50%;
+    width: 11px;
+    height: 11px;
+    margin-top: -5.5px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    box-shadow: 0 0 6px rgba(99, 102, 241, 0.8);
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.demo-tab-card:hover .demo-progress-fill::after {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Sync pulse ring on both cards */
+.demo-tab-card.sync-pulse {
+    animation: demoCardPulse 0.9s ease-out;
+}
+
+@keyframes demoCardPulse {
+    0% { box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45), 0 0 0 0 rgba(99, 102, 241, 0.65); }
+    100% { box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45), 0 0 0 22px rgba(99, 102, 241, 0); }
+}
+
+/* The existing popup mockup slides in at the right edge, dropping out of
+   the toolbar icon of the foreground window */
+.hero-demo-scene .extension-mockup {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    z-index: 5;
+    width: 292px;
+    width: min(320px, 66cqw);
+    margin: 0;
+    transform-origin: top right;
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s, visibility 0.45s;
+}
+
+@media (min-width: 1025px) {
+    .hero-demo-scene .extension-mockup {
+        /* Counter the content shift so the opened panel is balanced below nav. */
+        bottom: 0.625rem;
+    }
+}
+
+.hero-demo-scene:not(.popup-open) .extension-mockup {
+    transform: translate(2%, -3%) scale(0.5);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* Ghost cursor for the automated walkthrough */
+.demo-cursor {
+    position: absolute;
+    top: 52%;
+    left: 46%;
+    z-index: 20;
+    width: 22px;
+    height: 22px;
+    opacity: 0;
+    pointer-events: none;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+    transition: top 0.65s cubic-bezier(0.45, 0.05, 0.25, 1), left 0.65s cubic-bezier(0.45, 0.05, 0.25, 1), opacity 0.35s;
+}
+
+.demo-cursor.visible { opacity: 1; }
+
+.demo-cursor svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.demo-cursor::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: -8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid #818cf8;
+    opacity: 0;
+    transform: scale(0.35);
+}
+
+.demo-cursor.clicking::before {
+    animation: demoClickRipple 0.45s ease-out;
+}
+
+@keyframes demoClickRipple {
+    0% { opacity: 0.9; transform: scale(0.35); }
+    100% { opacity: 0; transform: scale(1.25); }
+}
+
+/* Caption below the scene */
+.demo-hint {
+    margin: 0.75rem auto 0;
+    max-width: min(100%, 34rem);
+    text-align: center;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.6s;
+}
+
+.demo-hint.show { opacity: 0.75; }
+
+/* Tablet/Small Desktop: fall back to the classic static popup mockup */
+@media (max-width: 1023px) {
+    .hero-demo-scene,
+    .hero-demo-scene.popup-open {
+        height: auto;
+        max-width: 320px;
+        margin: 0 auto;
+    }
+
+    .demo-tab-card,
+    .demo-tab-stack,
+    .demo-sync-chip,
+    .demo-cursor,
+    .demo-hint {
+        display: none !important;
+    }
+
+    .hero-demo-scene .extension-mockup,
+    .hero-demo-scene:not(.popup-open) .extension-mockup {
+        position: static;
+        width: 100%;
+        transform: none;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-demo-scene:not(.popup-open) .demo-ext-launcher::after {
+        animation: none;
+    }
+}
+
+/* --- Story walkthrough additions: room creation, invite flight, film --- */
+
+/* The stick-figure film carries the motion now — keep only the color drift
+   on the backdrop (the animation shorthand resets play-state, so re-pause) */
+.demo-video-art {
+    animation: demoArtShift 7s ease-in-out infinite alternate;
+    animation-play-state: paused;
+}
+
+.demo-film {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* Stars: staggered twinkle so the sky feels alive */
+.film-star {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: filmTwinkle 2.8s ease-in-out infinite;
+}
+.film-star:nth-child(2) { animation-duration: 3.4s; animation-delay: 0.5s; }
+.film-star:nth-child(3) { animation-duration: 2.4s; animation-delay: 1.1s; }
+.film-star:nth-child(4) { animation-duration: 3.6s; animation-delay: 0.3s; }
+.film-star:nth-child(5) { animation-duration: 2.6s; animation-delay: 1.6s; }
+.film-star:nth-child(6) { animation-duration: 3.2s; animation-delay: 0.8s; }
+.film-star:nth-child(7) { animation-duration: 2.2s; animation-delay: 1.3s; }
+
+@keyframes filmTwinkle {
+    0%, 100% { opacity: 0.25; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* Moon: gentle glow pulse + slow arc drift */
+.film-moon {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: filmMoon 6s ease-in-out infinite alternate;
+    animation-play-state: paused;
+}
+
+@keyframes filmMoon {
+    from { transform: translate(0, 0); filter: drop-shadow(0 0 4px rgba(241,245,249,0.5)); }
+    to { transform: translate(-6px, 3px); filter: drop-shadow(0 0 10px rgba(241,245,249,0.95)); }
+}
+
+.film-mtn-scroll {
+    transform: translateX(var(--scroll-back, 0px));
+}
+.film-mid-scroll {
+    transform: translateX(var(--scroll-mid, 0px));
+}
+.film-fore-scroll {
+    transform: translateX(var(--scroll-fore, 0px));
+}
+.film-bounce-ball {
+    transform-origin: bottom center;
+    transform: translateY(var(--bounce-y, 0px));
+    filter: drop-shadow(0 0 4px #fde047);
+}
+
+/* Twinkle & Glow play state bindings */
+.film-star {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: filmTwinkle 2.8s ease-in-out infinite;
+    animation-play-state: paused;
+}
+.demo-tab-card.playing .film-star,
+.demo-tab-card.playing .film-moon {
+    animation-play-state: running;
+}
+
+/* Play button pulsing indicator at the end of the walkthrough */
+.hero-demo-scene.demo-complete #demo-tab-a:not(.playing) .demo-icon-wrap {
+    animation: playButtonPulse 1.6s ease-in-out infinite;
+    border-color: #6366f1;
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.8);
+}
+@keyframes playButtonPulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 10px rgba(99, 102, 241, 0.5); }
+    50% { transform: scale(1.12); box-shadow: 0 0 20px rgba(99, 102, 241, 0.9); }
+}
+
+/* Seek-reset: scrubbing restarts animations from frame zero */
+.demo-film.demo-reset * {
+    animation: none !important;
+}
+
+/* Seek-break: scrubbing the timeline visibly glitches both videos so the
+   jump reads as a real cut instead of an invisible time update. A scanline
+   sweep + brightness pop, and the film animations restart mid-stride. */
+.demo-video-art { transition: filter 0.12s ease-out; }
+
+.demo-tab-card.demo-seeking .demo-video-art {
+    animation-play-state: paused;
+    filter: brightness(1.9) saturate(1.4) blur(0.6px);
+}
+
+.demo-tab-card .demo-seek-sweep {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    opacity: 0;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(129, 140, 248, 0.35) 20%,
+        rgba(255, 255, 255, 0.55) 50%,
+        rgba(129, 140, 248, 0.35) 80%,
+        transparent 100%);
+    mix-blend-mode: screen;
+    transform: translateX(-100%);
+}
+
+.demo-tab-card.demo-seeking .demo-seek-sweep {
+    animation: demoSeekSweep 0.34s ease-out;
+}
+
+@keyframes demoSeekSweep {
+    0% { opacity: 0; transform: translateX(-100%); }
+    20% { opacity: 1; }
+    100% { opacity: 0; transform: translateX(100%); }
+}
+
+/* The sync chip only appears once the room is connected (story progression) */
+.demo-sync-chip {
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: background 0.3s, border-color 0.3s, color 0.3s, opacity 0.4s, transform 0.4s;
+}
+
+.hero-demo-scene.connected .demo-sync-chip {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+}
+
+/* Toast on the friend's window ("Room joined", "Tab selected") */
+.demo-tab-toast {
+    position: absolute;
+    top: 36px;
+    left: 50%;
+    transform: translate(-50%, -6px);
+    z-index: 2;
+    padding: 4px 10px;
+    border-radius: 99px;
+    background: rgba(15, 23, 42, 0.92);
+    border: 1px solid rgba(99, 102, 241, 0.5);
+    color: #c7d2fe;
+    font-size: 9.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+.demo-tab-toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+/* Invite link pill flying from the popup to the friend's window */
+.demo-invite-fly {
+    position: absolute;
+    z-index: 30;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 99px;
+    background: var(--accent);
+    color: white;
+    font-size: 9.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: left 0.75s cubic-bezier(0.3, 0.7, 0.4, 1), top 0.75s cubic-bezier(0.3, 0.7, 0.4, 1), opacity 0.3s;
+}
+
+/* Attention flash (e.g. on the video select while "choosing the tab") */
+.demo-attn {
+    animation: demoAttn 0.7s ease-in-out 2;
+}
+
+@keyframes demoAttn {
+    50% { box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.75); }
+}
+
+
+/* --- Bento Card Host Control Mockup Additions --- */
+
+.bento-content-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    width: 100%;
+}
+
+.bento-host-control-mockup {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.bento-mockup-header {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    font-weight: 700;
+}
+
+.bento-mockup-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.75rem;
+    color: white;
+    font-weight: 600;
+    margin-top: 2px;
+}
+
+/* Custom switch toggle representation */
+.bento-switch-wrap {
+    position: relative;
+    display: inline-block;
+    width: 28px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.bento-switch-wrap input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.bento-switch-slider {
+    position: absolute;
+    cursor: default;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    transition: .3s;
+}
+
+.bento-switch-slider:before {
+    position: absolute;
+    content: "";
+    height: 10px;
+    width: 10px;
+    left: 2px;
+    bottom: 2px;
+    background-color: #94a3b8;
+    border-radius: 50%;
+    transition: .3s;
+}
+
+.bento-switch-wrap input:checked + .bento-switch-slider {
+    background-color: rgba(99, 102, 241, 0.25);
+    border-color: rgba(99, 102, 241, 0.6);
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.3);
+}
+
+.bento-switch-wrap input:checked + .bento-switch-slider:before {
+    transform: translateX(12px);
+    background-color: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+}
+
+/* --- Step 2 & Step 3 Visual Redesign Styles --- */
+
+/* Step 2 Browser video player mock */
+.illus-video-player-mock {
+    width: 85%;
+    height: 65%;
+    background: linear-gradient(135deg, #1e1b4b, #090514);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin-top: 15px;
+}
+
+.video-mock-play-button {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.8rem;
+    cursor: default;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.video-mock-timeline {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+}
+
+.video-mock-timeline-fill {
+    width: 35%;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+}
+
+/* Step 2 extension popup dropdown alignment */
+.illus-extension-popup.drop-down {
+    top: 2.2rem;
+    right: 0.6rem;
+    width: 145px;
+    animation: popup-dropdown-float 4s ease-in-out infinite;
+}
+
+@keyframes popup-dropdown-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+}
+
+.status-badge-select {
+    background: rgba(99, 102, 241, 0.12);
+    color: #c7d2fe;
+    font-size: 0.58rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    display: inline-flex;
+    align-items: center;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+}
+
+.popup-form-group {
+    margin-top: 6px;
+    width: 100%;
+    text-align: left;
+}
+
+.popup-form-label {
+    display: block;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-weight: 700;
+}
+
+.popup-select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.popup-select-mock {
+    width: 100%;
+    background: var(--card);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: white;
+    padding: 6px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.62rem;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: default;
+    display: block;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.popup-cursor-pointer {
+    position: absolute;
+    bottom: -15px;
+    right: 15px;
+    font-size: 1.1rem;
+    pointer-events: none;
+    z-index: 10;
+    animation: pointer-click 1.6s infinite ease-in-out;
+}
+
+@keyframes pointer-click {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(-3px, -3px) scale(0.9); }
+}
+
+/* Step 3 forest movie continuous animation bindings */
+.step-illustration-3 .film-mtn-scroll {
+    animation: scrollBack 12s linear infinite !important;
+}
+.step-illustration-3 .film-mid-scroll {
+    animation: scrollMid 6s linear infinite !important;
+}
+.step-illustration-3 .film-fore-scroll {
+    animation: scrollFore 3s linear infinite !important;
+}
+.step-illustration-3 .film-bounce-ball {
+    animation: ballBounce 0.8s ease-in-out infinite !important;
+    transform-origin: bottom center;
+}
+
+@keyframes scrollBack {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-160px); }
+}
+@keyframes scrollMid {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-160px); }
+}
+@keyframes scrollFore {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-160px); }
+}
+@keyframes ballBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-16px); }
+}
+
+/* --- High Fidelity Micro-Animations & Identity additions --- */
+
+/* Scroll progress bar glowing line at the top */
+.scroll-progress-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), #a855f7, #ec4899);
+    z-index: 9999;
+    width: 0%;
+    transition: width 0.1s ease-out;
+    box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* Navigation logo pop & spin */
+.nav-logo-img {
+    animation: logo-entrance 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    transform-origin: center;
+    transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    will-change: transform, opacity;
+}
+
+.nav-logo-img:hover {
+    transform: scale(1.15) rotate(360deg);
+}
+
+@keyframes logo-entrance {
+    0% {
+        transform: scale(0) rotate(-180deg);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(1) rotate(0deg);
+        opacity: 1;
+    }
+}
+
+/* Glowing reflection sweep on buttons */
+.btn-primary, .btn-firefox, .btn-secondary {
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-primary::after, .btn-firefox::after, .btn-secondary::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.25) 50%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    transform: skewX(-25deg);
+    transition: none;
+    pointer-events: none;
+}
+
+.btn-primary:hover::after, .btn-firefox:hover::after, .btn-secondary:hover::after {
+    left: 100%;
+    transition: left 0.8s ease-in-out;
+}
+
+/* Step 2 mockup control panel styles */
+.popup-mock-controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    width: 100%;
+}
+
+.popup-mock-btn {
+    flex: 1;
+    text-align: center;
+    padding: 6px;
+    border-radius: 6px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: white;
+    cursor: default;
+    opacity: 0.75;
+}
+
+.popup-mock-btn.play {
+    background: #22c55e;
+}
+
+.popup-mock-btn.pause {
+    background: #ef4444;
+}
+
+/* Phone and portrait-tablet widths: keep the full hero demo out of the page
+   flow. The demo modal mounts the same node in its own fixed layer. */
+@media (max-width: 900px) {
+    .hero-grid > .hero-mockup-wrapper {
+        display: none !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .hero-github-cta {
+        display: none;
+    }
+
+    .btn-demo-mobile {
+        display: inline-flex;
+    }
+}
+
+body.mobile-demo-open {
+    overflow: hidden;
+}
+
+.mobile-demo-modal[hidden] {
+    display: none;
+}
+
+.mobile-demo-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2400;
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+}
+
+.mobile-demo-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.25);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.mobile-demo-panel {
+    position: relative;
+    z-index: 1;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: none !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+.mobile-demo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 0.95rem;
+    border-bottom: none !important;
+    flex-shrink: 0;
+}
+
+.mobile-demo-header h2 {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    color: #f8fafc;
+}
+
+.mobile-demo-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(30, 41, 59, 0.72);
+    color: #e2e8f0;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.mobile-demo-stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden !important;
+    padding: 1rem 0.75rem 1.25rem;
+    overscroll-behavior: contain;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+/* Ensure the demo scene canvas is transparent inside the modal to let the glass backdrop blend */
+.mobile-demo-stage .hero-demo-scene {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Ensure the close button hover stays consistent in dark glass theme */
+.mobile-demo-close:hover {
+    background: rgba(51, 65, 85, 0.85) !important;
+}
+
+/* Light Mode Frosted Glass overrides */
+html.theme-light .mobile-demo-backdrop {
+    background: rgba(241, 245, 249, 0.2) !important;
+}
+
+html.theme-light .mobile-demo-panel {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+html.theme-light .mobile-demo-header {
+    border-bottom: none !important;
+}
+
+html.theme-light .mobile-demo-header h2 {
+    color: var(--text) !important;
+}
+
+html.theme-light .mobile-demo-close {
+    background: rgba(255, 255, 255, 0.4) !important;
+    border-color: rgba(15, 23, 42, 0.1) !important;
+    color: var(--text) !important;
+}
+
+html.theme-light .mobile-demo-close:hover {
+    background: rgba(255, 255, 255, 0.75) !important;
+}
+
+.mobile-demo-stage .hero-mockup-wrapper {
+    display: flex !important;
+    position: relative;
+    width: min(100%, 560px);
+    margin: 0 auto;
+    will-change: transform;
+}
+
+/* Mobile S / short screens */
+@media (max-height: 600px) {
+    .mobile-demo-stage .hero-mockup-wrapper {
+        transform: scale(0.68) !important;
+        transform-origin: top center !important;
+        height: 380px !important;
+    }
+}
+
+/* Mobile M/L / medium screens */
+@media (min-height: 601px) and (max-height: 740px) {
+    .mobile-demo-stage .hero-mockup-wrapper {
+        transform: scale(0.82) !important;
+        transform-origin: top center !important;
+        height: 460px !important;
+    }
+}
+
+/* Default / tall screens */
+@media (min-height: 741px) {
+    .mobile-demo-stage .hero-mockup-wrapper {
+        transform: scale(1) !important;
+        transform-origin: top center !important;
+        height: 550px !important;
+    }
+}
+
+.mobile-demo-stage .hero-demo-scene,
+.mobile-demo-stage .hero-demo-scene.popup-open {
+    position: relative;
+    width: 100%;
+    height: 100% !important;
+    max-width: none;
+    margin: 0 auto;
+}
+
+.mobile-demo-stage .demo-tab-stack {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+}
+
+.mobile-demo-stage .demo-tab-card {
+    display: block !important;
+}
+
+.mobile-demo-stage .demo-sync-chip {
+    display: inline-flex !important;
+}
+
+.mobile-demo-stage .demo-cursor {
+    display: block !important;
+}
+
+.mobile-demo-stage .demo-hint {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 12px !important;
+    margin: 0 auto !important;
+    padding-inline: 1rem;
+    max-width: 90%;
+    z-index: 10;
+}
+
+.mobile-demo-stage .hero-demo-scene .extension-mockup {
+    position: absolute;
+    bottom: 0 !important;
+    right: 0;
+    z-index: 15 !important;
+    width: min(320px, 66cqw);
+    transform: none !important;
+    transform-origin: top right !important;
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s, visibility 0.45s;
+}
+
+.mobile-demo-stage .hero-demo-scene:not(.popup-open) .extension-mockup {
+    bottom: 0 !important;
+    transform: translate(2%, -3%) scale(0.5) !important;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+@media (max-width: 380px) {
+    .mobile-demo-modal {
+        padding: 0 !important;
+    }
+
+    .mobile-demo-stage {
+        padding-inline: 0.45rem !important;
+    }
+}
+
+/* Performance optimization for off-screen sections (below the fold) */
+.lazy-section {
+    content-visibility: auto;
+}
+
+.use-cases-section {
+    contain-intrinsic-block-size: auto 600px;
+}
+
+.comparison-section {
+    contain-intrinsic-block-size: auto 800px;
+}
+
+#self-hosting {
+    contain-intrinsic-block-size: auto 400px;
+}
+
+#faq {
+    contain-intrinsic-block-size: auto 450px;
+}
+
+@media (max-width: 768px) {
+    .use-cases-section {
+        contain-intrinsic-block-size: auto 900px;
+    }
+
+    .comparison-section {
+        contain-intrinsic-block-size: auto 1100px;
+    }
+
+    #self-hosting {
+        contain-intrinsic-block-size: auto 550px;
+    }
+
+    #faq {
+        contain-intrinsic-block-size: auto 700px;
+    }
+}

@@ -44,7 +44,7 @@ The following components are within scope for security reports:
 
 Instead, email the project maintainer privately:
 
-**`koalasync_admin@koalamail.rocks`**
+**`koalasync@koalastuff.net`**
 
 Encrypt sensitive findings with our PGP key (available on request).
 

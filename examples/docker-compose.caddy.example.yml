@@ -9,6 +9,7 @@ services:                                                                       
       - MIN_VERSION=1.0.0                                                                  # Minimum client version allowed to connect
       - MAX_ROOMS=100                                                                      # Maximum number of rooms that can exist
       - MAX_PEERS_PER_ROOM=25                                                              # Maximum number of peers allowed per room
+      - SERVER_SALT=CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_BASE64_32                         # Required: unique random salt for room-password hashes
       - ADMIN_METRICS_TOKEN=                                                               # Optional: 32+ char random token for aggregate-only /health metrics
     pids_limit: 2048                                                                       # Limits the container to 2048 process IDs for safety
     networks:                                                                              # Attaches the service to the networks listed below

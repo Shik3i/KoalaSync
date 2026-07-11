@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "en",
   "name": "KoalaSync",
-  "version": "2.5.3",
+  "version": "2.5.4",
   "description": "Synchronize video playback on YouTube, Netflix, Emby, Jellyfin, and any HTML5 site in real-time with friends.",
   "permissions": [
     "storage",

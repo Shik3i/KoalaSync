@@ -65,6 +65,23 @@
     }
     </script>
 
+    <!-- Structured Data (Schema.org) for WebPage -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "{{ALT_INDEX_TITLE}}",
+      "url": "https://sync.koalastuff.net/{{LANG_PREFIX}}alternatives",
+      "description": "{{ALT_INDEX_META_DESC}}",
+      "inLanguage": "{{LANG_CODE}}",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "KoalaSync",
+        "url": "https://sync.koalastuff.net/{{LANG_PREFIX}}"
+      }
+    }
+    </script>
+
     <!-- Organization Schema -->
     <script type="application/ld+json">
     {
@@ -142,17 +159,13 @@
                 <img src="{{ASSET_PATH}}assets/RemoteProf.webp" alt="Koala teaching and explaining concepts" class="legal-mascot" width="180" height="180">
             </div>
             
-            <h1>
-                <span lang="en">Guides &amp; Comparisons</span>
-                <span lang="de">Vergleiche &amp; Anleitungen</span>
-            </h1>
+            <h1>{{ALT_INDEX_HEADING}}</h1>
             <p style="text-align: center; font-size: 0.95rem; line-height: 1.6; max-width: 600px; margin: 0 auto 2rem auto; color: var(--text-muted);">
-                <span lang="en">How does KoalaSync stack up against other watch party tools and streaming solutions? Read our honest, technical comparisons to find the best fit for your remote movie nights.</span>
-                <span lang="de">Wie schlägt sich KoalaSync im Vergleich zu anderen Watch-Party-Tools und Streaming-Lösungen? Lies unsere ehrlichen, technischen Vergleiche, um die passende Lösung für deine Filmabende zu finden.</span>
+                {{ALT_INDEX_INTRO}}
             </p>
 
             <!-- Cards Grid Layout -->
-            <div class="guides-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem; margin-bottom: 2rem;">
+            <div class="guides-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-top: 2rem; margin-bottom: 2rem;">
                 <!-- Teleparty Card -->
                 <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives/teleparty" class="guide-card" style="text-decoration: none; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
@@ -160,8 +173,51 @@
                         <p style="font-size: 0.9rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 1.5rem;">{{ALT_TELEPARTY_META_DESC}}</p>
                     </div>
                     <div class="btn btn-primary" style="align-self: flex-start; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 6px;">
-                        <span lang="en">Read Comparison &rarr;</span>
-                        <span lang="de">Vergleich lesen &rarr;</span>
+                        {{ALT_INDEX_READ_COMPARISON}}
+                    </div>
+                </a>
+
+                <!-- Watch2Gether Card -->
+                <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives/watch2gether" class="guide-card" style="text-decoration: none; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <h3 style="margin-top: 0; margin-bottom: 0.75rem; color: #fff; font-size: 1.25rem;">{{ALT_W2G_TITLE}}</h3>
+                        <p style="font-size: 0.9rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 1.5rem;">{{ALT_W2G_META_DESC}}</p>
+                    </div>
+                    <div class="btn btn-primary" style="align-self: flex-start; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 6px;">
+                        {{ALT_INDEX_READ_COMPARISON}}
+                    </div>
+                </a>
+
+                <!-- Scener Card -->
+                <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives/scener" class="guide-card" style="text-decoration: none; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <h3 style="margin-top: 0; margin-bottom: 0.75rem; color: #fff; font-size: 1.25rem;">{{ALT_SCENER_TITLE}}</h3>
+                        <p style="font-size: 0.9rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 1.5rem;">{{ALT_SCENER_META_DESC}}</p>
+                    </div>
+                    <div class="btn btn-primary" style="align-self: flex-start; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 6px;">
+                        {{ALT_INDEX_READ_COMPARISON}}
+                    </div>
+                </a>
+
+                <!-- Kosmi Card -->
+                <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives/kosmi" class="guide-card" style="text-decoration: none; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <h3 style="margin-top: 0; margin-bottom: 0.75rem; color: #fff; font-size: 1.25rem;">{{ALT_KOSMI_TITLE}}</h3>
+                        <p style="font-size: 0.9rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 1.5rem;">{{ALT_KOSMI_META_DESC}}</p>
+                    </div>
+                    <div class="btn btn-primary" style="align-self: flex-start; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 6px;">
+                        {{ALT_INDEX_READ_COMPARISON}}
+                    </div>
+                </a>
+
+                <!-- TwoSeven Card -->
+                <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives/twoseven" class="guide-card" style="text-decoration: none; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <h3 style="margin-top: 0; margin-bottom: 0.75rem; color: #fff; font-size: 1.25rem;">{{ALT_TWOSEVEN_TITLE}}</h3>
+                        <p style="font-size: 0.9rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 1.5rem;">{{ALT_TWOSEVEN_META_DESC}}</p>
+                    </div>
+                    <div class="btn btn-primary" style="align-self: flex-start; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 6px;">
+                        {{ALT_INDEX_READ_COMPARISON}}
                     </div>
                 </a>
 
@@ -172,8 +228,7 @@
                         <p style="font-size: 0.9rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 1.5rem;">{{ALT_SCREEN_META_DESC}}</p>
                     </div>
                     <div class="btn btn-primary" style="align-self: flex-start; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 6px;">
-                        <span lang="en">Read Comparison &rarr;</span>
-                        <span lang="de">Vergleich lesen &rarr;</span>
+                        {{ALT_INDEX_READ_GUIDE}}
                     </div>
                 </a>
             </div>
@@ -193,7 +248,7 @@
             <div style="margin-top: 1.5rem; font-size: 0.8rem; display: flex; justify-content: center; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
                 <a href="{{ASSET_PATH}}{{FOOTER_LEGAL_LINK}}">{{FOOTER_LEGAL}}</a>
                 <a href="{{ASSET_PATH}}{{FOOTER_PRIVACY_LINK}}">{{FOOTER_PRIVACY}}</a>
-                <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives"><span><span lang="en">Guides & comparisons</span><span lang="de">Vergleiche & Anleitungen</span></span></a>
+                <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives">{{ALT_INDEX_FOOTER_LINK}}</a>
                 <a href="https://mastodon.social/@koalastuff" rel="me noopener" target="_blank" style="display: inline-flex; align-items: center; gap: 4px;">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true" style="display: block;"><path d="M23.268 5.313c-.35-2.578-2.617-4.61-5.304-5.004C17.51.242 15.792 0 11.813 0h-.03c-3.98 0-4.835.242-5.288.309C3.882.692 1.496 2.518.917 5.127.64 6.412.61 7.837.661 9.143c.074 1.874.088 3.745.26 5.611.118 1.24.325 2.47.62 3.68.55 2.237 2.777 4.098 4.96 4.857 2.336.792 4.849.923 7.256.38.265-.061.527-.132.786-.213.585-.184 1.27-.39 1.774-.753a.057.057 0 0 0 .023-.043v-1.809a.052.052 0 0 0-.02-.041.053.053 0 0 0-.046-.01 20.282 20.282 0 0 1-4.709.545c-2.73 0-3.463-1.284-3.674-1.818a5.593 5.593 0 0 1-.319-1.433.053.053 0 0 1 .066-.054c1.517.363 3.072.546 4.632.546.376 0 .75 0 1.125-.01 1.57-.044 3.224-.124 4.768-.422.038-.008.077-.015.11-.024 2.435-.464 4.753-1.92 4.989-5.604.008-.145.03-1.52.03-1.67.002-.512.167-3.63-.024-5.545zm-3.748 9.195h-2.561V8.29c0-1.309-.55-1.976-1.67-1.976-1.23 0-1.846.79-1.846 2.35v3.403h-2.546V8.663c0-1.56-.617-2.35-1.848-2.35-1.112 0-1.668.668-1.67 1.977v6.218H4.822V8.102c0-1.31.337-2.35 1.011-3.12.696-.77 1.608-1.164 2.74-1.164 1.311 0 2.302.5 2.962 1.498l.638 1.06.638-1.06c.66-.999 1.65-1.498 2.96-1.498 1.13 0 2.043.395 2.74 1.164.675.77 1.012 1.81 1.012 3.12z"/></svg>
                     Mastodon

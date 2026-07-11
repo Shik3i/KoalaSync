@@ -16,12 +16,30 @@ PORT="3000"
 MAX_ROOMS="1000"
 MAX_PEERS_PER_ROOM="25"
 MIN_VERSION="1.0.0"
+
+# Required for production/self-hosting: unique random salt used for room-password hashes.
+# Generate one with: openssl rand -base64 32
+SERVER_SALT=""
+
 # Optional: enables aggregate-only admin metrics on /health with Authorization: Bearer <token>
 # Use a long random token, 32+ characters recommended.
 ADMIN_METRICS_TOKEN=""
 
 # Optional: set to "1" to enable verbose connection, room-join/leave, and CORS logs in the console. Default is "0" (disabled).
 DEBUG_LOGGING="0"
+```
+
+### Room Password Salt
+`SERVER_SALT` is used to HMAC room passwords before they are stored in RAM. The relay has a built-in fallback so development keeps working, but that fallback is public in the repository and the server logs a startup warning when it is used.
+
+For every real self-hosted deployment, set a unique random value:
+```bash
+openssl rand -base64 32
+```
+
+Then add it to `server/.env` or your Compose environment:
+```bash
+SERVER_SALT=replace-with-a-long-random-salt
 ```
 
 ### Health & Metrics
@@ -63,11 +81,20 @@ npm install
 npm start
 ```
 
+### Verification
+The server is covered by the root verification suite. From the repository root, run:
+```bash
+npm run verify
+```
+
+For focused server checks, see `scripts/test-server-ops.mjs`, `scripts/test-server-routes.mjs`, `scripts/test-server-ws.mjs`, and `scripts/test-rate-limiter.mjs`.
+
 ## Security
 - **Rate Limiting**: IP-based connection limits and socket-based event limits.
 - **Health Endpoint Throttle**: `GET /` and `GET /health` are limited to 10 requests per minute per IP, with 60-second lazy server-side response caching and stricter throttling for wrong admin bearer attempts.
 - **Room Discovery Throttle**: Room-list refreshes are rate-limited server-side to one request every 10 seconds per socket.
 - **Token Handshake**: Requires a valid token defined in the root `shared/constants.js`.
+- **Password Hash Salt**: Set `SERVER_SALT` in every deployment so room-password hashes are not derived with the public fallback salt.
 - **Single Source of Truth**: The server imports constants directly from the root `shared/` directory.
 - **In-Memory**: Rooms are automatically pruned after 2 hours of inactivity.
 - **Reverse Proxy Boundary**: The server trusts one reverse proxy hop for client IP detection. Keep the Node port private/firewalled so clients can only reach it through Caddy or another trusted proxy.

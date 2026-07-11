@@ -8,6 +8,13 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
+## [v2.5.4] — 2026-07-08
+
+### Changed
+- **Extension: Refined clutter blacklist** — Removed `localhost` and cloud storage providers (`drive.google.com`, `dropbox.com`, `onedrive.live.com`, `icloud.com`) from the domains blacklist so that local web development servers and tabs hosting video files in cloud storage are no longer hidden under "Hide Clutter Tabs".
+
+---
+
 ## [v2.5.3] — 2026-07-02
 
 ### Fixed

@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Shik3i/KoalaSync/actions/workflows/release.yml"><img src="https://github.com/Shik3i/KoalaSync/actions/workflows/release.yml/badge.svg" alt="Release Status"></a>
-  <a href="https://github.com/Shik3i/KoalaSync/releases"><img src="https://img.shields.io/badge/Release-v2.5.3-blue?logo=github" alt="GitHub release"></a>
+  <a href="https://github.com/Shik3i/KoalaSync/releases"><img src="https://img.shields.io/badge/Release-v2.5.4-blue?logo=github" alt="GitHub release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"></a>
   <a href="https://addons.mozilla.org/de/firefox/addon/koalasync/"><img src="https://img.shields.io/badge/Firefox-Download-orange?logo=firefoxbrowser&logoColor=white" alt="Firefox Add-on"></a>
   <a href="https://chromewebstore.google.com/detail/koalasync/obbnmkmlaaddodakcbdljknjpagklifc"><img src="https://img.shields.io/badge/Chrome-Download-blue?logo=googlechrome&logoColor=white" alt="Chrome Extension"></a>
@@ -14,7 +14,7 @@
 
 <p align="center"><i>KoalaSync is a lightweight Browser Extension and Relay Server for synchronized video playback on almost any website with a video element—YouTube, Twitch, Netflix, Emby, Jellyfin, and beyond. Built with a focus on <b>Data Sovereignty</b> and <b>Performance</b>.</i></p>
 
-<p align="center"><a href="docs/CHANGELOG.md"><b>New v2.5.3 Release!</b> — See what's changed</a></p>
+<p align="center"><a href="docs/CHANGELOG.md"><b>New v2.5.4 Release!</b> — See what's changed</a></p>
 
 ### 🌟 Why KoalaSync?
 
@@ -29,6 +29,7 @@
 
 - **Global Synchronization**: Synchronize Play, Pause, and Seeking on any website with a `<video>` tag.
 - **Episode Auto-Sync**: Perfectly sync series binges. All peers wait until everyone has loaded the next episode before starting together.
+- **Host Control & Co-Hosts**: Room hosts can lock playback control to trusted controllers while guests keep watching in sync.
 - **Smart Matching**: Automatically highlights tabs containing matching video titles.
 - **Dual Heartbeat Architecture**: Robust session tracking that prevents ghost rooms and stale connections.
 - **Efficient Relay**: Minimal overhead WebSocket message forwarding.
@@ -58,7 +59,7 @@ The easiest and safest way to install KoalaSync is directly through the official
 
 ### 🌐 Localization & Translations
 
-Both the official KoalaSync website and the **v2.0 Browser Extension** feature full dynamic localization:
+Both the official KoalaSync website and the browser extension feature dynamic localization:
 - **Available Languages**: Support is included for 15 languages: English (`en`), German (`de`), French (`fr`), Spanish (`es`), Portuguese (Brazil) (`pt-BR`), Russian (`ru`), Italian (`it`), Polish (`pl`), Turkish (`tr`), Dutch (`nl`), Japanese (`ja`), Korean (`ko`), Chinese (Simplified) (`zh`), Ukrainian (`uk`), and European Portuguese (`pt`).
 - **Real-Time Extension Localization**: Inside the extension Settings panel, users can swap languages instantly. The entire interface, notifications, Empty States, and onboarding guides re-translate dynamically in real-time.
 - **Contributing**: We welcome community translations for both the website and the extension! Please refer directly to the [TRANSLATION.md](docs/TRANSLATION.md) guide for step-by-step instructions on how to audit, refine, or add new languages.
@@ -86,16 +87,20 @@ npm run build:extension
 The compiled artifacts will be available in the `dist/` directory.
 
 #### For Self-Hosting (Docker)
-Deploy your own private relay server using our official image:
+For local development or a simple private relay, use the root Compose file:
 ```bash
-# Pull the latest image
-docker pull ghcr.io/shik3i/koalasync:latest
-
-# Or use our example compose file
-cp examples/docker-compose.caddy.example.yml docker-compose.yml
-docker-compose up -d
+cp server/.env.example server/.env
+# Edit server/.env and set SERVER_SALT to a unique random value:
+# openssl rand -base64 32
+docker compose up -d --build
 ```
-The server will be available at `ws://localhost:3000`. See [Docker network compose](examples/docker-compose.caddy.example.yml) or [Static IP compose](examples/docker-compose.ip.example.yml) for ready-to-use Docker Compose files.
+The local relay will be available at `ws://localhost:3000`.
+
+For production, use the official image and one of the ready-to-edit examples:
+- [Docker network compose](examples/docker-compose.caddy.example.yml): for a Caddy or reverse-proxy network. This file does not publish `localhost:3000`; Caddy routes traffic to the container.
+- [Static IP compose](examples/docker-compose.ip.example.yml): for a pre-existing Docker network with a fixed container IP.
+
+In every real deployment, set a unique `SERVER_SALT`. Without it the relay still starts, but it warns that room-password hashes are using the public fallback salt from the repository.
 
 To connect your extension to a self-hosted server, open the popup → **Room** tab → select **Custom Server** → enter your server's WebSocket URL (e.g., `ws://localhost:3000`).
 
@@ -134,6 +139,7 @@ gh attestation verify dist/koalasync-chrome.zip \
 - **[PROTOCOL.md](docs/PROTOCOL.md)**: WebSocket protocol specification and event reference.
 - **[ROADMAP.md](docs/ROADMAP.md)**: Planned features, backlog, and rejected ideas.
 - **[SECURITY.md](SECURITY.md)**: Disclosure policy and security practices.
+- **[AI_INIT.md](docs/AI_INIT.md)**: Maintainer and agent onboarding notes for safe code changes.
 - **[Caddyfile.example](examples/Caddyfile.example)**: Production Caddy configuration for website and relay.
 
 ---

@@ -10,13 +10,23 @@
         }
     };
 
-    var safeSetLocalStorage = function(key, val) {
+    var getSystemTheme = function() {
         try {
-            localStorage.setItem(key, val);
+            return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
         } catch (_) {
-            return;
+            return 'dark';
         }
     };
+
+    // Apply the effective theme before first paint. A saved preference wins;
+    // otherwise first-time visitors follow their browser/system setting.
+    var savedTheme = safeGetLocalStorage('koala_theme');
+    var effectiveTheme = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : getSystemTheme();
+    if (effectiveTheme === 'light') {
+        html.classList.add('theme-light');
+    } else {
+        html.classList.remove('theme-light');
+    }
 
     // Mapping of browser language codes to KoalaSync locale directories
     var langMap = {
@@ -72,10 +82,8 @@
     }
 
     if (hasStaticLang) {
-        var isLegal = path.indexOf('impressum') !== -1 || path.indexOf('datenschutz') !== -1 || path.indexOf('imprint') !== -1 || path.indexOf('privacy') !== -1;
-        if (!isLegal) {
-            safeSetLocalStorage('koala_lang', activeLang);
-        }
+        // Do not persist a static page language merely because the visitor landed
+        // there. The explicit dropdown handler in app.js owns language preference.
     } else {
         var savedLang = safeGetLocalStorage('koala_lang');
         var browserLang = getBrowserLang();
@@ -97,8 +105,8 @@
 
     if (isIndex) {
         var titles = {
-            en: 'KoalaSync | Real-time Video Synchronization for Friends',
-            de: 'KoalaSync | Echtzeit-Video-Synchronisation für Freunde'
+            en: 'KoalaSync | Watch Party for Netflix, YouTube & Any Video',
+            de: 'KoalaSync | Watch Party für Netflix, YouTube & jedes Video'
         };
         document.title = titles[activeLang] || titles.en;
     } else if (isJoin) {

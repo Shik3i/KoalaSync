@@ -1,38 +1,58 @@
-# Tested Streaming Services
+# 🎬 Tested Streaming Services & Compatibility
 
-This document tracks which streaming platforms and media servers have been tested with KoalaSync.
+This document tracks which streaming platforms and media servers are supported by the KoalaSync extension. 
 
-| Service | Sync Works | Media Title | Episode Auto-Sync | Notes |
-|---------|:----------:|:-----------:|:-----------------:|-------|
-| **YouTube** | ✅ Full | ✅ Full | ❌ | Individual videos, not episodes — no episode auto-sync. |
-| **Twitch** | ✅ Full | ✅ Full | ❌ | Individual streams/VODs, not episodes — no episode auto-sync. |
-| **Netflix** | ✅ Full | ❌ | ❌ | No media title exposed. |
-| **Emby** | ✅ Full | ✅ Full | ✅ Full | Best-in-class support. |
-| **Jellyfin** | ✅ Full | ✅ Full | ✅ Full | — |
-| **Plex** | Not tested | Not tested | Not tested | — |
-| **Disney+** | ✅ Full | ⚠️ Partial | ❌ | Series title only (e.g. "The Simpsons"), no episode info. |
-| **Prime Video** | ✅ Full  | ✅ Full  | ❌ | — |
-| **HBO Max / Max** | Not tested | Not tested | Not tested | — |
-| **Crunchyroll** | Not tested | Not tested | Not tested | — |
-| **Vimeo** | Not tested | Not tested | Not tested | — |
-| **Dailymotion** | Not tested | Not tested | Not tested | — |
-| **ARD / ZDF Mediathek** | Not tested | Not tested | Not tested | — |
+> [!TIP]
+> **Contributions are highly welcome!** 🤝 Anyone can easily update this list. If you have tested a streaming service (whether it works, has issues, or is not yet listed), please help the project by submitting a quick Pull Request. See the [How to Contribute](#how-to-contribute) guide below!
 
-## Legend
+---
+
+## Compatibility Matrix
+
+| Service | Sync Works | Media Title | Episode Auto-Sync | Last Tested | Tested By | Extension Version | Notes |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **YouTube** | ✅ Full | ✅ Full | ❌ N/A | — | — | — | Individual videos, not episodes. |
+| **Twitch** | ✅ Full | ✅ Full | ❌ N/A | — | — | — | Individual streams/VODs. |
+| **Netflix** | ✅ Full | ❌ | ❌ | — | — | — | No media title exposed. |
+| **Emby** | ✅ Full | ✅ Full | ✅ Full | — | — | — | Best-in-class support. |
+| **Jellyfin** | ✅ Full | ✅ Full | ✅ Full | — | — | — | — |
+| **Plex** | Not tested | Not tested | Not tested | — | — | — | — |
+| **Disney+** | ✅ Full | ⚠️ Partial | ❌ | — | — | — | Series title only (e.g. "The Simpsons"), no episode info. |
+| **Prime Video** | ✅ Full  | ✅ Full  | ❌ | — | — | — | — |
+| **HBO Max / Max** | Not tested | Not tested | Not tested | — | — | — | — |
+| **Crunchyroll** | Not tested | Not tested | Not tested | — | — | — | — |
+| **Vimeo** | Not tested | Not tested | Not tested | — | — | — | — |
+| **Dailymotion** | Not tested | Not tested | Not tested | — | — | — | — |
+| **ARD / ZDF Mediathek** | Not tested | Not tested | Not tested | — | — | — | — |
+| **Vix** | ✅ Full | ✅ Full | ✅ Full | — | — | — | Everything works correctly. |
+
+### Legend
 
 | Symbol | Meaning |
-|--------|---------|
+| :---: | :--- |
 | ✅ Full | Works without limitations. |
 | ⚠️ Partial | Works with caveats (see Notes). |
-| ❌ N/A | Not applicable or not supported. |
+| ❌ | Not supported / does not work. |
+| ❌ N/A | Not applicable (feature does not exist on the platform). |
+| **Not tested** | Has not been tested yet. |
+
+---
 
 ## How to Contribute
 
-Tested a service that's not listed? Found different behavior than documented?
+Updating this compatibility list is quick and easy! You don't need deep coding skills to contribute:
 
-1. Test KoalaSync on the service with two browser profiles
-2. Use the extension's **Dev tab** to check `readyState`, `currentTime`, and media title
-3. Open a GitHub issue or PR updating this table
+1. **Fork the Repository**: Click the **Fork** button at the top of the [KoalaSync GitHub Repository](https://github.com/Shik3i/KoalaSync).
+2. **Edit this File**: Open [docs/TESTED_SERVICES.md](TESTED_SERVICES.md) in your fork's browser editor (or clone it locally) and update the table with your testing details.
+3. **Commit & Push**: Commit your changes with a clear message (e.g., `docs: update Netflix compatibility status`).
+4. **Create a Pull Request**: Submit the Pull Request (PR) from your fork to our `main` branch.
+
+> [!NOTE]
+> **Reporting Problems:** If you notice a bug or partial support on a service, please open a [GitHub Issue](https://github.com/Shik3i/KoalaSync/issues) describing the problem, and link it in the **Notes** column of the table. 
+> 
+> _If you are unsure how to create/link an issue, don't worry! Simply submit the PR anyway, and the maintainers will gladly create and link the issue for you._
+
+---
 
 ## Technical Background
 

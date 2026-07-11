@@ -30,6 +30,7 @@ function copyDirSync(src, dest) {
 }
 
 function sha8(buf) { return crypto.createHash('sha256').update(buf).digest('hex').slice(0, 8); }
+function sha384(buf) { return 'sha384-' + crypto.createHash('sha384').update(buf).digest('base64'); }
 
 async function minifyJS(raw) {
     const result = await esbuild.transform(raw, {
@@ -117,22 +118,37 @@ async function compile() {
     }
     console.log('  ✓ Favicons/touch icons successfully synced to website/assets/');
 
+    // Social link preview image (og:image / twitter:image), same artwork as the
+    // GitHub repository OpenGraph card. PNG kept for maximum scraper support.
+    const ogSrc = path.join(websiteDir, '..', 'assets', 'StoreAssets', 'RepositoryOpenGraph.png');
+    if (fs.existsSync(ogSrc)) {
+        await sharp(ogSrc)
+            .png({ quality: 80, palette: true })
+            .toFile(path.join(targetAssetsDir, 'og-image.png'));
+        console.log('  ✓ og-image.png generated from RepositoryOpenGraph.png');
+    } else {
+        console.warn(`  ⚠️ Warning: ${ogSrc} not found. Skipping og-image generation.`);
+    }
+
     // ── 1. Minify CSS/JS (must happen first so hashes go into HTML) ──
     console.log('Minifying CSS/JS...');
     const styleRaw = fs.readFileSync(path.join(websiteDir, 'style.css'), 'utf8');
     const styleMin = minifyCSS(styleRaw);
     const styleHash = sha8(styleMin);
     const styleName = `style.${styleHash}.min.css`;
+    const styleSRI = sha384(styleMin);
 
     const appRaw = fs.readFileSync(path.join(websiteDir, 'app.js'), 'utf8');
     const appMin = await minifyJS(appRaw);
     const appHash = sha8(appMin);
     const appName = `app.${appHash}.min.js`;
+    const appSRI = sha384(appMin);
 
     const langRaw = fs.readFileSync(path.join(websiteDir, 'lang-init.js'), 'utf8');
     const langMin = await minifyJS(langRaw);
     const langHash = sha8(langMin);
     const langName = `lang-init.${langHash}.min.js`;
+    const langSRI = sha384(langMin);
 
     const stylePct = ((1 - styleMin.length / styleRaw.length) * 100).toFixed(0);
     const appPct   = ((1 - appMin.length / appRaw.length) * 100).toFixed(0);
@@ -174,13 +190,14 @@ async function compile() {
         let compiled = templateContent;
         compiled = compiled.replace(/\{\{ASSET_PATH\}\}/g, assetPath);
         compiled = compiled.replace(/\{\{VERSION\}\}/g, buildVersion);
+        compiled = compiled.replace(/\{\{VERSION_DATE\}\}/g, versionJson.date || '');
         const langPrefix = lang === 'en' ? '' : `${lang}/`;
         compiled = compiled.replace(/\{\{LANG_PREFIX\}\}/g, langPrefix);
         languages.forEach(l => {
             compiled = compiled.replace(new RegExp(`\\{\\{SELECTED_${l.toUpperCase()}\\}\\}`, 'g'), l === lang ? 'selected' : '');
         });
         for (const [key, value] of Object.entries(locale)) {
-            compiled = compiled.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+            compiled = compiled.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
         }
         return compiled;
     }
@@ -188,12 +205,24 @@ async function compile() {
     // Read alternative page templates
     const telepartyTemplatePath = path.join(websiteDir, 'alternatives/teleparty.html');
     const screenSharingTemplatePath = path.join(websiteDir, 'alternatives/screen-sharing.html');
+    const watch2getherTemplatePath = path.join(websiteDir, 'alternatives/watch2gether.html');
+    const scenerTemplatePath = path.join(websiteDir, 'alternatives/scener.html');
+    const kosmiTemplatePath = path.join(websiteDir, 'alternatives/kosmi.html');
+    const twosevenTemplatePath = path.join(websiteDir, 'alternatives/twoseven.html');
     const overviewTemplatePath = path.join(websiteDir, 'alternatives/index.html');
     const hasTelepartyTemplate = fs.existsSync(telepartyTemplatePath);
     const hasScreenSharingTemplate = fs.existsSync(screenSharingTemplatePath);
+    const hasWatch2getherTemplate = fs.existsSync(watch2getherTemplatePath);
+    const hasScenerTemplate = fs.existsSync(scenerTemplatePath);
+    const hasKosmiTemplate = fs.existsSync(kosmiTemplatePath);
+    const hasTwosevenTemplate = fs.existsSync(twosevenTemplatePath);
     const hasOverviewTemplate = fs.existsSync(overviewTemplatePath);
     const telepartyTemplate = hasTelepartyTemplate ? fs.readFileSync(telepartyTemplatePath, 'utf8') : '';
     const screenSharingTemplate = hasScreenSharingTemplate ? fs.readFileSync(screenSharingTemplatePath, 'utf8') : '';
+    const watch2getherTemplate = hasWatch2getherTemplate ? fs.readFileSync(watch2getherTemplatePath, 'utf8') : '';
+    const scenerTemplate = hasScenerTemplate ? fs.readFileSync(scenerTemplatePath, 'utf8') : '';
+    const kosmiTemplate = hasKosmiTemplate ? fs.readFileSync(kosmiTemplatePath, 'utf8') : '';
+    const twosevenTemplate = hasTwosevenTemplate ? fs.readFileSync(twosevenTemplatePath, 'utf8') : '';
     const overviewTemplate = hasOverviewTemplate ? fs.readFileSync(overviewTemplatePath, 'utf8') : '';
 
     // Preload English locale for fallback
@@ -207,14 +236,6 @@ async function compile() {
         compiled = compiled.replace(/\{\{LANG_PREFIX\}\}/g, langPrefix);
         compiled = compiled.replace(/\{\{VERSION\}\}/g, buildVersion);
 
-        const indexTitle = lang === 'de' ? 'KoalaSync - Vergleiche & Anleitungen' : 'KoalaSync - Alternatives & Comparisons';
-        const indexDesc = lang === 'de' 
-            ? 'Entdecke ehrliche Vergleiche und detaillierte Leitfäden zwischen KoalaSync und anderen Watch-Party-Erweiterungen.' 
-            : 'Explore honest comparisons and detailed guides comparing KoalaSync with other watch party extensions and streaming solutions.';
-
-        compiled = compiled.replace(/\{\{ALT_INDEX_TITLE\}\}/g, indexTitle);
-        compiled = compiled.replace(/\{\{ALT_INDEX_META_DESC\}\}/g, indexDesc);
-
         // og:locale mapping for Facebook
         const ogLocales = {
             en: 'en_US', de: 'de_DE', fr: 'fr_FR', es: 'es_ES',
@@ -227,7 +248,7 @@ async function compile() {
         // Merge locale with English fallback for keys not present in current locale
         const mergedLocale = { ...englishLocale, ...locale };
         for (const [key, value] of Object.entries(mergedLocale)) {
-            compiled = compiled.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+            compiled = compiled.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
         }
         return compiled;
     }
@@ -256,6 +277,30 @@ async function compile() {
                 const ssCompiled = compileAlternativePage(screenSharingTemplate, locale, lang, '../', '');
                 fs.writeFileSync(path.join(altDir, 'screen-sharing.html'), ssCompiled);
             }
+            if (hasWatch2getherTemplate) {
+                const altDir = path.join(wwwDir, 'alternatives');
+                fs.mkdirSync(altDir, { recursive: true });
+                const w2gCompiled = compileAlternativePage(watch2getherTemplate, locale, lang, '../', '');
+                fs.writeFileSync(path.join(altDir, 'watch2gether.html'), w2gCompiled);
+            }
+            if (hasScenerTemplate) {
+                const altDir = path.join(wwwDir, 'alternatives');
+                fs.mkdirSync(altDir, { recursive: true });
+                const scCompiled = compileAlternativePage(scenerTemplate, locale, lang, '../', '');
+                fs.writeFileSync(path.join(altDir, 'scener.html'), scCompiled);
+            }
+            if (hasKosmiTemplate) {
+                const altDir = path.join(wwwDir, 'alternatives');
+                fs.mkdirSync(altDir, { recursive: true });
+                const koCompiled = compileAlternativePage(kosmiTemplate, locale, lang, '../', '');
+                fs.writeFileSync(path.join(altDir, 'kosmi.html'), koCompiled);
+            }
+            if (hasTwosevenTemplate) {
+                const altDir = path.join(wwwDir, 'alternatives');
+                fs.mkdirSync(altDir, { recursive: true });
+                const tsCompiled = compileAlternativePage(twosevenTemplate, locale, lang, '../', '');
+                fs.writeFileSync(path.join(altDir, 'twoseven.html'), tsCompiled);
+            }
             if (hasOverviewTemplate) {
                 const altDir = path.join(wwwDir, 'alternatives');
                 fs.mkdirSync(altDir, { recursive: true });
@@ -282,6 +327,30 @@ async function compile() {
                 fs.mkdirSync(langAltDir, { recursive: true });
                 const ssCompiled = compileAlternativePage(screenSharingTemplate, locale, lang, '../../', lang + '/');
                 fs.writeFileSync(path.join(langAltDir, 'screen-sharing.html'), ssCompiled);
+            }
+            if (hasWatch2getherTemplate) {
+                const langAltDir = path.join(langDir, 'alternatives');
+                fs.mkdirSync(langAltDir, { recursive: true });
+                const w2gCompiled = compileAlternativePage(watch2getherTemplate, locale, lang, '../../', lang + '/');
+                fs.writeFileSync(path.join(langAltDir, 'watch2gether.html'), w2gCompiled);
+            }
+            if (hasScenerTemplate) {
+                const langAltDir = path.join(langDir, 'alternatives');
+                fs.mkdirSync(langAltDir, { recursive: true });
+                const scCompiled = compileAlternativePage(scenerTemplate, locale, lang, '../../', lang + '/');
+                fs.writeFileSync(path.join(langAltDir, 'scener.html'), scCompiled);
+            }
+            if (hasKosmiTemplate) {
+                const langAltDir = path.join(langDir, 'alternatives');
+                fs.mkdirSync(langAltDir, { recursive: true });
+                const koCompiled = compileAlternativePage(kosmiTemplate, locale, lang, '../../', lang + '/');
+                fs.writeFileSync(path.join(langAltDir, 'kosmi.html'), koCompiled);
+            }
+            if (hasTwosevenTemplate) {
+                const langAltDir = path.join(langDir, 'alternatives');
+                fs.mkdirSync(langAltDir, { recursive: true });
+                const tsCompiled = compileAlternativePage(twosevenTemplate, locale, lang, '../../', lang + '/');
+                fs.writeFileSync(path.join(langAltDir, 'twoseven.html'), tsCompiled);
             }
             if (hasOverviewTemplate) {
                 const langAltDir = path.join(langDir, 'alternatives');
@@ -315,12 +384,15 @@ async function compile() {
     }
 
     // ── 5. Copy generic static files and verification files ──
-    const genericFiles = ['robots.txt', 'sitemap.xml', 'site.webmanifest', 'version.json'];
+    const genericFiles = ['robots.txt', 'site.webmanifest', 'version.json', 'llms.txt'];
     for (const file of genericFiles) {
         const src = path.join(websiteDir, file);
         const dest = path.join(wwwDir, file);
         if (fs.existsSync(src)) { fs.copyFileSync(src, dest); }
     }
+
+    // ── 5.5 Generate dynamic sitemap ──
+    generateSitemap(wwwDir, websiteDir);
 
     // Auto-copy Google verification files and IndexNow/txt key files from website source to www root
     const websiteFiles = fs.readdirSync(websiteDir);
@@ -356,7 +428,7 @@ async function compile() {
         console.log('  ✓ Apple touch icons copied to www root.');
     }
 
-    // ── 7. Convert all WebP to AVIF (quality 70) ──
+    // ── 7. Convert all WebP to AVIF (quality 65) ──
     console.log('Converting WebP → AVIF...');
     let avifCount = 0;
     const webpFiles = fs.readdirSync(destAssets).filter(f => f.endsWith('.webp'));
@@ -366,7 +438,7 @@ async function compile() {
         if (stat.size < MIN_AVIF_KB * 1024) continue;
         const dest = path.join(destAssets, f.replace(/\.webp$/, '.avif'));
         if (fs.existsSync(dest) && fs.statSync(dest).mtimeMs >= stat.mtimeMs) continue;
-        await sharp(src).avif({ quality: 80, speed: 4 }).toFile(dest);
+        await sharp(src).avif({ quality: 65, speed: 4 }).toFile(dest);
         avifCount++;
     }
     console.log(`  ${avifCount} AVIF files generated.`);
@@ -384,15 +456,15 @@ async function compile() {
     walkHtml(wwwDir, (filePath) => {
         let html = fs.readFileSync(filePath, 'utf8');
 
-        // 8a. Replace hashed asset refs
-        html = html.replace(/href="((?:\.\.\/)*)style\.min\.css"/g, (m, prefix) => {
-            return `href="${prefix}${styleName}"`;
+        // 8a. Replace hashed asset refs and inject SRI (Subresource Integrity)
+        html = html.replace(/(<link\b[^>]*?\bhref=")((?:\.\.\/)*)style\.min\.css"/g, (m, before, prefix) => {
+            return `${before}${prefix}${styleName}" integrity="${styleSRI}" crossorigin="anonymous"`;
         });
-        html = html.replace(/src="((?:\.\.\/)*)app\.min\.js"/g, (m, prefix) => {
-            return `src="${prefix}${appName}"`;
+        html = html.replace(/(<script\b[^>]*?\bsrc=")((?:\.\.\/)*)app\.min\.js"/g, (m, before, prefix) => {
+            return `${before}${prefix}${appName}" integrity="${appSRI}" crossorigin="anonymous"`;
         });
-        html = html.replace(/src="((?:\.\.\/)*)lang-init\.min\.js"/g, (m, prefix) => {
-            return `src="${prefix}${langName}"`;
+        html = html.replace(/(<script\b[^>]*?\bsrc=")((?:\.\.\/)*)lang-init\.min\.js"/g, (m, before, prefix) => {
+            return `${before}${prefix}${langName}" integrity="${langSRI}" crossorigin="anonymous"`;
         });
 
         // 8b. Inject AVIF <picture> wrappers
@@ -407,4 +479,98 @@ async function compile() {
     console.log('KoalaSync build finished successfully! Output: website/www/');
 }
 
+function generateSitemap(wwwDir, websiteDir) {
+    const languages = [
+      { code: 'en', prefix: '', hreflang: 'en' },
+      { code: 'de', prefix: 'de/', hreflang: 'de' },
+      { code: 'fr', prefix: 'fr/', hreflang: 'fr' },
+      { code: 'es', prefix: 'es/', hreflang: 'es' },
+      { code: 'pt-BR', prefix: 'pt-BR/', hreflang: 'pt-br' },
+      { code: 'ru', prefix: 'ru/', hreflang: 'ru' },
+      { code: 'it', prefix: 'it/', hreflang: 'it' },
+      { code: 'pl', prefix: 'pl/', hreflang: 'pl' },
+      { code: 'tr', prefix: 'tr/', hreflang: 'tr' },
+      { code: 'nl', prefix: 'nl/', hreflang: 'nl' },
+      { code: 'ja', prefix: 'ja/', hreflang: 'ja' },
+      { code: 'ko', prefix: 'ko/', hreflang: 'ko' },
+      { code: 'zh', prefix: 'zh/', hreflang: 'zh' },
+      { code: 'uk', prefix: 'uk/', hreflang: 'uk' },
+      { code: 'pt', prefix: 'pt/', hreflang: 'pt' }
+    ];
+
+    const today = new Date().toISOString().split('T')[0];
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">`;
+
+    // Static legal pages
+    xml += `
+  <url>
+    <loc>https://sync.koalastuff.net/imprint</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://sync.koalastuff.net/privacy</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://sync.koalastuff.net/de/impressum</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://sync.koalastuff.net/de/datenschutz</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>`;
+
+    function addPage(relativePath, changefreq, priority) {
+      for (const lang of languages) {
+        const loc = `https://sync.koalastuff.net/${lang.prefix}${relativePath}`;
+        xml += `
+  <url>
+    <loc>${loc}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${changefreq}</changefreq>
+    <priority>${priority}</priority>`;
+        for (const alt of languages) {
+          const altHref = `https://sync.koalastuff.net/${alt.prefix}${relativePath}`;
+          xml += `
+    <xhtml:link rel="alternate" hreflang="${alt.hreflang}" href="${altHref}"/>`;
+        }
+        const defaultHref = `https://sync.koalastuff.net/${relativePath}`;
+        xml += `
+    <xhtml:link rel="alternate" hreflang="x-default" href="${defaultHref}"/>
+  </url>`;
+      }
+    }
+
+    addPage('', 'weekly', '1.0');
+    addPage('alternatives', 'weekly', '0.7');
+
+    const subpages = [
+      'alternatives/teleparty',
+      'alternatives/screen-sharing',
+      'alternatives/watch2gether',
+      'alternatives/scener',
+      'alternatives/kosmi',
+      'alternatives/twoseven'
+    ];
+    for (const sub of subpages) {
+      addPage(sub, 'weekly', '0.7');
+    }
+
+    xml += `\n</urlset>\n`;
+
+    fs.writeFileSync(path.join(websiteDir, 'sitemap.xml'), xml.trim() + '\n', 'utf8');
+    fs.writeFileSync(path.join(wwwDir, 'sitemap.xml'), xml.trim() + '\n', 'utf8');
+    console.log('  ✓ Dynamically generated sitemap.xml with current date');
+}
 compile().catch(err => { console.error('Build failed:', err); process.exit(1); });

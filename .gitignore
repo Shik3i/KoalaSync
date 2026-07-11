@@ -49,3 +49,18 @@ scratch/
 
 # Agent instructions (local only, never commit)
 AGENTS.md
+
+# AI Assistants and Agents
+.agents/
+.antigravity/
+.gemini/
+.claude/
+.codex/
+.opencode/
+.cursor/
+.cursorrules
+.copilot/
+.cline/
+.clinerules
+.windsurfrules
+.codeium/

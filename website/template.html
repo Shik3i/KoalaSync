@@ -6,8 +6,12 @@
     <title>{{META_TITLE}}</title>
     <meta name="description" content="{{META_DESCRIPTION}}">
     
+    <link rel="dns-prefetch" href="https://chromewebstore.google.com">
+    <link rel="dns-prefetch" href="https://addons.mozilla.org">
+    <link rel="dns-prefetch" href="https://github.com">
+    
     <link rel="preload" href="{{ASSET_PATH}}style.min.css" as="style">
-    <link rel="preload" as="image" href="{{ASSET_PATH}}assets/LookDownKoala.webp" imagesrcset="{{ASSET_PATH}}assets/LookDownKoala-1x.webp 90w, {{ASSET_PATH}}assets/LookDownKoala.webp 205w" imagesizes="90px" fetchpriority="high">
+    <link rel="preload" as="image" href="{{ASSET_PATH}}assets/LookDownKoala.avif" imagesrcset="{{ASSET_PATH}}assets/LookDownKoala-1x.avif 90w, {{ASSET_PATH}}assets/LookDownKoala.avif 205w" imagesizes="90px" type="image/avif" fetchpriority="high">
     <link rel="stylesheet" href="{{ASSET_PATH}}style.min.css">
     <link rel="icon" type="image/png" sizes="16x16" href="{{ASSET_PATH}}assets/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ASSET_PATH}}assets/favicon-32x32.png">
@@ -36,7 +40,10 @@
     <meta property="og:url" content="https://sync.koalastuff.net/{{CANONICAL_PATH}}">
     <meta property="og:title" content="{{OG_TITLE}}">
     <meta property="og:description" content="{{OG_DESCRIPTION}}">
-    <meta property="og:image" content="https://sync.koalastuff.net/assets/PlatformJuggler_New.webp">
+    <meta property="og:image" content="https://sync.koalastuff.net/assets/og-image.png">
+    <meta property="og:image:width" content="1280">
+    <meta property="og:image:height" content="640">
+    <meta property="og:image:type" content="image/png">
     <meta property="og:locale" content="{{OG_LOCALE}}">
     <meta property="og:locale:alternate" content="en_US">
     <meta property="og:locale:alternate" content="de_DE">
@@ -59,7 +66,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{TWITTER_TITLE}}">
     <meta name="twitter:description" content="{{TWITTER_DESCRIPTION}}">
-    <meta name="twitter:image" content="https://sync.koalastuff.net/assets/PlatformJuggler_New.webp">
+    <meta name="twitter:image" content="https://sync.koalastuff.net/assets/og-image.png">
 
     <!-- Mobile Browser Theme Styling -->
     <meta name="theme-color" content="#0f172a">
@@ -77,6 +84,7 @@
       "name": "KoalaSync",
       "url": "https://sync.koalastuff.net/",
       "logo": "https://sync.koalastuff.net/assets/NewLogoIcon_128.webp",
+      "description": "{{SCHEMA_APP_DESC}}",
       "sameAs": [
         "https://github.com/Shik3i/KoalaSync",
         "https://mastodon.social/@koalastuff"
@@ -89,6 +97,7 @@
       "@type": "WebSite",
       "name": "KoalaSync",
       "url": "https://sync.koalastuff.net/",
+      "description": "{{SCHEMA_APP_DESC}}",
       "inLanguage": ["en", "de", "fr", "es", "it", "nl", "pl", "pt", "pt-BR", "tr", "ru", "ja", "ko", "zh", "uk"]
     }
     </script>
@@ -106,7 +115,7 @@
         "priceCurrency": "EUR"
       },
       "description": "{{SCHEMA_APP_DESC}}",
-      "softwareVersion": "2.5.3",
+      "softwareVersion": "2.5.4",
       "license": "https://opensource.org/licenses/MIT",
       "sameAs": "https://github.com/Shik3i/KoalaSync",
       "image": "https://sync.koalastuff.net/assets/NewLogoIcon.webp",
@@ -201,6 +210,7 @@
     </noscript>
 </head>
 <body>
+    <div class="scroll-progress-bar"></div>
 
     <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -213,7 +223,7 @@
     <nav>
         <div class="container nav-content">
             <div class="logo-area">
-                <img src="{{ASSET_PATH}}assets/NewLogoIcon_128.webp" srcset="{{ASSET_PATH}}assets/NewLogoIcon_64.webp 64w, {{ASSET_PATH}}assets/NewLogoIcon_128.webp 128w, {{ASSET_PATH}}assets/NewLogoIcon.webp 256w" sizes="64px" alt="KoalaSync Logo" width="64" height="64">
+                <img class="nav-logo-img" src="{{ASSET_PATH}}assets/NewLogoIcon_128.webp" srcset="{{ASSET_PATH}}assets/NewLogoIcon_64.webp 64w, {{ASSET_PATH}}assets/NewLogoIcon_128.webp 128w, {{ASSET_PATH}}assets/NewLogoIcon.webp 256w" sizes="64px" alt="KoalaSync Logo" width="64" height="64">
                 <span>KoalaSync</span>
                 <div id="nav-extension-status" class="nav-ext-status" style="display: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="20 6 9 17 4 12"></polyline></svg>
@@ -246,6 +256,10 @@
                 </nav>
             </div>
             <div class="nav-right">
+                <button class="theme-toggle" id="theme-toggle" type="button" aria-label="{{THEME_TOGGLE_LABEL}}" title="{{THEME_TOGGLE_LABEL}}">
+                    <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                    <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                </button>
                 <div class="lang-select-container">
                     <select class="lang-dropdown" aria-label="Select Language">
                         <option value="en" {{SELECTED_EN}}>🇬🇧 English</option>
@@ -276,33 +290,171 @@
     <header class="hero" id="main-content">
         <div class="container hero-grid">
             <div class="hero-text">
-                <a href="https://github.com/Shik3i/KoalaSync/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener" class="version-badge" data-reveal style="text-decoration: none; display: inline-block; transition: transform 0.2s, box-shadow 0.2s;" title="View Changelog">
-                    <span class="version-text-en" lang="en">v2.2.1 OUT NOW</span>
-                    <span class="version-text-de" lang="de">v2.2.1 JETZT VERFÜGBAR</span>
-                </a>
-                <h1 data-reveal>{{HERO_TITLE}}</h1>
-                <p class="hero-subtitle" data-reveal>{{HERO_SUBTITLE}}</p>
-                <div class="hero-mascot-container" data-reveal>
+                <h1>{{HERO_TITLE}}</h1>
+                <p class="hero-subtitle">{{HERO_SUBTITLE}}</p>
+                <div class="hero-mascot-container">
                     <img src="{{ASSET_PATH}}assets/LookDownKoala-1x.webp" srcset="{{ASSET_PATH}}assets/LookDownKoala-1x.webp 90w, {{ASSET_PATH}}assets/LookDownKoala.webp 205w" sizes="90px" alt="{{HERO_MASCOT_ALT}}" class="hero-lookdown-mascot" width="90" height="132" loading="eager" fetchpriority="high" decoding="async">
+                    <a href="https://github.com/Shik3i/KoalaSync/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener" class="koala-speech-bubble" data-release="{{VERSION_DATE}}" title="View Changelog">
+                        <span class="version-text-en" lang="en">
+                            <strong class="bubble-title">v{{VERSION}} is out!&nbsp;🎉</strong>
+                            <span class="bubble-sub"><span class="bubble-ago"></span>See what's new →</span>
+                        </span>
+                        <span class="version-text-de" lang="de">
+                            <strong class="bubble-title">v{{VERSION}} ist da!&nbsp;🎉</strong>
+                            <span class="bubble-sub"><span class="bubble-ago"></span>Was ist neu? →</span>
+                        </span>
+                    </a>
                 </div>
-                <div class="cta-group" data-reveal>
-                    <a href="https://chromewebstore.google.com/detail/koalasync/obbnmkmlaaddodakcbdljknjpagklifc" class="btn btn-primary">
-                        <img src="{{ASSET_PATH}}assets/chrome.svg" alt="Chrome" width="20" height="20">
-                        <span>{{ADD_TO_CHROME}}</span>
+                <div class="cta-group">
+                    <a href="https://chromewebstore.google.com/detail/koalasync/obbnmkmlaaddodakcbdljknjpagklifc" class="btn btn-primary btn-install" data-browser="chrome">
+                        <img src="{{ASSET_PATH}}assets/chrome.svg" alt="" width="20" height="20">
+                        <span class="btn-label-short">Chrome</span>
+                        <span class="btn-label-full">{{ADD_TO_CHROME}}</span>
                     </a>
-                    <a href="https://addons.mozilla.org/de/firefox/addon/koalasync/" class="btn btn-firefox">
-                        <img src="{{ASSET_PATH}}assets/firefox.svg" alt="Firefox" width="20" height="20">
-                        <span>{{ADD_TO_FIREFOX}}</span>
+                    <a href="https://addons.mozilla.org/de/firefox/addon/koalasync/" class="btn btn-firefox btn-install" data-browser="firefox">
+                        <img src="{{ASSET_PATH}}assets/firefox.svg" alt="" width="20" height="20">
+                        <span class="btn-label-short">Firefox</span>
+                        <span class="btn-label-full">{{ADD_TO_FIREFOX}}</span>
                     </a>
-                    <a href="https://github.com/Shik3i/KoalaSync/releases" target="_blank" rel="noopener" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 8px;">
+                    <a href="https://github.com/Shik3i/KoalaSync/releases" target="_blank" rel="noopener" class="btn btn-secondary btn-compact hero-github-cta">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true" style="display: block;"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                        GitHub Releases
+                        <span>GitHub</span>
                     </a>
+                    <button class="btn btn-secondary btn-demo-mobile" id="mobile-demo-open" type="button" aria-haspopup="dialog" aria-controls="mobile-demo-modal">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                        <span>{{MOBILE_DEMO_CTA}}</span>
+                    </button>
                 </div>
+                <p class="cta-trust">{{HERO_TRUST}}</p>
             </div>
 
-            <!-- Interactive CSS Extension Mockup -->
-            <div class="hero-mockup-wrapper" data-reveal>
+            <!-- Interactive Live Demo: two synced video tabs + the extension popup -->
+            <div class="hero-mockup-wrapper">
+                <div class="hero-demo-scene popup-open connected" id="hero-demo">
+                    <div class="demo-tab-stack">
+                        <button class="demo-sync-chip" id="demo-sync-chip" type="button" title="Live sync status of the two demo tabs">
+                            <span class="demo-chip-dot" aria-hidden="true"></span>
+                            <span class="demo-chip-label-sync">{{DEMO_SYNC}}</span>
+                            <span class="demo-chip-event"></span>
+                        </button>
+
+                        <div class="demo-tab-card demo-tab-a" id="demo-tab-a" role="button" tabindex="0" aria-pressed="false" aria-label="Press play or pause as 🐱 ChillCat. KoalaSync mirrors it to the other tab" title="Press play/pause here. KoalaSync mirrors it to the other tab">
+                        <div class="demo-tab-titlebar">
+                            <span class="demo-tab-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                            <span class="demo-tab-title"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> <span class="demo-title-text-ep1">Stranger Things - S4E1</span></span>
+                            <span class="demo-tab-user demo-user-a">🐱 ChillCat</span>
+                            <button class="demo-ext-launcher" id="demo-launcher" type="button" aria-expanded="true" title="Open or close the KoalaSync popup">
+                                <img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="" width="16" height="16" loading="eager" decoding="async">
+                            </button>
+                        </div>
+                        <div class="demo-video">
+                            <div class="demo-video-art" aria-hidden="true"></div>
+                            <div class="demo-seek-sweep" aria-hidden="true"></div>
+                            <svg class="demo-film" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                                <g class="film-stars" fill="#e2e8f0">
+                                    <circle class="film-star" cx="18" cy="14" r="0.8"/>
+                                    <circle class="film-star" cx="42" cy="24" r="0.6"/>
+                                    <circle class="film-star" cx="64" cy="10" r="0.9"/>
+                                    <circle class="film-star" cx="90" cy="28" r="0.6"/>
+                                    <circle class="film-star" cx="108" cy="16" r="0.5"/>
+                                    <circle class="film-star" cx="134" cy="22" r="0.8"/>
+                                    <circle class="film-star" cx="150" cy="12" r="0.5"/>
+                                </g>
+                                <circle class="film-moon" cx="122" cy="26" r="7.5" fill="#f1f5f9" opacity="0.92"/>
+                                <path class="film-mtn-scroll" d="M0,60 L30,45 L70,55 L110,40 L160,60 L190,45 L230,55 L270,40 L320,60 L320,92 L0,92 Z" fill="rgba(30,27,75,0.7)"/>
+                                <g class="film-mid-scroll">
+                                    <polygon points="20,76 26,60 32,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="55,78 63,52 71,78" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="95,76 101,62 107,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="135,77 144,55 153,77" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="180,76 186,60 192,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="215,78 223,52 231,78" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="255,76 261,62 267,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="295,77 304,55 313,77" fill="rgba(49,46,129,0.55)"/>
+                                    <path d="M0,76 Q40,73 80,76 T160,76 Q200,73 240,76 T320,76 L320,92 L0,92 Z" fill="rgba(49,46,129,0.55)"/>
+                                </g>
+                                <g class="film-fore-scroll">
+                                    <polygon points="40,84 52,48 64,84" fill="#090d16"/>
+                                    <polygon points="115,84 128,42 141,84" fill="#090d16"/>
+                                    <polygon points="200,84 212,48 224,84" fill="#090d16"/>
+                                    <polygon points="275,84 288,42 301,84" fill="#090d16"/>
+                                    <path d="M0,84 Q80,82 160,84 T320,84 L320,92 L0,92 Z" fill="#090d16"/>
+                                </g>
+                                <circle class="film-bounce-ball" cx="80" cy="46" r="3.5" fill="#fde047"/>
+                            </svg>
+                            <div class="demo-play-overlay" aria-hidden="true">
+                                <span class="demo-icon-wrap">
+                                    <svg class="icon-play" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M8 5v14l11-7z"/></svg>
+                                    <svg class="icon-pause" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+                                </span>
+                            </div>
+                            <div class="demo-video-controls">
+                                <span class="demo-time">12:34</span>
+                                <div class="demo-progress" title="Seek: KoalaSync jumps the other tab to the same spot"><div class="demo-progress-fill"></div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                        <div class="demo-tab-card demo-tab-b" id="demo-tab-b" role="button" tabindex="0" aria-pressed="false" aria-label="Press play or pause as 🐶 HappyDog. KoalaSync mirrors it to the other tab" title="Press play/pause here. KoalaSync mirrors it to the other tab">
+                        <div class="demo-tab-titlebar">
+                            <span class="demo-tab-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                            <span class="demo-tab-title"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> <span class="demo-title-text-ep1">Stranger Things - S4E1</span></span>
+                            <span class="demo-tab-user demo-user-b">🐶 HappyDog</span>
+                            <span class="demo-ext-launcher demo-ext-static" aria-hidden="true" title="KoalaSync is installed here too">
+                                <img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="" width="16" height="16" loading="eager" decoding="async">
+                            </span>
+                        </div>
+                        <div class="demo-video">
+                            <div class="demo-video-art" aria-hidden="true"></div>
+                            <div class="demo-seek-sweep" aria-hidden="true"></div>
+                            <svg class="demo-film" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                                <g class="film-stars" fill="#e2e8f0">
+                                    <circle class="film-star" cx="18" cy="14" r="0.8"/>
+                                    <circle class="film-star" cx="42" cy="24" r="0.6"/>
+                                    <circle class="film-star" cx="64" cy="10" r="0.9"/>
+                                    <circle class="film-star" cx="90" cy="28" r="0.6"/>
+                                    <circle class="film-star" cx="108" cy="16" r="0.5"/>
+                                    <circle class="film-star" cx="134" cy="22" r="0.8"/>
+                                    <circle class="film-star" cx="150" cy="12" r="0.5"/>
+                                </g>
+                                <circle class="film-moon" cx="122" cy="26" r="7.5" fill="#f1f5f9" opacity="0.92"/>
+                                <path class="film-mtn-scroll" d="M0,60 L30,45 L70,55 L110,40 L160,60 L190,45 L230,55 L270,40 L320,60 L320,92 L0,92 Z" fill="rgba(30,27,75,0.7)"/>
+                                <g class="film-mid-scroll">
+                                    <polygon points="20,76 26,60 32,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="55,78 63,52 71,78" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="95,76 101,62 107,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="135,77 144,55 153,77" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="180,76 186,60 192,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="215,78 223,52 231,78" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="255,76 261,62 267,76" fill="rgba(49,46,129,0.55)"/>
+                                    <polygon points="295,77 304,55 313,77" fill="rgba(49,46,129,0.55)"/>
+                                    <path d="M0,76 Q40,73 80,76 T160,76 Q200,73 240,76 T320,76 L320,92 L0,92 Z" fill="rgba(49,46,129,0.55)"/>
+                                </g>
+                                <g class="film-fore-scroll">
+                                    <polygon points="40,84 52,48 64,84" fill="#090d16"/>
+                                    <polygon points="115,84 128,42 141,84" fill="#090d16"/>
+                                    <polygon points="200,84 212,48 224,84" fill="#090d16"/>
+                                    <polygon points="275,84 288,42 301,84" fill="#090d16"/>
+                                    <path d="M0,84 Q80,82 160,84 T320,84 L320,92 L0,92 Z" fill="#090d16"/>
+                                </g>
+                                <circle class="film-bounce-ball" cx="80" cy="46" r="3.5" fill="#fde047"/>
+                            </svg>
+                            <div class="demo-play-overlay" aria-hidden="true">
+                                <span class="demo-icon-wrap">
+                                    <svg class="icon-play" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M8 5v14l11-7z"/></svg>
+                                    <svg class="icon-pause" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+                                </span>
+                            </div>
+                            <div class="demo-video-controls">
+                                <span class="demo-time">12:34</span>
+                                <div class="demo-progress" title="Seek: KoalaSync jumps the other tab to the same spot"><div class="demo-progress-fill"></div></div>
+                            </div>
+                        </div>
+                        <div class="demo-tab-toast" id="demo-toast-b" data-joined="{{DEMO_JOINED}}" data-selected="{{DEMO_TAB_SELECTED}}" aria-hidden="true"></div>
+                        </div>
+                    </div>
+                    <p class="demo-hint" id="demo-hint">{{DEMO_HINT}}</p>
+
                 <div class="extension-mockup">
                     <div class="mock-header-row">
                         <div class="mock-header-title"><img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="KoalaSync Logo">KoalaSync</div>
@@ -310,6 +462,9 @@
                             <svg viewBox="0 0 16 16" fill="currentColor" style="width: 12px; height: 12px; display: block;"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
                             <span class="mockup-version">{{VERSION}}</span>
                         </a>
+                        <button class="mock-close-btn" id="demo-popup-close" type="button" aria-label="Close popup" title="Close popup">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" width="13" height="13" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
                     </div>
                     <div class="mock-tabs">
                         <button class="mock-tab active" data-target="mock-room" title="Room settings and connection">Room</button>
@@ -320,6 +475,13 @@
                     <div class="mock-body">
                         <!-- ROOM TAB -->
                         <div id="mock-room" class="mock-screen active">
+                            <!-- Pre-room state, shown only during the scripted walkthrough -->
+                            <div id="demo-room-empty" class="demo-room-empty">
+                                <img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="" width="42" height="42" loading="eager" decoding="async">
+                                <div class="demo-room-empty-text">{{DEMO_NO_ROOM}}</div>
+                                <button id="demo-create-room" class="demo-create-room-btn" type="button">{{DEMO_CREATE_ROOM}}</button>
+                            </div>
+                            <div id="demo-room-joined">
                             <div class="mock-joined-room" style="display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--accent); padding: 8px 10px; background: var(--card); border-radius: 8px; margin-bottom: 12px;" title="The room you are currently connected to">
                                 <div style="display: flex; flex-direction: column;">
                                     <span style="font-size: 0.6rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; line-height: 1;">{{MOCK_01}}</span>
@@ -331,7 +493,7 @@
                                     <div class="mock-label" title="Share this link with friends so they can join">{{MOCK_03}}</div>
                                 <div class="mock-invite-box">
                                     <input type="text" class="mock-input" value="https://sync.koalastuff.net/join#join:brave-eagle-80:pass" readonly style="flex: 1;" aria-label="Invite link">
-                                    <button class="mock-btn" style="width: 40px; padding: 0.45rem 0; flex-shrink: 0; background: #334155;" title="Copy Invite Link"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                                    <button class="mock-btn" id="demo-invite-copy" style="width: 40px; padding: 0.45rem 0; flex-shrink: 0; background: #334155;" title="Copy Invite Link"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
                                 </div>
                             </div>
                             <div class="mock-card" style="margin-bottom: 12px;">
@@ -339,33 +501,35 @@
                                 <div class="mock-peer-list">
                                     <div class="mock-peer-item">
                                         <div class="mock-peer-header">
-                                            <span class="mock-peer-name">CoolUsername</span>
+                                            <span class="mock-peer-name">🐱 ChillCat</span>
                                                 <span class="mock-peer-meta">{{MOCK_05}}</span>
                                         </div>
-                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> Stranger Things - S4E1</div>
+                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> <span class="demo-title-text-ep1">Stranger Things - S4E1</span></div>
                                             <div class="mock-peer-status"><span style="color:#22c55e;">●</span> 0:55 • {{MOCK_06}}</div>
                                     </div>
-                                    <div class="mock-peer-item">
+                                    <div class="mock-peer-item demo-peer-b">
                                         <div class="mock-peer-header">
-                                            <span class="mock-peer-name">KoalaPC</span>
+                                            <span class="mock-peer-name">🐶 HappyDog</span>
                                                 <span class="mock-peer-meta">{{MOCK_07}}</span>
                                         </div>
-                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> Stranger Things - S4E1</div>
+                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> <span class="demo-title-text-ep1">Stranger Things - S4E1</span></div>
                                             <div class="mock-peer-status"><span style="color:#22c55e;">●</span> 0:55 • {{MOCK_06}}</div>
                                     </div>
                                 </div>
                             </div>
                                 <button class="mock-btn" style="background:#ef4444; width:100%; border: none; padding: 10px; border-radius: 8px; color: white; font-weight: 700; cursor: pointer; border: 1px solid #ef4444;">{{MOCK_08}}</button>
+                            </div>
                         </div>
 
                         <!-- SYNC TAB -->
                         <div id="mock-sync" class="mock-screen">
                             <div class="mock-form-group" style="margin-bottom: 12px;">
-                                <label class="mock-section-label" title="Choose the browser tab containing the video to sync">
+                                <label class="mock-section-label" for="demo-video-select" title="Choose the browser tab containing the video to sync">
                                     {{MOCK_09}}
                                 </label>
-                                <select class="mock-input" style="width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid #334155; color: white; padding: 8px; border-radius: 8px; font-family: inherit; font-size: 0.75rem; outline: none; cursor: default;">
-                                    <option><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> Stranger Things - S4E1</option>
+                                <select class="mock-input" id="demo-video-select" style="width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid #334155; color: white; padding: 8px; border-radius: 8px; font-family: inherit; font-size: 0.75rem; outline: none; cursor: default;">
+                                    <option value="" class="demo-select-placeholder" selected hidden>{{DEMO_SELECT_PLACEHOLDER}}</option>
+                                    <option><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> <span class="demo-title-text-ep1">Stranger Things - S4E1</span></option>
                                 </select>
                             </div>
                             
@@ -379,12 +543,12 @@
                                 </button>
                             </div>
                             <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                                    <button class="mock-btn mock-btn-play" style="flex: 1; background: #22c55e; color: white; padding: 8px; border-radius: 8px; font-weight: 700; border: none; cursor: pointer;" title="Send a Play command to everyone">{{MOCK_11}}</button>
-                                    <button class="mock-btn mock-btn-pause" style="flex: 1; background: #ef4444; color: white; padding: 8px; border-radius: 8px; font-weight: 700; border: none; cursor: pointer;" title="Send a Pause command to everyone">{{MOCK_12}}</button>
+                                    <button class="mock-btn mock-btn-play" id="demo-play-btn" style="flex: 1; background: #22c55e; color: white; padding: 8px; border-radius: 8px; font-weight: 700; border: none; cursor: pointer;" title="Send a Play command to everyone">{{MOCK_11}}</button>
+                                    <button class="mock-btn mock-btn-pause" id="demo-pause-btn" style="flex: 1; background: #ef4444; color: white; padding: 8px; border-radius: 8px; font-weight: 700; border: none; cursor: pointer;" title="Send a Pause command to everyone">{{MOCK_12}}</button>
                             </div>
                             
                             <div style="display: flex; gap: 8px; margin-bottom: 15px; align-items: stretch;">
-                                <button class="mock-btn" style="background: linear-gradient(135deg, #6366f1, #a855f7); flex: 1; color: white; border: none; font-weight: 700; border-radius: 8px; padding: 8px; cursor: pointer;" title="Force all users to sync up">
+                                <button class="mock-btn" id="demo-force-sync" style="background: linear-gradient(135deg, #6366f1, #a855f7); flex: 1; color: white; border: none; font-weight: 700; border-radius: 8px; padding: 8px; cursor: pointer;" title="Force all users to sync up">
                                     {{MOCK_13}}
                                 </button>
                                 <div class="mock-input" style="flex: 1; background: var(--card); border: 1px solid #334155; color: white; padding: 6px; border-radius: 8px; font-size: 0.75rem; display: flex; align-items: center; justify-content: space-between;" title="Choose sync target">
@@ -401,31 +565,14 @@
                             <div class="mock-card" style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 6px;">
                                 <div style="display: flex; justify-content: space-between; align-items: baseline;">
                                     <span style="font-weight: 700; color: #ef4444; font-size: 11px;">PAUSE</span>
-                                    <span style="font-size: 9px; color: var(--text-muted);">CoolUsername @ 12:44:32</span>
+                                    <span style="font-size: 9px; color: var(--text-muted);">🐱 ChillCat @ 12:44:32</span>
                                 </div>
                                 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 5px; margin-top: 4px;">
                                     <div style="display: flex; flex-direction: column; align-items: center;">
                                         <div style="width: 18px; height: 18px; border-radius: 50%; background: var(--success); color: white; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; margin-bottom: 1px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="10" height="10" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></div>
-                                        <span style="font-size: 7px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 36px;">🐨 KoalaPC</span>
+                                        <span style="font-size: 7px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 36px;">🐶 HappyDog</span>
                                     </div>
                                 </div>
-                            </div>
-
-                            <!-- Episode Auto-Sync Lobby Status Mockup -->
-                            <div class="mock-card" style="margin-bottom: 15px; border-left: 4px solid #fbbf24; background: var(--card); padding: 8px 10px; border-radius: 8px;">
-                                <div style="display:flex; align-items:center; gap: 6px; margin-bottom: 4px;">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true" style="display:block; flex-shrink:0;"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>
-                                    <span style="font-weight: 700; color: #fbbf24; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em;">Episode Lobby</span>
-                                </div>
-                                <div style="font-size: 0.7rem; color: white; margin-bottom: 4px; font-weight: 600;">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> Stranger Things - S4E2
-                                </div>
-                                <div style="font-size: 0.65rem; color: var(--text-muted); margin-bottom: 6px;">
-                                    {{MOCK_16}}
-                                </div>
-                                <button class="mock-btn" style="background: #334155; border: none; padding: 4px 8px; border-radius: 6px; color: white; font-weight: 600; font-size: 0.65rem; cursor: pointer; width: auto; display: block;" title="Cancel lobby and play anyway">
-                                    {{MOCK_17}}
-                                </button>
                             </div>
 
                             <label class="mock-section-label" title="Other users currently connected to this room">
@@ -435,18 +582,18 @@
                                 <div class="mock-peer-list">
                                     <div class="mock-peer-item">
                                         <div class="mock-peer-header">
-                                            <span class="mock-peer-name">CoolUsername</span>
+                                            <span class="mock-peer-name">🐱 ChillCat</span>
                                                 <span class="mock-peer-meta">{{MOCK_05}}</span>
                                         </div>
-                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> Stranger Things - S4E1</div>
+                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> <span class="demo-title-text-ep1">Stranger Things - S4E1</span></div>
                                             <div class="mock-peer-status"><span style="color:#22c55e;">●</span> 0:55 • {{MOCK_06}}</div>
                                     </div>
-                                    <div class="mock-peer-item">
+                                    <div class="mock-peer-item demo-peer-b">
                                         <div class="mock-peer-header">
-                                            <span class="mock-peer-name">KoalaPC</span>
+                                            <span class="mock-peer-name">🐶 HappyDog</span>
                                                 <span class="mock-peer-meta">{{MOCK_07}}</span>
                                         </div>
-                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> Stranger Things - S4E1</div>
+                                        <div class="mock-peer-tab"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> <span class="demo-title-text-ep1">Stranger Things - S4E1</span></div>
                                             <div class="mock-peer-status"><span style="color:#22c55e;">●</span> 0:55 • {{MOCK_06}}</div>
                                     </div>
                                 </div>
@@ -459,7 +606,7 @@
                                 <label style="margin: 0; font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;" title="Username helps others identify you.">
                                     {{MOCK_18}}
                                 </label>
-                                <input type="text" class="mock-input" value="CoolUsername" readonly style="width: 110px; padding: 4px; text-align: right; background: transparent; border: none; color: var(--accent); font-weight: 700;">
+                                <input type="text" class="mock-input" value="🐱 ChillCat" readonly style="width: 110px; padding: 4px; text-align: right; background: transparent; border: none; color: var(--accent); font-weight: 700;">
                             </div>
 
                             <div style="display: flex; align-items: center; justify-content: space-between; background: var(--card); padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #334155;">
@@ -545,11 +692,11 @@
                             </label>
                             <div class="mock-card" style="font-size: 0.65rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 12px; max-height: 100px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
                                 <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 4px;">
-                                    <span>CoolUsername: PAUSE</span>
+                                    <span>🐱 ChillCat: PAUSE</span>
                                     <span style="opacity: 0.5;">0:55</span>
                                 </div>
                                 <div style="display: flex; justify-content: space-between; padding-top: 2px;">
-                                    <span>KoalaPC: PLAY</span>
+                                    <span>🐶 HappyDog: PLAY</span>
                                     <span style="opacity: 0.5;">0:00</span>
                                 </div>
                             </div>
@@ -576,9 +723,31 @@
                         </div>
                     </div>
                 </div>
+
+                    <div class="demo-invite-fly" id="demo-invite-fly" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                        sync.koalastuff.net/join…
+                    </div>
+                    <div class="demo-cursor" id="demo-cursor" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2l13 11.5-6 .7 3.4 6.3-2.6 1.4-3.4-6.4L5 19.5z" fill="#f8fafc" stroke="#0f172a" stroke-width="1.4" stroke-linejoin="round"/></svg>
+                    </div>
+                </div>
             </div>
         </div>
     </header>
+
+    <div class="mobile-demo-modal" id="mobile-demo-modal" hidden>
+        <div class="mobile-demo-backdrop" data-mobile-demo-close></div>
+        <div class="mobile-demo-panel" role="dialog" aria-modal="true" aria-labelledby="mobile-demo-title">
+            <div class="mobile-demo-header">
+                <h2 id="mobile-demo-title">{{MOBILE_DEMO_TITLE}}</h2>
+                <button class="mobile-demo-close" id="mobile-demo-close" type="button" aria-label="{{MOBILE_DEMO_CLOSE}}">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="mobile-demo-stage" id="mobile-demo-stage"></div>
+        </div>
+    </div>
 
     <section class="compat-section">
         <div class="container">
@@ -603,7 +772,11 @@
                     <img src="{{ASSET_PATH}}assets/primevideo.svg" alt="Prime Video" width="24" height="24">
                     <span>Prime Video</span>
                 </div>
-                <div class="compat-logo">
+                <div class="compat-logo compat-logo-disneyplus">
+                    <img class="compat-logo-wide compat-logo-disneyplus-mark" src="{{ASSET_PATH}}assets/disneyplus.svg" alt="Disney+" width="76" height="36">
+                    <span>Disney+</span>
+                </div>
+                <div class="compat-logo compat-logo-jellyfin">
                     <img src="{{ASSET_PATH}}assets/jellyfin.svg" alt="Jellyfin" width="24" height="24">
                     <span>Jellyfin</span>
                 </div>
@@ -622,15 +795,15 @@
         </div>
     </section>
 
-    <section id="use-cases" class="use-cases-section">
+    <section id="use-cases" class="use-cases-section lazy-section">
         <div class="container">
             <h2 class="section-title" data-reveal style="text-align: center; font-size: 2.2rem; margin-bottom: 1rem;">
-                <span>{{USE_CASES_TITLE}}</span>
+                <span>{{WHY_TITLE}}</span>
             </h2>
             <p class="section-subtitle" data-reveal style="text-align: center; color: var(--text-muted); margin-bottom: 3.5rem; max-width: 600px; margin-left: auto; margin-right: auto;">
-                <span>{{USE_CASES_SUBTITLE}}</span>
+                <span>{{WHY_SUBTITLE}}</span>
             </p>
-            <div class="use-cases-grid">
+            <div class="use-cases-grid use-cases-feature-grid">
                 <div class="use-case-card" data-reveal>
                     <img src="{{ASSET_PATH}}assets/PopcornFriends-1x.webp" srcset="{{ASSET_PATH}}assets/PopcornFriends-1x.webp 272w, {{ASSET_PATH}}assets/PopcornFriends.webp 543w" sizes="(max-width: 768px) calc(100vw - 2rem), 272px" alt="{{USE_CASE_1_ALT}}" class="use-case-image" width="272" height="150" loading="lazy" fetchpriority="low">
                     <h3>
@@ -652,71 +825,8 @@
                     </h3>
                     <p>{{USE_CASE_3_DESC}}</p>
                 </div>
-            </div>
-        </div>
-    </section>
-
-    <section id="features">
-        <div class="container">
-            <img src="{{ASSET_PATH}}assets/KoalaQuestions-1x.webp" srcset="{{ASSET_PATH}}assets/KoalaQuestions-1x.webp 250w, {{ASSET_PATH}}assets/KoalaQuestions.webp 355w" sizes="(max-width: 768px) calc(100vw - 2rem), 250px" alt="A cute koala with a question mark above its head wondering why to choose KoalaSync" class="features-questions-mascot" width="250" height="211" loading="lazy" fetchpriority="low" data-reveal>
-            <h2 style="font-size: 2.5rem; text-align: center; margin-bottom: 1rem;">
-                <span>{{WHY_TITLE}}</span>
-            </h2>
-            <p style="text-align: center; color: var(--text-muted); margin-bottom: 4rem;">
-                <span>{{WHY_SUBTITLE}}</span>
-            </p>
-            
-            <div class="features-grid">
-                <!-- Card 1: Full Control / Instant Sync (Bento Large) -->
-                <div class="feature-card bento-large" data-reveal>
-                    <h3>
-                        <span class="feature-icon-svg">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                        </span>
-                        <span>{{FEATURE_1_TITLE}}</span>
-                    </h3>
-                    <p>{{FEATURE_1_DESC}}</p>
-                </div>
-
-                <!-- Card 2: Endless Binge-Watching (Bento Standard) -->
-                <div class="feature-card" data-reveal>
-                    <h3>
-                        <span class="feature-icon-svg">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
-                        </span>
-                        <span>{{FEATURE_2_TITLE}}</span>
-                    </h3>
-                    <p>{{FEATURE_2_DESC}}</p>
-                </div>
-
-                <!-- Card 3: Zero Accounts / Pure Privacy (Bento Standard) -->
-                <div class="feature-card" data-reveal>
-                    <h3>
-                        <span class="feature-icon-svg">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        </span>
-                        <span>{{FEATURE_3_TITLE}}</span>
-                    </h3>
-                    <p>{{FEATURE_3_DESC}}</p>
-                    <div class="bento-visual-architecture" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.7rem; font-family: monospace; display: flex; align-items: center; justify-content: space-between; color: var(--accent);">
-                        <span>STATE: VOLATILE</span>
-                        <span style="background: rgba(99, 102, 241, 0.15); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.6rem;">RAM-ONLY</span>
-                    </div>
-                </div>
-
-                <!-- Card 4: Universal HTML5 Support (Bento Large) -->
-                <div class="feature-card bento-large" data-reveal>
-                    <h3>
-                        <span class="feature-icon-svg">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                        </span>
-                        <span>{{FEATURE_4_TITLE}}</span>
-                    </h3>
-                    <p>{{FEATURE_4_DESC}}</p>
-                </div>
-
-                <!-- Card 5: Instant Invites / 1-Click Join (Bento Large) -->
-                <div class="feature-card bento-large" data-reveal>
+                <!-- Tile 1: Instant Invites / 1-Click Join -->
+                <div id="features" class="feature-card feature-card-compact" data-reveal>
                     <h3>
                         <span class="feature-icon-svg">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -726,30 +836,8 @@
                     <p>{{FEATURE_6_DESC}}</p>
                 </div>
 
-                <!-- Card 6: Self-Hostable & Docker-Ready (Bento Standard) -->
-                <div class="feature-card" data-reveal>
-                    <h3>
-                        <span class="feature-icon-svg">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                        </span>
-                        <span>{{FEATURE_5_TITLE}}</span>
-                    </h3>
-                    <p>{{FEATURE_5_DESC}}</p>
-                </div>
-
-                <!-- Card 7: Open Source / MIT License (Bento Standard) -->
-                <div class="feature-card" data-reveal>
-                    <h3>
-                        <span class="feature-icon-svg">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                        </span>
-                        <span>{{FEATURE_8_TITLE}}</span>
-                    </h3>
-                    <p>{{FEATURE_8_DESC}}</p>
-                </div>
-
-                <!-- Card 8: Volume Leveling / Audio Compressor (Bento Large) -->
-                <div class="feature-card bento-large" data-reveal>
+                <!-- Tile 2: Volume Leveling / Audio Compressor -->
+                <div class="feature-card feature-card-compact" data-reveal>
                     <h3>
                         <span class="feature-icon-svg">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
@@ -758,12 +846,22 @@
                     </h3>
                     <p>{{FEATURE_7_DESC}}</p>
                 </div>
-            </div>
 
+                <!-- Tile 3: Universal HTML5 Support -->
+                <div class="feature-card feature-card-compact" data-reveal>
+                    <h3>
+                        <span class="feature-icon-svg">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bento-icon"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                        </span>
+                        <span>{{FEATURE_4_TITLE}}</span>
+                    </h3>
+                    <p>{{FEATURE_4_DESC}}</p>
+                </div>
+            </div>
         </div>
     </section>
 
-    <section id="comparison" class="comparison-section">
+    <section id="comparison" class="comparison-section lazy-section">
         <div class="container">
             <img src="{{ASSET_PATH}}assets/ProContraKoala-1x.webp" srcset="{{ASSET_PATH}}assets/ProContraKoala-1x.webp 260w, {{ASSET_PATH}}assets/ProContraKoala.webp 423w" sizes="(max-width: 768px) calc(100vw - 2rem), 260px" alt="A cute koala weighing options in both hands to compare KoalaSync vs Teleparty" class="comparison-mascot" width="260" height="184" loading="lazy" fetchpriority="low" data-reveal>
             <h2 class="section-title" data-reveal style="text-align: center; font-size: 2.2rem; margin-bottom: 1rem;">
@@ -875,17 +973,23 @@
                         <a href="https://www.teleparty.com/privacy" target="_blank" rel="noopener noreferrer">teleparty.com/privacy</a>
                     </p>
                     <p id="footnote-3">
-                        <sup>[3]</sup> 
+                        <sup>[3]</sup>
                         <span>{{COMP_FOOTNOTE_4}}</span>
                     </p>
                 </div>
             </div>
+            <p class="comparison-guides-link" data-reveal>
+                <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives">
+                    <span>{{COMP_MORE_GUIDES}}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </a>
+            </p>
         </div>
     </section>
 
-    <section id="how-it-works" style="background: rgba(255,255,255,0.02)">
+    <section id="how-it-works" style="background: var(--section-tint)">
         <div class="container">
-            <h2 style="font-size: 2.5rem; text-align: center; margin-bottom: 4rem;">
+            <h2 style="font-size: 2.2rem; text-align: center; margin-bottom: 2.25rem;">
                 <span>{{STEPS_TITLE}}</span>
             </h2>
             
@@ -897,73 +1001,6 @@
                         <p>{{STEP_1_DESC}}</p>
                     </div>
                     <!-- Custom Step 1 Illustration -->
-                    <div class="step-illustration-1" data-reveal>
-                        <div class="illus-browser-container">
-                            <div class="illus-browser-header">
-                                <div class="illus-browser-dots">
-                                    <span class="illus-browser-dot"></span>
-                                    <span class="illus-browser-dot"></span>
-                                    <span class="illus-browser-dot"></span>
-                                </div>
-                                <div class="illus-browser-address-bar">
-                                    <span class="url-protocol">https://</span>sync.koalastuff.net
-                                </div>
-                                <div class="illus-browser-toolbar">
-                                    <div class="illus-extension-btn active">
-                                        <img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="KoalaSync Extension" width="14" height="14">
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="illus-browser-content">
-                                <div class="illus-store-card">
-                                    <div class="illus-store-card-header">
-                                        <img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="KoalaSync Logo" class="illus-large-logo" width="30" height="30">
-                                        <div class="illus-store-info">
-                                            <div class="illus-store-title">KoalaSync</div>
-                                            <div class="illus-store-desc">
-                                                <span>{{STEP_1_ILLUS_DESC}}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="illus-store-buttons">
-                                        <div class="illus-store-btn chrome">
-                                            <img src="{{ASSET_PATH}}assets/chrome.svg" alt="Chrome Logo" width="12" height="12">
-                                            <span>{{STEP_1_ILLUS_DL_CHROME}}</span>
-                                        </div>
-                                        <div class="illus-store-btn firefox">
-                                            <img src="{{ASSET_PATH}}assets/firefox.svg" alt="Firefox Logo" width="12" height="12">
-                                            <span>{{STEP_1_ILLUS_DL_FIREFOX}}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Floating Extension Success Popup -->
-                                <div class="illus-extension-popup">
-                                    <div class="popup-title">
-                                        <img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="KoalaSync Logo" width="12" height="12">
-                                        <span>KoalaSync</span>
-                                    </div>
-                                    <div class="popup-status">
-                                        <div class="status-badge-success">
-                                            <span class="status-check"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                            <span>{{STEP_1_ILLUS_ACTIVE}}</span>
-                                        </div>
-                                    </div>
-                                    <div class="popup-quick-start">
-                                        <span>{{STEP_1_ILLUS_READY}}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="step">
-                    <div class="step-text" data-reveal>
-                        <div class="step-num" aria-hidden="true">02</div>
-                        <h3><span>{{STEP_2_TITLE}}</span></h3>
-                        <p>{{STEP_2_DESC}}</p>
-                    </div>
-                    <!-- Custom Step 2 Illustration -->
                     <div class="step-illustration-2" data-reveal>
                         <div class="illus-popup-card">
                             <div class="illus-popup-header">
@@ -1005,6 +1042,51 @@
                 </div>
                 <div class="step">
                     <div class="step-text" data-reveal>
+                        <div class="step-num" aria-hidden="true">02</div>
+                        <h3><span>{{STEP_2_TITLE}}</span></h3>
+                        <p>{{STEP_2_DESC}}</p>
+                    </div>
+                    <!-- Custom Step 2 Illustration -->
+                    <div class="step-illustration-1" data-reveal>
+                        <div class="illus-popup-card">
+                            <div class="illus-popup-header">
+                                <div class="illus-popup-brand">
+                                    <img src="{{ASSET_PATH}}assets/NewLogoIcon.webp" alt="KoalaSync Logo" width="14" height="14">
+                                    <span>KoalaSync</span>
+                                </div>
+                                <div class="illus-popup-version mockup-version">{{VERSION}}</div>
+                            </div>
+                            <div class="illus-popup-tabs">
+                                <div class="illus-popup-tab">
+                                    <span>{{STEP_2_ILLUS_ROOM}}</span>
+                                </div>
+                                <div class="illus-popup-tab active">
+                                    <span>{{STEP_2_ILLUS_SYNC}}</span>
+                                </div>
+                                <div class="illus-popup-tab">
+                                    <span>{{STEP_2_ILLUS_SETTINGS}}</span>
+                                </div>
+                            </div>
+                            <div class="illus-popup-body">
+                                <div class="popup-form-group">
+                                    <label class="popup-form-label" for="popup-select-mock-el">{{LABEL_SELECT_VIDEO}}</label>
+                                    <div class="popup-select-wrapper">
+                                        <select class="popup-select-mock" id="popup-select-mock-el" disabled>
+                                            <option class="demo-title-text-ep1">Stranger Things - S4E1</option>
+                                        </select>
+                                        <div class="popup-cursor-pointer">👆</div>
+                                    </div>
+                                </div>
+                                <div class="popup-mock-controls">
+                                    <div class="popup-mock-btn play">▶ Play</div>
+                                    <div class="popup-mock-btn pause">⏸ Pause</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-text" data-reveal>
                         <div class="step-num" aria-hidden="true">03</div>
                         <h3><span>{{STEP_3_TITLE}}</span></h3>
                         <p>{{STEP_3_DESC}}</p>
@@ -1012,15 +1094,38 @@
                     <!-- Custom Step 3 Illustration -->
                     <div class="step-illustration-3" data-reveal>
                         <div class="illus-sync-theater">
-                            <!-- Player A (KoalaPC) -->
+                            <!-- Player A (🐱 ChillCat) -->
                             <div class="illus-player-card player-a">
                                 <div class="player-header">
-                                    <span class="player-user">🐨 KoalaPC</span>
+                                    <span class="player-user">🐱 ChillCat</span>
                                     <span class="player-badge active">PLAYING</span>
                                 </div>
                                 <div class="player-video-canvas">
-                                    <div class="player-play-pulse">▶</div>
                                     <div class="player-video-overlay"></div>
+                                    <svg class="demo-film" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                                        <g class="film-stars" fill="#e2e8f0">
+                                            <circle class="film-star" cx="18" cy="14" r="0.8"/>
+                                            <circle class="film-star" cx="42" cy="24" r="0.6"/>
+                                            <circle class="film-star" cx="64" cy="10" r="0.9"/>
+                                            <circle class="film-star" cx="90" cy="28" r="0.6"/>
+                                            <circle class="film-star" cx="134" cy="22" r="0.8"/>
+                                        </g>
+                                        <circle class="film-moon" cx="122" cy="26" r="7.5" fill="#f1f5f9" opacity="0.92"/>
+                                        <path class="film-mtn-scroll" d="M0,60 L30,45 L70,55 L110,40 L160,60 L190,45 L230,55 L270,40 L320,60 L320,92 L0,92 Z" fill="rgba(30,27,75,0.7)"/>
+                                        <g class="film-mid-scroll">
+                                            <polygon points="20,76 26,60 32,76" fill="rgba(49,46,129,0.55)"/>
+                                            <polygon points="55,78 63,52 71,78" fill="rgba(49,46,129,0.55)"/>
+                                            <polygon points="95,76 101,62 107,76" fill="rgba(49,46,129,0.55)"/>
+                                            <polygon points="135,77 144,55 153,77" fill="rgba(49,46,129,0.55)"/>
+                                            <path d="M0,76 Q40,73 80,76 T160,76 Q200,73 240,76 T320,76 L320,92 L0,92 Z" fill="rgba(49,46,129,0.55)"/>
+                                        </g>
+                                        <g class="film-fore-scroll">
+                                            <polygon points="40,84 52,48 64,84" fill="#090d16"/>
+                                            <polygon points="115,84 128,42 141,84" fill="#090d16"/>
+                                            <path d="M0,84 Q40,82 80,84 T160,84 L160,92 L0,92 Z" fill="#090d16"/>
+                                        </g>
+                                        <circle class="film-bounce-ball" cx="80" cy="80" r="4.5" fill="#fde047"/>
+                                    </svg>
                                 </div>
                                 <div class="player-controls">
                                     <span class="control-btn">⏸</span>
@@ -1042,15 +1147,38 @@
                                 </div>
                             </div>
                             
-                            <!-- Player B (LaptopKoala) -->
+                            <!-- Player B (🐶 HappyDog) -->
                             <div class="illus-player-card player-b">
                                 <div class="player-header">
-                                    <span class="player-user">💻 LaptopKoala</span>
+                                    <span class="player-user">🐶 HappyDog</span>
                                     <span class="player-badge active">PLAYING</span>
                                 </div>
                                 <div class="player-video-canvas">
-                                    <div class="player-play-pulse">▶</div>
                                     <div class="player-video-overlay"></div>
+                                    <svg class="demo-film" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                                        <g class="film-stars" fill="#e2e8f0">
+                                            <circle class="film-star" cx="18" cy="14" r="0.8"/>
+                                            <circle class="film-star" cx="42" cy="24" r="0.6"/>
+                                            <circle class="film-star" cx="64" cy="10" r="0.9"/>
+                                            <circle class="film-star" cx="90" cy="28" r="0.6"/>
+                                            <circle class="film-star" cx="134" cy="22" r="0.8"/>
+                                        </g>
+                                        <circle class="film-moon" cx="122" cy="26" r="7.5" fill="#f1f5f9" opacity="0.92"/>
+                                        <path class="film-mtn-scroll" d="M0,60 L30,45 L70,55 L110,40 L160,60 L190,45 L230,55 L270,40 L320,60 L320,92 L0,92 Z" fill="rgba(30,27,75,0.7)"/>
+                                        <g class="film-mid-scroll">
+                                            <polygon points="20,76 26,60 32,76" fill="rgba(49,46,129,0.55)"/>
+                                            <polygon points="55,78 63,52 71,78" fill="rgba(49,46,129,0.55)"/>
+                                            <polygon points="95,76 101,62 107,76" fill="rgba(49,46,129,0.55)"/>
+                                            <polygon points="135,77 144,55 153,77" fill="rgba(49,46,129,0.55)"/>
+                                            <path d="M0,76 Q40,73 80,76 T160,76 Q200,73 240,76 T320,76 L320,92 L0,92 Z" fill="rgba(49,46,129,0.55)"/>
+                                        </g>
+                                        <g class="film-fore-scroll">
+                                            <polygon points="40,84 52,48 64,84" fill="#090d16"/>
+                                            <polygon points="115,84 128,42 141,84" fill="#090d16"/>
+                                            <path d="M0,84 Q40,82 80,84 T160,84 L160,92 L0,92 Z" fill="#090d16"/>
+                                        </g>
+                                        <circle class="film-bounce-ball" cx="80" cy="80" r="4.5" fill="#fde047"/>
+                                    </svg>
                                 </div>
                                 <div class="player-controls">
                                     <span class="control-btn">⏸</span>
@@ -1069,7 +1197,7 @@
     </section>
 
     <!-- Self Hosters Paradise Section -->
-    <section id="self-hosting" style="background: rgba(15, 23, 42, 0.4); border-top: 1px solid var(--glass-border); border-bottom: 1px solid var(--glass-border);">
+    <section id="self-hosting" class="lazy-section">
         <div class="container">
             <h2 style="font-size: 2.5rem; text-align: center; margin-bottom: 1rem;">
                 <span>{{SELF_TITLE}}</span>
@@ -1083,7 +1211,13 @@
                 <img src="{{ASSET_PATH}}assets/KoalaDeploy-1x.webp" srcset="{{ASSET_PATH}}assets/KoalaDeploy-1x.webp 300w, {{ASSET_PATH}}assets/KoalaDeploy.webp 600w" sizes="(max-width: 768px) calc(100vw - 2rem), 300px" alt="{{SELF_MASCOT_ALT}}" class="selfhost-mascot" width="300" height="201" loading="lazy" fetchpriority="low">
             </div>
 
-            <div class="terminal-container" data-reveal>
+            <details class="section-collapse" id="selfhost-collapse">
+                <summary class="collapse-summary" data-reveal>
+                    <span class="collapse-label-show"><span>{{SELF_SHOW_SETUP}}</span></span>
+                    <span class="collapse-label-hide"><span>{{SELF_HIDE_SETUP}}</span></span>
+                    <svg class="collapse-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </summary>
+                <div class="terminal-container collapse-content">
                 <div class="terminal-header">
                     <div class="terminal-dots">
                         <span class="terminal-dot red"></span>
@@ -1185,56 +1319,65 @@
 }</code></pre>
                     </div>
                 </div>
-            </div>
+                </div>
+            </details>
         </div>
     </section>
 
-    <section id="faq" style="border-top: 1px solid var(--glass-border);">
+    <section id="faq" class="lazy-section">
         <div class="container">
+            <img src="{{ASSET_PATH}}assets/KoalaQuestions-1x.webp" srcset="{{ASSET_PATH}}assets/KoalaQuestions-1x.webp 250w, {{ASSET_PATH}}assets/KoalaQuestions.webp 355w" sizes="(max-width: 768px) calc(100vw - 2rem), 250px" alt="A cute koala holding a question mark wondering about KoalaSync" class="features-questions-mascot" width="250" height="211" loading="lazy" fetchpriority="low" data-reveal>
             <h2 data-reveal style="font-size: 2.2rem; text-align: center; margin-bottom: 1rem;">
                 <span>{{FAQ_TITLE}}</span>
             </h2>
-            <p data-reveal style="text-align: center; color: var(--text-muted); margin-bottom: 3rem; max-width: 600px; margin-left: auto; margin-right: auto;">
+            <p data-reveal style="text-align: center; color: var(--text-muted); margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto;">
                 <span>{{FAQ_SUBTITLE}}</span>
             </p>
-            <div class="faq-grid">
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q1}}</span></summary>
-                    <p><span>{{FAQ_A1}}</span></p>
-                </details>
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q_VIDEO_ACCESS}}</span></summary>
-                    <p><span>{{FAQ_A_VIDEO_ACCESS}}</span></p>
-                </details>
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q2}}</span></summary>
-                    <p><span>{{FAQ_A2}}</span></p>
-                </details>
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q3}}</span></summary>
-                    <p><span>{{FAQ_A3}}</span></p>
-                </details>
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q4}}</span></summary>
-                    <p><span>{{FAQ_A4}}</span></p>
-                </details>
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q5}}</span></summary>
-                    <p><span>{{FAQ_A5}}</span></p>
-                </details>
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q6}}</span></summary>
-                    <p><span>{{FAQ_A6}}</span></p>
-                </details>
-                <details class="faq-item" data-reveal>
-                    <summary><span>{{FAQ_Q7}}</span></summary>
-                    <p><span>{{FAQ_A7}}</span></p>
-                </details>
-            </div>
+            <details class="section-collapse faq-section-collapse" id="faq-collapse">
+                <summary class="collapse-summary" data-reveal>
+                    <span class="collapse-label-show"><span>{{FAQ_SHOW_ALL}}</span></span>
+                    <span class="collapse-label-hide"><span>{{FAQ_HIDE_ALL}}</span></span>
+                    <svg class="collapse-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </summary>
+                <div class="faq-grid collapse-content">
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q1}}</span></summary>
+                        <p><span>{{FAQ_A1}}</span></p>
+                    </details>
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q_VIDEO_ACCESS}}</span></summary>
+                        <p><span>{{FAQ_A_VIDEO_ACCESS}}</span></p>
+                    </details>
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q2}}</span></summary>
+                        <p><span>{{FAQ_A2}}</span></p>
+                    </details>
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q3}}</span></summary>
+                        <p><span>{{FAQ_A3}}</span></p>
+                    </details>
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q4}}</span></summary>
+                        <p><span>{{FAQ_A4}}</span></p>
+                    </details>
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q5}}</span></summary>
+                        <p><span>{{FAQ_A5}}</span></p>
+                    </details>
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q6}}</span></summary>
+                        <p><span>{{FAQ_A6}}</span></p>
+                    </details>
+                    <details class="faq-item">
+                        <summary><span>{{FAQ_Q7}}</span></summary>
+                        <p><span>{{FAQ_A7}}</span></p>
+                    </details>
+                </div>
+            </details>
         </div>
     </section>
 
-    <section style="text-align: center; border-top: 1px solid var(--glass-border); padding: 6rem 0 2rem 0;">
+    <section style="text-align: center; padding: 6rem 0 2rem 0;">
         <div class="container">
             <h2 data-reveal style="font-size: 2.2rem; margin-bottom: 1rem;">
                 <span>{{BOTTOM_TITLE}}</span>
@@ -1275,7 +1418,7 @@
                 <a href="{{ASSET_PATH}}{{FOOTER_LEGAL_LINK}}" style="color: var(--text-muted); text-decoration: none;"><span>{{FOOTER_LEGAL}}</span></a>
                 <a href="{{ASSET_PATH}}{{FOOTER_PRIVACY_LINK}}" style="color: var(--text-muted); text-decoration: none;"><span>{{FOOTER_PRIVACY}}</span></a>
                 <a href="{{ASSET_PATH}}{{LANG_PREFIX}}alternatives"><span><span lang="en">Guides & comparisons</span><span lang="de">Vergleiche & Anleitungen</span></span></a>
-                <a href="https://support.koalastuff.net" target="_blank" rel="noopener" title="{{FOOTER_SUPPORT}}" style="color: #fff; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; background: #ff5e5b; border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 3px 9px; font-size: 0.72rem; font-weight: 700; line-height: 1;">
+                <a href="https://support.koalastuff.net" target="_blank" rel="noopener" title="{{FOOTER_SUPPORT}}" style="color: #fff; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; background: #c9302c; border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 3px 9px; font-size: 0.72rem; font-weight: 700; line-height: 1;">
                     <span aria-hidden="true">♥</span>
                     <span>{{FOOTER_SUPPORT}}</span>
                 </a>

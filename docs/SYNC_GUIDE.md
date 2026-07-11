@@ -10,8 +10,9 @@ You MUST run the build script in any of the following scenarios:
 1. **After a fresh `git clone` or `git pull`** (as the synced files are ignored by git).
 2. **After modifying** `shared/constants.js`.
 3. **After modifying** `shared/blacklist.js`.
-4. **Before committing** changes to the repository if any protocol-related files were touched.
-5. **Before deploying** the server or releasing the extension.
+4. **After modifying** `shared/names.js`.
+5. **Before committing** changes to the repository if any shared protocol or extension-mirrored files were touched.
+6. **Before deploying** the server or releasing the extension.
 
 ## How to sync
 
@@ -24,10 +25,11 @@ npm run build:extension
 
 ## What does it do?
 The build script performs the following actions:
-1. Synchronizes protocol constants by copying `shared/constants.js`, `shared/blacklist.js`, and `shared/README.md` into `extension/shared/`.
+1. Synchronizes shared files by copying `shared/constants.js`, `shared/blacklist.js`, `shared/names.js`, and `shared/README.md` into `extension/shared/`.
 2. Injects `EVENTS`, `HEARTBEAT_INTERVAL`, and `episode-utils.js` functions (`extractEpisodeId`, `sameEpisode`) into `content.js` via marker-based replacement.
-3. Compiles browser-specific manifest files.
-4. Packages the final ready-to-publish extension artifacts for Chrome and Firefox into the `dist/` directory.
+3. Injects browser-specific uninstall URL constants into `background.js` and a build timestamp into `popup.html`.
+4. Compiles browser-specific manifest files.
+5. Packages the final ready-to-publish extension artifacts for Chrome and Firefox into the `dist/` directory.
 
 ## Protocol Versioning
 The system enforces a strict `protocolVersion` check during the `JOIN_ROOM` handshake. 

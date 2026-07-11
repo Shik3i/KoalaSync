@@ -1,0 +1,39 @@
+# KoalaSync
+
+> Watch Netflix, YouTube, Twitch & any HTML5 video in perfect sync with friends. Free, open-source browser extension for Chrome and Firefox. No sign-up needed.
+
+KoalaSync is a privacy-first peer-to-peer video synchronization tool. It uses WebRTC for direct connections between peers — no video data ever passes through a server. The relay server is only used for signaling and optional room-based coordination. Self-hostable, MIT licensed.
+
+## Features
+
+- [Sync any HTML5 video](https://sync.koalastuff.net/): Works with Netflix, Emby, Jellyfin, YouTube, Twitch, Amazon Prime Video, Disney+, Crunchyroll, HBO Max and more
+- [Host & co-host controls](https://sync.koalastuff.net/#features): Synchronized play, pause, seek, host control mode, co-host roles
+- [Privacy-first](https://sync.koalastuff.net/#features): No accounts, no tracking, no data collection, peer-to-peer by design
+- [Available in 15 languages](https://sync.koalastuff.net/): English, Deutsch, Français, Español, Português, Italiano, Nederlands, Polski, Türkçe, Русский, 日本語, 한국어, 中文, Українська
+
+## Download
+
+- [Chrome Web Store](https://chromewebstore.google.com/detail/koalasync/obbnmkmlaaddodakcbdljknjpagklifc): Install KoalaSync for Chrome, Edge, and other Chromium-based browsers
+- [Firefox Add-ons](https://addons.mozilla.org/de/firefox/addon/koalasync/): Install KoalaSync for Firefox
+- [GitHub Releases](https://github.com/Shik3i/KoalaSync/releases): Manual download and release notes
+
+## Technical
+
+- [Source code](https://github.com/Shik3i/KoalaSync): Full MIT-licensed source on GitHub (extension, server, website)
+- [Changelog](https://github.com/Shik3i/KoalaSync/blob/main/docs/CHANGELOG.md): Version history and release notes
+- [Self-hosting guide](https://sync.koalastuff.net/#self-hosting): Run your own relay server
+- [Server](https://sync.koalastuff.net/): Node.js WebSocket relay, port 54000
+
+## Optional
+
+- [Alternatives hub](https://sync.koalastuff.net/alternatives/): Overview of watch party guide and comparisons
+  - [Teleparty alternative guide](https://sync.koalastuff.net/alternatives/teleparty): Comparison with Teleparty / Netflix Party
+  - [Watch2Gether alternative guide](https://sync.koalastuff.net/alternatives/watch2gether): Comparison with Watch2Gether
+  - [Scener alternative guide](https://sync.koalastuff.net/alternatives/scener): Comparison with Scener
+  - [Kosmi alternative guide](https://sync.koalastuff.net/alternatives/kosmi): Comparison with Kosmi
+  - [TwoSeven alternative guide](https://sync.koalastuff.net/alternatives/twoseven): Comparison with TwoSeven
+  - [Screen sharing guide](https://sync.koalastuff.net/alternatives/screen-sharing): Guide on browser-based screen sharing
+- [Privacy policy](https://sync.koalastuff.net/privacy.html): Data handling and privacy information
+- [Imprint](https://sync.koalastuff.net/imprint.html): Legal notice
+- [Sitemap](https://sync.koalastuff.net/sitemap.xml): Full site index
+- [Join a room](https://sync.koalastuff.net/join.html): Direct room join page
