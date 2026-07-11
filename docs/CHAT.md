@@ -11,6 +11,10 @@ Der Chat ermöglicht es Room-Mitgliedern, Textnachrichten auszutauschen, ohne di
 **Status:** MVP (seit v2.6.0)  
 **Privacy:** RAM-only, keine Persistenz
 
+Der Relay kündigt Chat-Unterstützung über die Capability `chat` in `room_data`
+an. `CHAT_HISTORY_LIMIT` legt die RAM-Historie pro Raum fest (Standard: 100,
+Maximum: 500); der Wert `0` deaktiviert Chat und die Capability vollständig.
+
 ---
 
 ## Features

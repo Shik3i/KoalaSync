@@ -6,6 +6,7 @@ import {
   createChatMessage,
   isPeerInRoom,
   normalizeMessageId,
+  parseChatHistoryLimit,
   sanitizeChatText,
   sanitizeChatUsername
 } from './chat.js';
@@ -80,5 +81,14 @@ describe('server chat policy', () => {
     expect(canKickPeer(room, 'controller', 'host')).toBe(false);
     room.controllers.add('controller-2');
     expect(canKickPeer(room, 'controller', 'controller-2')).toBe(false);
+  });
+
+  it('normalizes configurable chat history limits from 0 through 500', () => {
+    expect(parseChatHistoryLimit(undefined)).toBe(100);
+    expect(parseChatHistoryLimit('0')).toBe(0);
+    expect(parseChatHistoryLimit('250')).toBe(250);
+    expect(parseChatHistoryLimit('999')).toBe(500);
+    expect(parseChatHistoryLimit('-1')).toBe(0);
+    expect(parseChatHistoryLimit('invalid')).toBe(100);
   });
 });

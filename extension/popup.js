@@ -1,4 +1,4 @@
-import { EVENTS, OFFICIAL_LANDING_PAGE_URL, SUPPORT_URL, getReviewUrl } from './shared/constants.js';
+import { EVENTS, CAPABILITIES, OFFICIAL_LANDING_PAGE_URL, SUPPORT_URL, getReviewUrl } from './shared/constants.js';
 import { BLACKLIST_DOMAINS } from './shared/blacklist.js';
 import { getAvatarForName, generateUsername, USERNAME_ADJECTIVES, USERNAME_NOUNS } from './shared/names.js';
 import { loadLocale, translateDOM, getMessage, getSystemLanguage } from './i18n.js';
@@ -284,6 +284,7 @@ async function init() {
         }
         if (res) {
             localPeerId = res.peerId;
+            updateChatSupport(res.chatSupported);
             reconnectSlowMode = res.reconnectSlowMode || false;
             applyConnectionStatus(res.status);
             updatePingDisplay(res.ping);
@@ -2731,6 +2732,7 @@ elements.restartTourBtn?.addEventListener('click', () => {
 });
 
 function emitTyping(isTyping) {
+    if (!chatSupported) return;
     chrome.runtime.sendMessage({
         type: 'CHAT_TYPING',
         payload: { username: elements.username?.value || null, isTyping }
@@ -2739,9 +2741,25 @@ function emitTyping(isTyping) {
 
 const typingTracker = createTypingTracker({ emit: emitTyping, timeoutMs: 1500 });
 
+let chatSupported = false;
+
+function updateChatSupport(supported) {
+    chatSupported = supported === true;
+    if (elements.chatInput) elements.chatInput.disabled = !chatSupported;
+    if (elements.sendBtn) elements.sendBtn.disabled = !chatSupported;
+    if (elements.emojiBtn) elements.emojiBtn.disabled = !chatSupported;
+    if (!chatSupported) {
+        typingTracker.stop();
+        if (elements.emojiPalette) elements.emojiPalette.hidden = true;
+        if (elements.chatTypingIndicator) elements.chatTypingIndicator.textContent = 'Chat unavailable on this server';
+    } else if (elements.chatTypingIndicator?.textContent === 'Chat unavailable on this server') {
+        elements.chatTypingIndicator.textContent = '';
+    }
+}
+
 function sendChatMessage() {
     const text = elements.chatInput?.value?.trim();
-    if (!text || !localPeerId) return;
+    if (!chatSupported || !text || !localPeerId) return;
     const message = {
         id: globalThis.crypto.randomUUID(),
         senderId: localPeerId,
@@ -2883,6 +2901,7 @@ initChatEventListeners();
 
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'ROOM_DATA') {
+        updateChatSupport(Array.isArray(msg.data?.capabilities) && msg.data.capabilities.includes(CAPABILITIES.CHAT));
         renderChatHistory(msg.data?.chatHistory, msg.data?.roomId);
     } else if (msg.type === 'CHAT_MESSAGE_RECEIVED') {
         const isOwn = msg.payload.senderId === localPeerId;

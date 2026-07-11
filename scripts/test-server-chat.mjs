@@ -90,7 +90,8 @@ try {
   const roomId = `chat-${Date.now()}`;
   const alice = await connect();
   const bob = await connect();
-  await join(alice, roomId, 'alice-id', 'Alice');
+  const aliceRoomData = await join(alice, roomId, 'alice-id', 'Alice');
+  assert.ok(aliceRoomData.capabilities.includes('chat'), 'relay advertises explicit chat capability');
   await join(bob, roomId, 'bob-id', 'Bob');
   alice.messages.length = bob.messages.length = 0;
 

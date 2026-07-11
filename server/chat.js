@@ -2,6 +2,13 @@ import { randomUUID } from 'node:crypto';
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/;
 
+export function parseChatHistoryLimit(value, fallback = 100) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(500, Math.max(0, parsed));
+}
+
 function limitCodePoints(value, limit) {
   return [...value].slice(0, limit).join('');
 }

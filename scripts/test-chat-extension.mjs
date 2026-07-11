@@ -9,6 +9,8 @@ const background = fs.readFileSync(path.join(root, 'extension/background.js'), '
 const html = fs.readFileSync(path.join(root, 'extension/popup.html'), 'utf8');
 
 assert.match(popup, /from '\.\/chat\.js'/, 'popup imports the safe chat module');
+assert.match(popup, /updateChatSupport\(res\.chatSupported\)/, 'popup applies chat capability from status');
+assert.match(popup, /CAPABILITIES\.CHAT/, 'popup recognizes the shared chat capability');
 assert.match(popup, /msg\.type === 'ROOM_DATA'[\s\S]*chatHistory/, 'popup renders room chat history');
 assert.match(popup, /function renderChatHistory[\s\S]*sendReadReceipt/, 'visible remote history sends receipts');
 assert.match(popup, /res\.chatHistory/, 'popup restores history when opened after joining');
@@ -25,6 +27,7 @@ assert.match(background, /payload:\s*\{[\s\S]*?id:\s*data\.id,[\s\S]*?senderId:/
   'background preserves inbound message IDs');
 assert.match(background, /case EVENTS\.CHAT_SYSTEM:[\s\S]*data\.text/, 'background uses canonical system text');
 assert.match(background, /GET_STATUS'[\s\S]*chatHistory:\s*currentRoom/, 'status exposes in-memory chat history');
+assert.match(background, /chatSupported:\s*serverSupports\(CAPABILITIES\.CHAT\)/, 'status exposes negotiated chat capability');
 assert.match(background, /case EVENTS\.CHAT_MESSAGE:[\s\S]*currentRoom\.chatHistory/, 'background keeps status history current');
 
 assert.match(html, /id="emoji-palette"/, 'popup contains a real emoji palette');

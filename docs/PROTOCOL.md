@@ -69,9 +69,14 @@ Payload:
   "hostPeerId": "string or null",
   "controlMode": "everyone | host-only",
   "controllers": ["peerId"],
-  "capabilities": ["host-control", "co-host"]
+  "capabilities": ["host-control", "co-host", "chat"],
+  "chatHistory": ["canonical chat message objects"]
 }
 ```
+
+`chat` wird nur angekündigt, wenn Chat serverseitig aktiviert ist. Der Relay
+hält standardmäßig die letzten 100 Nachrichten je Raum ausschließlich im RAM;
+`CHAT_HISTORY_LIMIT=0` deaktiviert die Chat-Events und entfernt die Capability.
 
 `room_data` is sent to the joining socket. It is not the general broadcast used
 for every later room update.

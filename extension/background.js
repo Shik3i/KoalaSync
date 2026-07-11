@@ -2036,6 +2036,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             peerId, 
             peers: currentRoom ? currentRoom.peers : [],
             chatHistory: currentRoom?.chatHistory || [],
+            chatSupported: serverSupports(CAPABILITIES.CHAT),
             lastActionState,
             targetTabId: currentTabId,
             episodeLobby: episodeLobby,

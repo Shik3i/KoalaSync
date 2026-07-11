@@ -45,6 +45,7 @@ import {
     canRelayReadReceipt,
     createChatMessage,
     isPeerInRoom,
+    parseChatHistoryLimit,
     sanitizeChatUsername
 } from './chat.js';
 
@@ -187,7 +188,13 @@ const HOST_ONLY_GATED_EVENTS = new Set([
 // Features this relay supports, advertised to clients in ROOM_DATA so they can
 // enable matching UI/behavior only when the server actually backs it. Append a
 // flag here when a new server-gated feature ships (e.g. co-host promotion).
-const SERVER_CAPABILITIES = [CAPABILITIES.HOST_CONTROL, CAPABILITIES.CO_HOST];
+const CHAT_HISTORY_LIMIT = parseChatHistoryLimit(process.env.CHAT_HISTORY_LIMIT);
+const CHAT_ENABLED = CHAT_HISTORY_LIMIT > 0;
+const SERVER_CAPABILITIES = [
+    CAPABILITIES.HOST_CONTROL,
+    CAPABILITIES.CO_HOST,
+    ...(CHAT_ENABLED ? [CAPABILITIES.CHAT] : [])
+];
 
 // M-4: minimum interval between CONTROL_MODE changes per room. Stops a rapidly
 // toggling host from thrashing every guest's UI (locked/unlocked/locked...) and
@@ -866,6 +873,7 @@ io.on('connection', (socket) => {
     // Chat Event Handlers
     socket.on(EVENTS.CHAT_MESSAGE, (data) => {
         try {
+            if (!CHAT_ENABLED) return;
             if (!checkEventRate(socket.id) || !checkChatMessageRate(socket.id)) {
                 log('SECURITY', `Event rate limit exceeded for socket (CHAT_MESSAGE): ${socket.id}`);
                 socket.disconnect(true);
@@ -885,7 +893,7 @@ io.on('connection', (socket) => {
             if (!relayPayload) return;
             
             // Store message in chat history
-            appendChatHistory(room.chatHistory, relayPayload);
+            appendChatHistory(room.chatHistory, relayPayload, CHAT_HISTORY_LIMIT);
             room.lastActivity = Date.now();
             
             // Broadcast canonical server-confirmed message to every peer, including sender.
@@ -897,6 +905,7 @@ io.on('connection', (socket) => {
 
     socket.on(EVENTS.CHAT_TYPING, (data) => {
         try {
+            if (!CHAT_ENABLED) return;
             if (!checkEventRate(socket.id)) {
                 log('SECURITY', `Event rate limit exceeded for socket (CHAT_TYPING): ${socket.id}`);
                 socket.disconnect(true);
@@ -925,6 +934,7 @@ io.on('connection', (socket) => {
 
     socket.on(EVENTS.CHAT_READ, (data) => {
         try {
+            if (!CHAT_ENABLED) return;
             if (!checkChatReadRate(socket.id)) {
                 socket.disconnect(true);
                 return;
@@ -954,6 +964,7 @@ io.on('connection', (socket) => {
 
     socket.on(EVENTS.CHAT_KICK, (data) => {
         try {
+            if (!CHAT_ENABLED) return;
             if (!checkEventRate(socket.id)) {
                 log('SECURITY', `Event rate limit exceeded for socket (CHAT_KICK): ${socket.id}`);
                 socket.disconnect(true);

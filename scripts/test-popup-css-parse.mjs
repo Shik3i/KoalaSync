@@ -27,8 +27,8 @@ assert.equal(
 );
 assert.match(
   popupCss,
-  /\.chat-container\s*\{[^}]*max-height:\s*240px/s,
-  'chat container should be bounded to 240px inside the popup'
+  /\.chat-container\s*\{[^}]*height:\s*340px[^}]*max-height:\s*calc\(100vh\s*-\s*140px\)[^}]*min-height:\s*280px/s,
+  'chat container should target 340px while remaining bounded by the popup viewport'
 );
 assert.match(
   popupCss,
