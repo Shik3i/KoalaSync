@@ -4,6 +4,7 @@ export const MEDIA_INTENT_KIND = 'media-intent';
 export const MAX_LOGICAL_QUEUE_SIZE = 50;
 
 const MEDIA_EVENTS = new Set([EVENTS.PLAY, EVENTS.PAUSE, EVENTS.SEEK]);
+const KNOWN_EVENTS = new Set(Object.values(EVENTS));
 const STALE_OFFLINE_EVENTS = new Set([EVENTS.PING, EVENTS.PONG, EVENTS.PEER_STATUS, EVENTS.EVENT_ACK]);
 const FORCE_SYNC_EVENTS = new Set([EVENTS.FORCE_SYNC_PREPARE, EVENTS.FORCE_SYNC_EXECUTE]);
 const HOST_GATED_EVENTS = new Set([
@@ -49,6 +50,22 @@ function trimQueue(queue, maxEntries) {
     const trimmed = queue.slice();
     let dropped = 0;
     while (trimmed.length > maxEntries) {
+        if (trimmed[0]?.event === EVENTS.FORCE_SYNC_PREPARE) {
+            const executeIndex = trimmed.findIndex(entry => entry?.event === EVENTS.FORCE_SYNC_EXECUTE);
+            if (executeIndex >= 0) {
+                trimmed.splice(0, executeIndex + 1);
+                dropped += executeIndex + 1;
+                continue;
+            }
+            // Preserve an incomplete oldest Force Sync transaction. Evict the
+            // next-oldest work until EXECUTE arrives, at which point the whole
+            // transaction can be evicted atomically if pressure continues.
+            if (trimmed.length > 1) {
+                trimmed.splice(1, 1);
+                dropped++;
+                continue;
+            }
+        }
         trimmed.shift();
         dropped++;
     }
@@ -127,8 +144,16 @@ export function enqueueQueuedEvent(queue, event, data, {
     if (STALE_OFFLINE_EVENTS.has(event)) {
         return { queue: next, collapsed: 0, dropped: 0, droppedStale: 1 };
     }
+    if (!KNOWN_EVENTS.has(event)) {
+        return { queue: next, collapsed: 0, dropped: 0, droppedStale: 1 };
+    }
     if (!isMediaQueueEvent(event)) {
-        next.push({ event, data });
+        next.push({
+            kind: 'event',
+            roomId: typeof roomId === 'string' && roomId ? roomId : null,
+            event,
+            data
+        });
     } else if (typeof roomId === 'string' && roomId) {
         const last = next.at(-1);
         const hasMergeTarget = isQueuedMediaIntent(last) && last.roomId === roomId;
@@ -177,23 +202,71 @@ function normalizeIntentEntry(entry, roomId) {
     };
 }
 
+function repairIntentSequences(entry, minimumSequence) {
+    const repaired = {
+        ...entry,
+        intent: { ...entry.intent }
+    };
+    const hasState = repaired.intent.playbackState !== null;
+    const hasPosition = repaired.intent.currentTime !== null;
+    const previousSeq = validSequence(repaired.intent.previousSeq);
+    const latestSeq = validSequence(repaired.intent.latestSeq);
+    if (hasState && hasPosition) {
+        if (latestSeq === null) {
+            repaired.intent.previousSeq = null;
+            repaired.intent.latestSeq = minimumSequence + 1;
+        } else if (latestSeq <= minimumSequence) {
+            if (previousSeq === null) {
+                repaired.intent.previousSeq = null;
+                repaired.intent.latestSeq = minimumSequence + 1;
+            } else {
+                repaired.intent.previousSeq = minimumSequence + 1;
+                repaired.intent.latestSeq = minimumSequence + 2;
+            }
+        } else if (previousSeq !== null
+            && (previousSeq >= latestSeq || previousSeq <= minimumSequence)) {
+            repaired.intent.previousSeq = minimumSequence + 1;
+            repaired.intent.latestSeq = Math.max(latestSeq, minimumSequence + 2);
+        }
+    } else if (latestSeq === null || latestSeq <= minimumSequence) {
+        repaired.intent.previousSeq = null;
+        repaired.intent.latestSeq = minimumSequence + 1;
+    }
+    return repaired;
+}
+
 export function normalizePersistedEventQueue(value, roomId, maxEntries = MAX_LOGICAL_QUEUE_SIZE) {
     if (!Array.isArray(value) || typeof roomId !== 'string' || !roomId) return [];
     let normalized = [];
+    let maximumSequence = 0;
     for (const entry of value) {
         if (isQueuedMediaIntent(entry)) {
-            const intentEntry = normalizeIntentEntry(entry, roomId);
-            if (intentEntry) normalized.push(intentEntry);
+            let intentEntry = normalizeIntentEntry(entry, roomId);
+            if (intentEntry) {
+                intentEntry = repairIntentSequences(intentEntry, maximumSequence);
+                normalized.push(intentEntry);
+                maximumSequence = Math.max(maximumSequence, maxQueuedSequence([intentEntry]));
+            }
             continue;
         }
         if (!entry || typeof entry !== 'object' || typeof entry.event !== 'string') continue;
+        if (!KNOWN_EVENTS.has(entry.event)) continue;
+        if (typeof entry.roomId === 'string' && entry.roomId && entry.roomId !== roomId) continue;
         if (STALE_OFFLINE_EVENTS.has(entry.event)) continue;
+        const data = entry.data && typeof entry.data === 'object' ? { ...entry.data } : entry.data;
+        const queuedSequence = validSequence(data?.seq);
+        if (data && typeof data === 'object'
+            && ((isMediaQueueEvent(entry.event) && queuedSequence === null)
+                || (queuedSequence !== null && queuedSequence <= maximumSequence))) {
+            data.seq = maximumSequence + 1;
+        }
         if (isMediaQueueEvent(entry.event)) {
-            normalized = enqueueQueuedEvent(normalized, entry.event, entry.data, { roomId, maxEntries }).queue;
+            normalized = enqueueQueuedEvent(normalized, entry.event, data, { roomId, maxEntries }).queue;
         } else {
-            normalized.push({ event: entry.event, data: entry.data });
+            normalized.push({ kind: 'event', roomId, event: entry.event, data });
         }
         normalized = trimQueue(normalized, maxEntries).queue;
+        maximumSequence = Math.max(maximumSequence, maxQueuedSequence(normalized));
     }
     return normalized;
 }
@@ -229,10 +302,10 @@ export function reserveLatestMediaIntentSequence(queue, roomId, nextSequence) {
     return { queue: next, reserved: true };
 }
 
-function frameData(intent, seq) {
+function frameData(intent, seq, includeActionTimestamp = true) {
     const data = {};
     if (seq !== null) data.seq = seq;
-    if (intent.actionTimestamp !== null) data.actionTimestamp = intent.actionTimestamp;
+    if (includeActionTimestamp && intent.actionTimestamp !== null) data.actionTimestamp = intent.actionTimestamp;
     if (intent.mediaTitle !== null) data.mediaTitle = intent.mediaTitle;
     return data;
 }
@@ -259,11 +332,11 @@ export function materializeMediaIntent(entry) {
     }
     if (playbackState === null || currentTime === null) return [];
 
-    // Both materialized frames carry the latest genuine action timestamp: it is
-    // correlation metadata for existing ACK/activity paths, not scheduled wall
-    // time. A previous-format single PLAY/PAUSE has only one reserved sequence. Keep
+    // A previous-format single PLAY/PAUSE has only one reserved sequence. Keep
     // its original one-frame behavior during migration rather than inventing a
-    // sequence that could overtake a later transactional barrier.
+    // sequence that could overtake a later transactional barrier. In a current
+    // two-frame intent, only the logical final frame carries actionTimestamp so
+    // its helper frame cannot falsely acknowledge the final user action.
     if (previousSeq === null || latestSeq === null || previousSeq >= latestSeq) {
         if (intent.latestEvent === EVENTS.SEEK) {
             return [{
@@ -279,11 +352,26 @@ export function materializeMediaIntent(entry) {
 
     const seekFrame = {
         event: EVENTS.SEEK,
-        data: { ...frameData(intent, intent.latestEvent === EVENTS.SEEK ? latestSeq : previousSeq), currentTime, targetTime: currentTime }
+        data: {
+            ...frameData(
+                intent,
+                intent.latestEvent === EVENTS.SEEK ? latestSeq : previousSeq,
+                intent.latestEvent === EVENTS.SEEK
+            ),
+            currentTime,
+            targetTime: currentTime
+        }
     };
     const stateFrame = {
         event: stateEvent,
-        data: { ...frameData(intent, intent.latestEvent === EVENTS.SEEK ? previousSeq : latestSeq), currentTime }
+        data: {
+            ...frameData(
+                intent,
+                intent.latestEvent === EVENTS.SEEK ? previousSeq : latestSeq,
+                intent.latestEvent !== EVENTS.SEEK
+            ),
+            currentTime
+        }
     };
     return intent.latestEvent === EVENTS.SEEK
         ? [stateFrame, seekFrame]
@@ -320,13 +408,18 @@ export function reconcileQueuedRoomIntent(queue, {
     roomId,
     canControl = true,
     activeLobby = false,
-    desynced = false
+    desynced = false,
+    authoritativeLobby = false
 } = {}) {
     const source = Array.isArray(queue) ? queue : [];
     const blockedEvents = !canControl
         ? HOST_GATED_EVENTS
-        : (activeLobby || desynced ? FORCE_SYNC_EVENTS : null);
+        : new Set([
+            ...(activeLobby || desynced ? FORCE_SYNC_EVENTS : []),
+            ...(authoritativeLobby ? [EVENTS.EPISODE_LOBBY, EVENTS.EPISODE_READY, EVENTS.EPISODE_LOBBY_CANCEL] : [])
+        ]);
     const reconciled = source.filter(entry => {
+        if (entry?.roomId && entry.roomId !== roomId) return false;
         if (isQueuedMediaIntent(entry) && entry.roomId === roomId) {
             return canControl && !activeLobby && !desynced;
         }
@@ -366,7 +459,7 @@ export async function drainQueuedBatch(queue, {
 
     while (remaining.length > 0) {
         const entry = remaining[0];
-        if (isQueuedMediaIntent(entry) && entry.roomId !== roomId) {
+        if (entry?.roomId && entry.roomId !== roomId) {
             remaining.shift();
             droppedStaleIntents++;
             continue;

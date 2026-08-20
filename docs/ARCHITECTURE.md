@@ -45,11 +45,13 @@ the room/revision, respects Host Control solo mode and Episode Lobby, then sends
 internal `APPLY_CANONICAL_MEDIA_STATE` message to the existing content/video path.
 That path reuses frame election, Netflix/Disney page-API seeks, native play/pause,
 the 2-second drift tolerance, and programmatic-event suppression. The apply is
-one-shot recovery: it creates no action history, notification, command ACK, or
-relay media event.
+one-shot recovery: a pending playing snapshot advances from its local receipt
+time while waiting for a target, and the apply creates no action history,
+notification, command ACK, or relay media event.
 
-Force Sync remains a two-phase ACK protocol. `PREPARE` is temporary choreography;
-the matching `EXECUTE` commits its validated target to canonical state. Per-sender
+Force Sync remains a two-phase ACK protocol. A valid `PREPARE` is temporary
+room-wide choreography; the next authorized `EXECUTE` commits the latest target
+visible to peers to canonical state. Per-sender
 `seq`, peer heartbeats, and the reconnect queue remain separate mechanisms.
 
 ## 3.2 Offline Media Intent

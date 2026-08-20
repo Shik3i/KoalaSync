@@ -286,10 +286,10 @@ function removePeerFromRoom(socketId, roomId, reason) {
     if (peerGone && room.controllers && room.peers.size > 0) {
         const wasController = room.controllers.has(peerId);
         room.controllers.delete(peerId);
-        // H-1: a leaving initiator strands the room's force-sync — release the
-        // slot so a future controller's PREPARE can take over cleanly.
+        // Release the post-demotion exemption, but retain the validated target:
+        // an authorized initiator may reconnect and finish the already-visible
+        // choreography. A newer PREPARE still replaces it normally.
         if (room.forceSyncInitiator === peerId) room.forceSyncInitiator = null;
-        if (room.forceSyncTarget?.initiatorPeerId === peerId) room.forceSyncTarget = null;
         if (room.hostPeerId === peerId) {
             // Owner left → reassign owner + fall back to 'everyone' so the room is
             // never stuck locked, and reset the controller set to just the new owner.
@@ -596,15 +596,10 @@ io.on('connection', (socket) => {
                     // a controller (the owner + any promoted co-hosts). Robust chokepoint:
                     // independent of client behavior, kills spam. Heartbeats/ACKs pass.
                     //
-                    // H-1 exception: a demoted co-host's FORCE_SYNC_EXECUTE still has to
-                    // land — otherwise their already-relayed PREPARE would leave the whole
-                    // room stuck paused. Track the in-flight initiator on PREPARE and let
-                    // their matching EXECUTE through regardless of current controllers set.
-                    if (eventName === EVENTS.FORCE_SYNC_PREPARE &&
-                        room.controlMode === CONTROL_MODES.HOST_ONLY &&
-                        room.controllers && room.controllers.has(mapping.peerId)) {
-                        room.forceSyncInitiator = mapping.peerId;
-                    }
+                    // H-1 exception: the latest valid PREPARE initiator's
+                    // FORCE_SYNC_EXECUTE still has to land after demotion —
+                    // otherwise the already-relayed room-wide choreography
+                    // would leave peers paused.
                     const isOwnForceSyncExecute = eventName === EVENTS.FORCE_SYNC_EXECUTE &&
                         room.forceSyncInitiator && mapping.peerId === room.forceSyncInitiator;
                     if (!isOwnForceSyncExecute &&
@@ -614,11 +609,6 @@ io.on('connection', (socket) => {
                         log('ROOM', `Dropped ${eventName} from guest ${mapping.peerId} in host-only room ${mapping.roomId.substring(0, 3)}***`);
                         return;
                     }
-                    // Clear initiator tracking once the EXECUTE has been relayed.
-                    if (eventName === EVENTS.FORCE_SYNC_EXECUTE && room.forceSyncInitiator) {
-                        room.forceSyncInitiator = null;
-                    }
-
                     // --- S-2 & S-3: Sanitize ALL relay fields (strings, numbers, booleans) ---
                     const clamp    = (val, max) => typeof val === 'string' ? val.substring(0, max) : undefined;
                     const clampNum = (val, min, max) => typeof val === 'number' && Number.isFinite(val) ? Math.max(min, Math.min(max, val)) : undefined;
@@ -661,6 +651,23 @@ io.on('connection', (socket) => {
                     // Strip undefined keys for clean wire format
                     Object.keys(relayPayload).forEach(k => relayPayload[k] === undefined && delete relayPayload[k]);
 
+                    if (eventName === EVENTS.FORCE_SYNC_EXECUTE && !room.forceSyncTarget) {
+                        log('ROOM', `Dropped force_sync_execute without a prepared target from ${mapping.peerId}`);
+                        room.forceSyncInitiator = null;
+                        return;
+                    }
+                    if (eventName === EVENTS.PLAY
+                        || eventName === EVENTS.PAUSE
+                        || eventName === EVENTS.SEEK
+                        || eventName === EVENTS.EPISODE_LOBBY
+                        || eventName === EVENTS.EPISODE_LOBBY_CANCEL) {
+                        // A later room-driving action supersedes unfinished Force
+                        // Sync choreography. Do not let a delayed EXECUTE commit
+                        // an obsolete target after peers have moved elsewhere.
+                        room.forceSyncInitiator = null;
+                        room.forceSyncTarget = null;
+                    }
+
                     // Canonical Media State v1: mutate only after rate limiting,
                     // room mapping, Host Control authorization and sanitization.
                     // Heartbeats remain observational and never enter this path.
@@ -670,12 +677,25 @@ io.on('connection', (socket) => {
                         senderPlaybackState: existing.playbackState
                     });
                     if (eventName === EVENTS.FORCE_SYNC_PREPARE) {
-                        room.forceSyncTarget = Number.isFinite(relayPayload.targetTime)
-                            ? { initiatorPeerId: mapping.peerId, targetTime: relayPayload.targetTime }
-                            : null;
+                        // A malformed PREPARE must neither pause peers nor grant
+                        // the initiator a later Host Control EXECUTE exemption.
+                        if (!Number.isFinite(relayPayload.targetTime)) {
+                            log('ROOM', `Dropped invalid force_sync_prepare from ${mapping.peerId}`);
+                            return;
+                        }
+                        // One room-wide choreography is visible on the legacy
+                        // wire. A newer PREPARE replaces the target every peer
+                        // most recently received. Track its initiator in every
+                        // control mode so an everyone -> host-only transition
+                        // cannot strand that already-authorized transaction.
+                        room.forceSyncInitiator = mapping.peerId;
+                        room.forceSyncTarget = {
+                            initiatorPeerId: mapping.peerId,
+                            targetTime: relayPayload.targetTime
+                        };
                     } else if (eventName === EVENTS.FORCE_SYNC_EXECUTE) {
                         const forceSyncTarget = room.forceSyncTarget;
-                        if (forceSyncTarget?.initiatorPeerId === mapping.peerId) {
+                        if (forceSyncTarget) {
                             commitForceSyncMediaState(
                                 room,
                                 forceSyncTarget.targetTime,
@@ -683,6 +703,7 @@ io.on('connection', (socket) => {
                                 mediaStateNow
                             );
                         }
+                        room.forceSyncInitiator = null;
                         room.forceSyncTarget = null;
                     }
 

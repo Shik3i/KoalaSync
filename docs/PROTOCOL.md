@@ -119,8 +119,10 @@ Only accepted, sanitized room controls update canonical state:
 - `pause` uses its valid `currentTime`, or freezes an existing effective position.
 - `seek` prefers `targetTime` (with `currentTime` compatibility) and preserves the
   established playback state.
-- `force_sync_prepare` records only temporary coordination state. Its matching
-  `force_sync_execute` commits the prepared target as playing.
+- a valid `force_sync_prepare` records only temporary coordination state. The
+  next authorized `force_sync_execute` commits the latest room-wide prepared
+  target as playing. The latest valid prepare is also the only post-demotion
+  execute exemption in Host Control mode.
 
 `peer_status` heartbeats are observations and never rewrite canonical intent.
 Per-sender `seq` still orders commands from one sender; canonical `revision`
@@ -130,7 +132,8 @@ On join/reconnect, a capable extension applies a valid snapshot once through an
 extension-internal recovery message. Existing seek/page-API and native-event
 suppression prevent `play`, `pause`, or `seek` echoes. Pending recovery is scoped
 to the room/revision in `chrome.storage.session`, waits for the selected media
-target lifecycle, and is cleared on leave/switch. Intentional host-only guest
+target lifecycle, and projects a still-playing snapshot from its local receipt
+time before a delayed apply. It is cleared on leave/switch. Intentional host-only guest
 desync and an active Episode Lobby take precedence over snapshot recovery.
 
 Compatibility is additive: new clients use old behavior with a relay that omits
@@ -329,10 +332,11 @@ them with the same sanitized relay envelope as other room events, including
 ### `force_sync_execute`
 
 The current extension sends sequence/action metadata but no target; the relay uses
-the validated target retained from the matching `force_sync_prepare`. In
+the latest validated room target retained from `force_sync_prepare`. In
 `host-only` mode, only controllers may send it.
-The relay also allows a matching initiator's execute event after that initiator
-started the prepare step, even if their controller state changed before execute.
+The relay also allows that latest valid initiator's execute event after their
+controller state changed before execute. Invalid prepares are dropped and grant
+no exemption.
 
 ## Episode Lobby
 

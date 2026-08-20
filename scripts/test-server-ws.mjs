@@ -371,6 +371,35 @@ try {
     assert.equal(forceSyncState.playbackState, 'playing');
     assert.equal(forceSyncState.currentTime, 700);
 
+    // The legacy wire exposes one room-wide prepared target. A later PREPARE
+    // replaces what every peer has just sought to; any currently authorized
+    // EXECUTE must commit that visible target instead of clearing it unmatched.
+    s(msa, 'force_sync_prepare', { targetTime: 800 });
+    await w(msb, 'force_sync_prepare');
+    s(msb, 'force_sync_prepare', { targetTime: 900 });
+    await w(msa, 'force_sync_prepare');
+    const beforeCompetingExecute = { ...mod.rooms.get(msrid).mediaState };
+    s(msa, 'force_sync_execute', {});
+    await w(msb, 'force_sync_execute');
+    const competingForceState = mod.rooms.get(msrid).mediaState;
+    assert.equal(competingForceState.revision, beforeCompetingExecute.revision + 1);
+    assert.equal(competingForceState.currentTime, 900,
+        'authorized EXECUTE commits the latest target visible to legacy peers');
+    assert.equal(competingForceState.updatedBy, 'msa');
+
+    msa._m.length = msb._m.length = 0;
+    s(msa, 'force_sync_prepare', { targetTime: 1_000 });
+    await w(msb, 'force_sync_prepare');
+    s(msb, 'pause', { currentTime: 1_100 });
+    await w(msa, 'pause');
+    const supersedingMediaState = { ...mod.rooms.get(msrid).mediaState };
+    msa._m.length = msb._m.length = 0;
+    s(msa, 'force_sync_execute', {});
+    let orphanExecuteDropped = false;
+    try { await w(msb, 'force_sync_execute', 500); } catch { orphanExecuteDropped = true; }
+    assert.ok(orphanExecuteDropped, 'an action that supersedes PREPARE makes delayed EXECUTE invalid');
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, supersedingMediaState);
+
     // Active Episode Lobby is additive ROOM_DATA state and does not rewrite mediaState.
     s(msa, 'episode_lobby', { expectedTitle: 'S02E03' });
     await delay(40);
@@ -675,6 +704,63 @@ try {
     close();
     resetConnectionRate();
 
+    // A valid PREPARE remains executable if the room changes from everyone to
+    // host-only before EXECUTE. An invalid PREPARE grants no such exemption.
+    const transitionRid = 'force-transition-'+Date.now();
+    const transitionHost = await c(), transitionGuest = await c();
+    await j(transitionHost, transitionRid, 'transition-host');
+    await j(transitionGuest, transitionRid, 'transition-guest');
+    transitionHost._m.length = transitionGuest._m.length = 0;
+    s(transitionGuest, 'force_sync_prepare', { targetTime: 321 });
+    await w(transitionHost, 'force_sync_prepare');
+    s(transitionHost, 'set_control_mode', { controlMode: 'host-only' });
+    await w(transitionGuest, 'control_mode');
+    transitionHost._m.length = transitionGuest._m.length = 0;
+    s(transitionGuest, 'force_sync_execute', {});
+    await w(transitionHost, 'force_sync_execute');
+    assert.equal(mod.rooms.get(transitionRid).mediaState.currentTime, 321);
+
+    await delay(550);
+    s(transitionHost, 'set_peer_role', { peerId: 'transition-guest', controller: true });
+    await w(transitionGuest, 'control_mode');
+    transitionHost._m.length = transitionGuest._m.length = 0;
+    s(transitionGuest, 'force_sync_prepare', { targetTime: 'invalid' });
+    let invalidPrepareRelayed = false;
+    try { await w(transitionHost, 'force_sync_prepare', 500); } catch { invalidPrepareRelayed = true; }
+    assert.ok(invalidPrepareRelayed, 'invalid PREPARE is not relayed');
+    await delay(550);
+    s(transitionHost, 'set_peer_role', { peerId: 'transition-guest', controller: false });
+    await w(transitionGuest, 'control_mode');
+    transitionHost._m.length = transitionGuest._m.length = 0;
+    s(transitionGuest, 'force_sync_execute', {});
+    let invalidExecuteGated = false;
+    try { await w(transitionHost, 'force_sync_execute', 500); } catch { invalidExecuteGated = true; }
+    assert.ok(invalidExecuteGated, 'invalid PREPARE grants no post-demotion EXECUTE exemption');
+    close();
+    resetConnectionRate();
+
+    // A transient disconnect clears the Host Control exemption but not the
+    // validated room target. If the peer rejoins with current authority, its
+    // recovered EXECUTE must keep live playback and canonical state aligned.
+    const forceReconnectRid = 'force-reconnect-'+Date.now();
+    const forceReconnectHost = await c(), forceReconnectPeer = await c();
+    await j(forceReconnectHost, forceReconnectRid, 'force-host');
+    await j(forceReconnectPeer, forceReconnectRid, 'force-peer');
+    forceReconnectHost._m.length = forceReconnectPeer._m.length = 0;
+    s(forceReconnectPeer, 'force_sync_prepare', { targetTime: 444 });
+    await w(forceReconnectHost, 'force_sync_prepare');
+    forceReconnectPeer.close();
+    await delay(100);
+    const forceReconnectReplacement = await c();
+    await j(forceReconnectReplacement, forceReconnectRid, 'force-peer');
+    forceReconnectHost._m.length = forceReconnectReplacement._m.length = 0;
+    s(forceReconnectReplacement, 'force_sync_execute', {});
+    await w(forceReconnectHost, 'force_sync_execute');
+    assert.equal(mod.rooms.get(forceReconnectRid).mediaState.currentTime, 444);
+    assert.equal(mod.rooms.get(forceReconnectRid).mediaState.playbackState, 'playing');
+    close();
+    resetConnectionRate();
+
     // --- A guest's stray EXECUTE (no matching PREPARE they initiated) is still gated ---
     const grid = 'h1b-'+Date.now();
     const go = await c(), gg = await c();
@@ -755,12 +841,12 @@ try {
     s(mxo,'play',{currentTime:1}); await w(mxn,'play');
     s(mxo,'seek',{currentTime:99}); await w(mxn,'seek');
     s(mxo,'force_sync_prepare',{targetTime:5}); await w(mxn,'force_sync_prepare');
-    s(mxo,'episode_lobby',{expectedTitle:'S1E1'}); await w(mxn,'episode_lobby');
     // New → old
     mxo._m.length = mxn._m.length = 0;
+    s(mxn,'force_sync_execute',{}); await w(mxo,'force_sync_execute');
+    s(mxo,'episode_lobby',{expectedTitle:'S1E1'}); await w(mxn,'episode_lobby');
     s(mxn,'pause',{currentTime:2}); await w(mxo,'pause');
     s(mxn,'seek',{currentTime:50}); await w(mxo,'seek');
-    s(mxn,'force_sync_execute',{}); await w(mxo,'force_sync_execute');
     s(mxn,'episode_lobby_cancel',{}); await w(mxo,'episode_lobby_cancel');
     close();
     resetConnectionRate();

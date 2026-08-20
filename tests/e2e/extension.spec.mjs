@@ -1182,10 +1182,11 @@ test('coalesces persisted offline media intent before canonical reconnect recove
         expect(restoredQueue.queuedLogicalEvents).toBeGreaterThanOrEqual(1);
         expect(restoredQueue.queuedWireEvents).toBeGreaterThanOrEqual(2);
 
-        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async serverUrl => {
+        const retryResult = await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async serverUrl => {
             await chrome.storage.local.set({ serverUrl });
-            chrome.alarms.create('keepAlive', { when: Date.now() + 50 });
+            return chrome.runtime.sendMessage({ type: 'RETRY_CONNECT' });
         }, `ws://127.0.0.1:${port}`));
+        expect(retryResult).toMatchObject({ status: 'ok' });
 
         await page.locator('#player').evaluate(video => {
             window.__koalaReconnectSeeks = [];

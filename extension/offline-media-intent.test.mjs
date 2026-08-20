@@ -34,7 +34,7 @@ describe('offline media intent coalescing', () => {
         queue = reserve(queue, 6);
         expect(queue).toHaveLength(1);
         expect(materializeMediaIntent(queue[0])).toEqual([
-            { event: EVENTS.SEEK, data: { seq: 5, actionTimestamp: 100, currentTime: 10, targetTime: 10 } },
+            { event: EVENTS.SEEK, data: { seq: 5, currentTime: 10, targetTime: 10 } },
             { event: EVENTS.PLAY, data: { seq: 6, actionTimestamp: 100, currentTime: 10 } }
         ]);
     });
@@ -159,6 +159,17 @@ describe('offline media intent coalescing', () => {
         expect(maxQueuedSequence(restored)).toBe(4);
     });
 
+    it('drops room-scoped barriers from another room and unknown persisted events', () => {
+        const restored = normalizePersistedEventQueue([
+            { kind: 'event', roomId: 'room-b', event: EVENTS.FORCE_SYNC_EXECUTE, data: { seq: 1 } },
+            { kind: 'event', roomId, event: 'unexpected_event', data: { secret: 'nope' } },
+            { kind: 'event', roomId, event: EVENTS.EPISODE_READY, data: { seq: 2 } }
+        ], roomId);
+        expect(restored).toEqual([{
+            kind: 'event', roomId, event: EVENTS.EPISODE_READY, data: { seq: 2 }
+        }]);
+    });
+
     it('discards stale-room intent without affecting the new room', () => {
         const queue = reserve(media(EVENTS.PAUSE, { currentTime: 500, seq: 1 }), 2);
         expect(hasQueuedMediaIntent(queue, roomId)).toBe(true);
@@ -180,8 +191,26 @@ describe('offline media intent coalescing', () => {
         queue = enqueueQueuedEvent(queue, EVENTS.FORCE_SYNC_PREPARE, { targetTime: 500, seq: 3 }, { roomId }).queue;
         queue = enqueueQueuedEvent(queue, EVENTS.EPISODE_READY, { title: 'S01E02' }, { roomId }).queue;
         const result = reconcileQueuedRoomIntent(queue, { roomId, activeLobby: true });
-        expect(result.queue).toEqual([{ event: EVENTS.EPISODE_READY, data: { title: 'S01E02' } }]);
+        expect(result.queue).toEqual([{
+            kind: 'event',
+            roomId,
+            event: EVENTS.EPISODE_READY,
+            data: { title: 'S01E02' }
+        }]);
         expect(result.hasPendingLocalIntent).toBe(false);
+    });
+
+    it('drops stale queued Episode Lobby coordination when ROOM_DATA has an authoritative lobby', () => {
+        let queue = enqueueQueuedEvent([], EVENTS.EPISODE_LOBBY, { expectedTitle: 'S02E01' }, { roomId }).queue;
+        queue = enqueueQueuedEvent(queue, EVENTS.EPISODE_READY, { title: 'S02E01' }, { roomId }).queue;
+        queue = enqueueQueuedEvent(queue, EVENTS.EPISODE_LOBBY_CANCEL, {}, { roomId }).queue;
+        const result = reconcileQueuedRoomIntent(queue, {
+            roomId,
+            activeLobby: true,
+            authoritativeLobby: true
+        });
+        expect(result.queue).toEqual([]);
+        expect(result.discarded).toBe(3);
     });
 
     it('does not let intentional solo mode retain future room-driving intent', () => {
@@ -229,7 +258,7 @@ describe('offline media intent drain', () => {
     });
 
     it('retains the whole logical intent after a partial send failure', async () => {
-        const queue = reserve(media(EVENTS.PLAY, { currentTime: 90, seq: 5 }), 6);
+        const queue = reserve(media(EVENTS.PLAY, { currentTime: 90, seq: 5, actionTimestamp: 500 }), 6);
         let calls = 0;
         const result = await drainQueuedBatch(queue, {
             roomId,
@@ -240,6 +269,8 @@ describe('offline media intent drain', () => {
         expect(result.sentWireEvents).toBe(1);
         expect(result.queue).toEqual(queue);
         expect(materializeMediaIntent(result.queue[0]).map(frame => frame.data.seq)).toEqual([5, 6]);
+        expect(materializeMediaIntent(result.queue[0]).map(frame => frame.data.actionTimestamp))
+            .toEqual([undefined, 500]);
     });
 
     it('drops stale-room intent during drain and preserves unrelated events', async () => {
@@ -251,8 +282,58 @@ describe('offline media intent drain', () => {
             maxWireEvents: 10,
             sendFrame: async frame => { sent.push(frame); return true; }
         });
-        expect(result.droppedStaleIntents).toBe(1);
-        expect(sent).toEqual([{ event: EVENTS.EPISODE_READY, data: { seq: 3 } }]);
+        expect(result.droppedStaleIntents).toBe(2);
+        expect(sent).toEqual([]);
+    });
+
+    it('repairs regressing sequences across malformed persisted intent entries', () => {
+        const restored = normalizePersistedEventQueue([
+            {
+                kind: 'media-intent',
+                roomId,
+                intent: {
+                    playbackState: 'playing', currentTime: 10, latestEvent: EVENTS.PLAY,
+                    previousSeq: 99, latestSeq: 100, actionTimestamp: 1, mediaTitle: null, sourceEventCount: 1
+                }
+            },
+            {
+                kind: 'media-intent',
+                roomId,
+                intent: {
+                    playbackState: 'paused', currentTime: 20, latestEvent: EVENTS.PAUSE,
+                    previousSeq: 49, latestSeq: 50, actionTimestamp: 2, mediaTitle: null, sourceEventCount: 1
+                }
+            }
+        ], roomId);
+        expect(materializeMediaIntent(restored[0]).map(frame => frame.data.seq)).toEqual([99, 100]);
+        expect(materializeMediaIntent(restored[1]).map(frame => frame.data.seq)).toEqual([101, 102]);
+        expect(maxQueuedSequence(restored)).toBe(102);
+    });
+
+    it('preserves a valid legacy single-frame intent during sequence repair', () => {
+        const restored = normalizePersistedEventQueue([{
+            kind: 'media-intent',
+            roomId,
+            intent: {
+                playbackState: 'paused', currentTime: 20, latestEvent: EVENTS.PAUSE,
+                previousSeq: null, latestSeq: 50, actionTimestamp: 2, mediaTitle: null, sourceEventCount: 1
+            }
+        }], roomId);
+        expect(materializeMediaIntent(restored[0])).toEqual([{
+            event: EVENTS.PAUSE,
+            data: { seq: 50, actionTimestamp: 2, currentTime: 20 }
+        }]);
+    });
+
+    it('evicts a complete Force Sync transaction instead of orphaning EXECUTE at the cap', () => {
+        let queue = enqueueQueuedEvent([], EVENTS.FORCE_SYNC_PREPARE, { targetTime: 100, seq: 1 }, { roomId }).queue;
+        queue = enqueueQueuedEvent(queue, EVENTS.FORCE_SYNC_EXECUTE, { seq: 2 }, { roomId }).queue;
+        for (let index = 0; index < 49; index++) {
+            queue = enqueueQueuedEvent(queue, EVENTS.FORCE_SYNC_ACK, { seq: index + 3 }, { roomId }).queue;
+        }
+        expect(queue).toHaveLength(49);
+        expect(queue.some(entry => entry.event === EVENTS.FORCE_SYNC_PREPARE)).toBe(false);
+        expect(queue.some(entry => entry.event === EVENTS.FORCE_SYNC_EXECUTE)).toBe(false);
     });
 
     it('reports logical and actual-wire queue sizes separately', () => {

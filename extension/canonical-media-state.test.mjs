@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     canonicalMediaStateFromRoomData,
     createCanonicalMediaStateTracker,
+    projectCanonicalMediaState,
     validateCanonicalMediaState
 } from './canonical-media-state.js';
 
@@ -81,6 +82,15 @@ describe('ROOM_DATA capability compatibility', () => {
 });
 
 describe('canonical media state tracker', () => {
+    it('projects a deferred playing snapshot from local receipt time and clamps it', () => {
+        expect(projectCanonicalMediaState(state(1, 100, 'playing'), 1_000, 31_000))
+            .toMatchObject({ currentTime: 130, playbackState: 'playing' });
+        expect(projectCanonicalMediaState(state(1, 100, 'paused'), 1_000, 31_000))
+            .toMatchObject({ currentTime: 100, playbackState: 'paused' });
+        expect(projectCanonicalMediaState(state(1, 86_390, 'playing'), 1_000, 31_000).currentTime)
+            .toBe(86_400);
+    });
+
     it('accepts a valid snapshot and applies each revision once', () => {
         const tracker = createCanonicalMediaStateTracker();
         expect(tracker.receive('room-a', state(1)).status).toBe('pending');
@@ -114,6 +124,23 @@ describe('canonical media state tracker', () => {
         tracker.beginRecovery('room-a');
         expect(tracker.receive('room-a', state(8, 100)).status).toBe('pending');
         expect(tracker.getPending().mediaState.currentTime).toBe(100);
+    });
+
+    it('accepts a lower revision from a new relay or room epoch after reconnect', () => {
+        const tracker = createCanonicalMediaStateTracker();
+        tracker.receive('room-a', state(12), 1_000);
+        tracker.markHandled('room-a', 12);
+        tracker.beginRecovery('room-a');
+        expect(tracker.receive('room-a', state(1), 2_000).status).toBe('pending');
+        expect(tracker.getPending('room-a').mediaState.revision).toBe(1);
+    });
+
+    it('persists receipt time so MV3 recovery projects only playing snapshots', () => {
+        const first = createCanonicalMediaStateTracker();
+        first.receive('room-a', state(4, 50, 'playing'), 10_000);
+        const restored = createCanonicalMediaStateTracker();
+        expect(restored.restore(first.snapshot(), 'room-a')).toBe(true);
+        expect(restored.getPendingProjected('room-a', 15_000).mediaState.currentTime).toBe(55);
     });
 
     it('restores only room-scoped session state', () => {

@@ -16,6 +16,7 @@ describe('offline media intent background integration', () => {
     it('keeps online sends immediate and defers reconnect work only while ROOM_DATA is pending', () => {
         const emit = functionBody('emit', 'emitLive');
         expect(emit).toContain('mustWaitForRoomData');
+        expect(emit).toContain('&& !flushInProgress');
         expect(emit).toContain('socket.send(msg)');
         expect(emit).toContain('queueEvent(event, data)');
         expect(emit).not.toContain('setTimeout');
@@ -27,6 +28,7 @@ describe('offline media intent background integration', () => {
         expect(backgroundSource).toContain('localSeq = Math.max(localSeq, maxQueuedSequence(eventQueue))');
         expect(backgroundSource).toContain('chrome.storage.session.set({ eventQueue, localSeq })');
         expect(backgroundSource).not.toContain('storage.sync.set({ eventQueue');
+        expect(backgroundSource).toContain('if (restorationTimedOut) return');
     });
 
     it('reconciles Host Control, Episode Lobby and solo mode before canonical recovery and replay', () => {
@@ -36,10 +38,11 @@ describe('offline media intent background integration', () => {
         expect(roomData.indexOf('applyQueuedRoomPolicy(data.roomId'))
             .toBeLessThan(roomData.indexOf('handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)'));
         expect(roomData.indexOf('handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)'))
-            .toBeLessThan(roomData.indexOf('flushEventQueue()'));
+            .toBeLessThan(roomData.indexOf('flushEventQueue(replaySettings)'));
         expect(roomData).toContain('activeLobby: !!episodeLobby');
         expect(roomData).toContain('desynced: hcmDesynced');
-        expect(roomData).toContain('if (!data?.activeLobby && episodeLobby)');
+        expect(roomData).toContain('if (!data?.activeLobby && episodeLobby && !hasQueuedLocalLobby)');
+        expect(roomData).toContain('authoritativeLobby: !!data.activeLobby');
     });
 
     it('clears queued room intent on failed join, leave and room switch paths', () => {
@@ -51,6 +54,11 @@ describe('offline media intent background integration', () => {
             backgroundSource.indexOf("message.type === 'CLEAR_LOGS'")
         );
         expect(leaveHandler).toContain('forceDisconnect()');
+        const retryHandler = backgroundSource.slice(
+            backgroundSource.indexOf("message.type === 'RETRY_CONNECT'"),
+            backgroundSource.indexOf("message.type === 'GET_STATUS'")
+        );
+        expect(retryHandler).toContain('forceDisconnect({ preserveEventQueue: true })');
     });
 
     it('paces actual frames through a failure-retaining logical drain', () => {
@@ -61,7 +69,16 @@ describe('offline media intent background integration', () => {
         expect(flush).toContain('if (eventQueueVersion === drainVersion)');
         expect(flush).toContain('const consumedEntries = new Set(drainSource.slice(0, consumedCount))');
         expect(flush).toContain('eventQueue = eventQueue.filter(entry => !consumedEntries.has(entry))');
+        expect(flush).toContain('flushConnectionGeneration !== connectionGeneration');
         expect(flush).not.toMatch(/eventQueue\.shift\(\)[\s\S]*emit\(/);
+    });
+
+    it('generation-scopes socket callbacks and stale ROOM_DATA work', () => {
+        expect(backgroundSource).toContain('let connectionGeneration = 0');
+        expect(backgroundSource).toContain('socket !== connectionSocket');
+        expect(backgroundSource).toContain('handleServerEvent(payload[0], payload[1], generation)');
+        expect(backgroundSource).toContain('expectedConnectionGeneration !== connectionGeneration');
+        expect(backgroundSource).toContain('data.roomId !== pendingRoomDataRoomId');
     });
 
     it('exposes bounded queue diagnostics without media-title content', () => {

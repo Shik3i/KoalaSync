@@ -35,6 +35,22 @@ export function canonicalMediaStateFromRoomData(roomData) {
         : { status: 'invalid', mediaState: null };
 }
 
+export function projectCanonicalMediaState(mediaState, receivedAt, now = Date.now()) {
+    const validated = validateCanonicalMediaState(mediaState);
+    if (!validated) return null;
+    if (validated.playbackState !== 'playing') return validated;
+    const received = typeof receivedAt === 'number' && Number.isFinite(receivedAt)
+        ? receivedAt
+        : now;
+    return {
+        ...validated,
+        currentTime: Math.min(
+            MAX_MEDIA_TIME,
+            validated.currentTime + Math.max(0, now - received) / 1000
+        )
+    };
+}
+
 function normalizeRoomId(roomId) {
     return typeof roomId === 'string' && roomId ? roomId : null;
 }
@@ -60,11 +76,16 @@ export function createCanonicalMediaStateTracker() {
 
         beginRecovery(nextRoomId) {
             adoptRoom(nextRoomId);
+            // A relay restart or an empty-room recreation starts a new in-memory
+            // revision epoch. ROOM_DATA belongs to this fresh connection, so a
+            // lower revision is current truth rather than a stale packet from
+            // the previous epoch.
+            knownRevision = 0;
             appliedRevision = 0;
             pending = null;
         },
 
-        receive(nextRoomId, value) {
+        receive(nextRoomId, value, receivedAt = Date.now()) {
             adoptRoom(nextRoomId);
             const mediaState = validateCanonicalMediaState(value);
             if (!roomId || !mediaState) return { status: 'invalid' };
@@ -74,7 +95,13 @@ export function createCanonicalMediaStateTracker() {
                 return { status: 'duplicate' };
             }
             knownRevision = Math.max(knownRevision, mediaState.revision);
-            pending = { roomId, mediaState };
+            pending = {
+                roomId,
+                mediaState,
+                receivedAt: typeof receivedAt === 'number' && Number.isFinite(receivedAt)
+                    ? receivedAt
+                    : Date.now()
+            };
             return { status: 'pending', mediaState };
         },
 
@@ -82,6 +109,16 @@ export function createCanonicalMediaStateTracker() {
             return pending && pending.roomId === normalizeRoomId(nextRoomId)
                 ? { roomId: pending.roomId, mediaState: { ...pending.mediaState } }
                 : null;
+        },
+
+        getPendingProjected(nextRoomId = roomId, now = Date.now()) {
+            if (!pending || pending.roomId !== normalizeRoomId(nextRoomId)) return null;
+            const mediaState = projectCanonicalMediaState(
+                pending.mediaState,
+                pending.receivedAt,
+                now
+            );
+            return mediaState ? { roomId: pending.roomId, mediaState } : null;
         },
 
         markHandled(nextRoomId, revision) {
@@ -114,7 +151,14 @@ export function createCanonicalMediaStateTracker() {
                 && restoredPending
                 && restoredPending.revision >= appliedRevision
                 && restoredPending.revision >= knownRevision) {
-                pending = { roomId, mediaState: restoredPending };
+                pending = {
+                    roomId,
+                    mediaState: restoredPending,
+                    receivedAt: typeof value.pending.receivedAt === 'number'
+                        && Number.isFinite(value.pending.receivedAt)
+                        ? value.pending.receivedAt
+                        : Date.now()
+                };
                 knownRevision = restoredPending.revision;
             }
             return true;
@@ -125,7 +169,11 @@ export function createCanonicalMediaStateTracker() {
                 roomId,
                 knownRevision,
                 appliedRevision,
-                pending: pending ? { roomId: pending.roomId, mediaState: { ...pending.mediaState } } : null
+                pending: pending ? {
+                    roomId: pending.roomId,
+                    mediaState: { ...pending.mediaState },
+                    receivedAt: pending.receivedAt
+                } : null
             };
         }
     };

@@ -80,6 +80,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 // --- State Management ---
 let socket = null;
+let connectionGeneration = 0;
 let isConnecting = false;
 let peerId = null; // initialized via getPeerId()
 let currentRoom = null;
@@ -249,7 +250,7 @@ let pendingHistory = [];
 let eventQueue = [];
 let eventQueueVersion = 0;
 let flushTimer = null; // paces draining of eventQueue after (re)connect
-let flushInProgress = false;
+let flushInProgress = null;
 let isNamespaceJoined = false;
 let awaitingRoomData = false;
 let pendingRoomDataRoomId = null;
@@ -382,9 +383,11 @@ function ensureState() {
     if (!restorationTask) {
         restorationTask = new Promise(resolve => {
             let resolved = false;
+            let restorationTimedOut = false;
             const done = () => { if (!resolved) { resolved = true; resolve(); } };
 
             const storageTimeout = setTimeout(() => {
+                restorationTimedOut = true;
                 addLog('Storage restoration timed out, continuing with defaults', 'warn');
                 storageInitialized = true;
                 done();
@@ -399,6 +402,9 @@ function ensureState() {
                 'episodeLobby', 'localSeq', 'lastSeqBySender', 'expectedAcksCount', 'roomIdleSince', 'lastContentHeartbeatAt',
                 'hcmDesynced', 'chatActivityTimeline', 'canonicalMediaRecovery'
             ], (data) => {
+                // A late callback must not resurrect a room, queue or canonical
+                // snapshot after the worker already continued with defaults.
+                if (restorationTimedOut) return;
                 clearTimeout(storageTimeout);
                 if (data.expectedAcksCount !== undefined) expectedAcksCount = data.expectedAcksCount;
                 if (data.currentTabId !== undefined) currentTabId = normalizeTabId(data.currentTabId);
@@ -720,7 +726,8 @@ function resolveServerUrl(settings) {
     return (settings.serverUrl && settings.useCustomServer) ? settings.serverUrl : OFFICIAL_SERVER_URL;
 }
 
-function forceDisconnect() {
+function forceDisconnect({ preserveEventQueue = false } = {}) {
+    connectionGeneration++;
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -755,15 +762,17 @@ function forceDisconnect() {
     lastContentHeartbeatAt = null;
     forceSyncAcks.clear();
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    flushInProgress = false;
-    eventQueue = [];
-    eventQueueVersion++;
+    flushInProgress = null;
+    if (!preserveEventQueue) {
+        eventQueue = [];
+        eventQueueVersion++;
+    }
     chrome.storage.session.set({
         isForceSyncInitiator: false,
         forceSyncAcks: [],
         forceSyncDeadline: null,
         expectedAcksCount: 0,
-        eventQueue: [],
+        eventQueue,
         episodeLobby: null,
         roomIdleSince: null,
         lastContentHeartbeatAt: null
@@ -1096,6 +1105,8 @@ async function leaveRoomAfterIdleGrace(reason) {
 async function connect() {
     if (isConnecting) return;
     isConnecting = true;
+    const startingGeneration = connectionGeneration;
+    let attemptGeneration = startingGeneration;
 
     let finalUrl = '';
     try {
@@ -1104,6 +1115,7 @@ async function connect() {
         try {
             if (!peerId) peerId = await getPeerId();
             settings = await getSettings();
+            if (startingGeneration !== connectionGeneration) return;
             pendingRoomDataRoomId = settings.roomId || currentRoom?.roomId || null;
         } catch (e) {
             throw new Error(`[Storage Error] ${e.message}`);
@@ -1170,114 +1182,125 @@ async function connect() {
             url.searchParams.set('version', chrome.runtime.getManifest().version);
             url.searchParams.set('token', OFFICIAL_SERVER_TOKEN);
 
-            socket = new WebSocket(url.toString());
+            const generation = ++connectionGeneration;
+            attemptGeneration = generation;
+            const connectionSocket = new WebSocket(url.toString());
+            socket = connectionSocket;
+
+            // --- Phase 5: Event Listeners ---
+            connectionSocket.onopen = () => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                reconnectAttempts = 0;
+                reconnectStartTime = null;
+                reconnectFailed = false;
+                addLog('WebSocket Connection Opened', 'success');
+                chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null }).catch(() => {});
+                isNamespaceJoined = false;
+                connectionSocket.send('40');
+            };
+
+            connectionSocket.onmessage = async (event) => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                await ensureState();
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                const msg = event.data;
+                if (msg === '2') {
+                    connectionSocket.send('3');
+                    return;
+                }
+                if (msg.startsWith('0')) {
+                    addLog(`Socket.IO Handshake: ${msg}`, 'info');
+                } else if (msg.startsWith('40')) {
+                    isConnecting = false;
+                    isNamespaceJoined = true;
+                    broadcastConnectionStatus('connected');
+                    startPing();
+                    addLog('Joined Namespace /', 'success');
+                    const joinedSettings = await getSettings();
+                    if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                    if (joinedSettings.roomId) {
+                        awaitingRoomData = true;
+                        pendingRoomDataRoomId = joinedSettings.roomId;
+                        const sharedTitles = getSharedTitleFields(joinedSettings);
+                        emit(EVENTS.JOIN_ROOM, {
+                            roomId: joinedSettings.roomId,
+                            password: joinedSettings.password,
+                            peerId,
+                            username: joinedSettings.username,
+                            tabTitle: sharedTitles.tabTitle,
+                            clientCapabilities: CLIENT_CAPABILITIES,
+                            protocolVersion: PROTOCOL_VERSION
+                        });
+                    } else {
+                        awaitingRoomData = false;
+                        pendingRoomDataRoomId = null;
+                        flushEventQueue();
+                    }
+                } else if (msg.startsWith('42')) {
+                    try {
+                        const payload = JSON.parse(msg.substring(2));
+                        try {
+                            await handleServerEvent(payload[0], payload[1], generation);
+                        } catch (handlerErr) {
+                            addLog(`Handler error for ${payload[0]}: ${handlerErr.message}`, 'error');
+                        }
+                    } catch (_e) {
+                        addLog(`Failed to parse message: ${msg}`, 'error');
+                    }
+                }
+            };
+
+            connectionSocket.onclose = () => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                // Invalidate any async message handler that began before the
+                // close event and is still suspended at an await boundary.
+                connectionGeneration++;
+                isConnecting = false;
+                isNamespaceJoined = false;
+                awaitingRoomData = false;
+                pendingRoomDataRoomId = null;
+                invalidateChatSession();
+                stopPing();
+                if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+
+                if (!connectIntent && !currentRoom) {
+                    isForceSyncInitiator = false;
+                    forceSyncAcks.clear();
+                    if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
+                    chrome.storage.session.set({
+                        isForceSyncInitiator: false,
+                        forceSyncAcks: [],
+                        forceSyncDeadline: null
+                    }).catch(() => {});
+                }
+
+                if (currentRoom && !connectIntent) {
+                    currentRoom.peers = [];
+                    if (storageInitialized) chrome.storage.session.set({ currentRoom }).catch(() => {});
+                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
+                }
+                broadcastConnectionStatus('disconnected');
+                socket = null;
+                if (currentRoom || connectIntent) {
+                    addLog('Disconnected. Scheduling reconnect...', 'warn');
+                    scheduleReconnect();
+                } else {
+                    addLog('Disconnected. No active session — staying disconnected.', 'info');
+                }
+            };
+
+            connectionSocket.onerror = () => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                broadcastConnectionStatus('disconnected');
+                const logType = reconnectAttempts > 1 ? 'error' : 'warn';
+                addLog('WebSocket Error: Connection failed', logType);
+            };
         } catch (e) {
             throw new Error(`[Connection Error] ${e.message}`);
         }
 
-        // --- Phase 5: Event Listeners ---
-        socket.onopen = () => {
-            reconnectAttempts = 0;
-            reconnectStartTime = null;
-            reconnectFailed = false;
-            addLog('WebSocket Connection Opened', 'success');
-            chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null }).catch(() => {});
-            isNamespaceJoined = false;
-            socket.send('40');
-        };
-
-        socket.onmessage = async (event) => {
-            await ensureState();
-            const msg = event.data;
-            if (msg === '2') {
-                socket.send('3');
-                return;
-            }
-            if (msg.startsWith('0')) {
-                addLog(`Socket.IO Handshake: ${msg}`, 'info');
-            } else if (msg.startsWith('40')) {
-                isConnecting = false;
-                isNamespaceJoined = true;
-                broadcastConnectionStatus('connected');
-                startPing();
-                addLog('Joined Namespace /', 'success');
-                const settings = await getSettings();
-                if (settings.roomId) {
-                    awaitingRoomData = true;
-                    pendingRoomDataRoomId = settings.roomId;
-                    const sharedTitles = getSharedTitleFields(settings);
-                    emit(EVENTS.JOIN_ROOM, { 
-                        roomId: settings.roomId, 
-                        password: settings.password,
-                        peerId,
-                        username: settings.username,
-                        tabTitle: sharedTitles.tabTitle,
-                        clientCapabilities: CLIENT_CAPABILITIES,
-                        protocolVersion: PROTOCOL_VERSION
-                    });
-                } else {
-                    awaitingRoomData = false;
-                    pendingRoomDataRoomId = null;
-                    flushEventQueue();
-                }
-            } else if (msg.startsWith('42')) {
-                try {
-                    const payload = JSON.parse(msg.substring(2));
-                    try {
-                        await handleServerEvent(payload[0], payload[1]);
-                    } catch (handlerErr) {
-                        addLog(`Handler error for ${payload[0]}: ${handlerErr.message}`, 'error');
-                    }
-                } catch (_e) {
-                    addLog(`Failed to parse message: ${msg}`, 'error');
-                }
-            }
-        };
-
-        socket.onclose = () => {
-            isConnecting = false;
-            isNamespaceJoined = false;
-            awaitingRoomData = false;
-            pendingRoomDataRoomId = null;
-            invalidateChatSession();
-            stopPing();
-            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-            
-            if (!connectIntent && !currentRoom) {
-                isForceSyncInitiator = false;
-                forceSyncAcks.clear();
-                if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
-                chrome.storage.session.set({ 
-                    isForceSyncInitiator: false, 
-                    forceSyncAcks: [], 
-                    forceSyncDeadline: null 
-                }).catch(() => {});
-            }
-
-            
-            if (currentRoom && !connectIntent) {
-                currentRoom.peers = [];
-                if (storageInitialized) chrome.storage.session.set({ currentRoom }).catch(() => {});
-                chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
-            }
-            broadcastConnectionStatus('disconnected');
-            if (currentRoom || connectIntent) {
-                addLog('Disconnected. Scheduling reconnect...', 'warn');
-                socket = null;
-                scheduleReconnect();
-            } else {
-                addLog('Disconnected. No active session — staying disconnected.', 'info');
-                socket = null;
-            }
-        };
-
-        socket.onerror = () => {
-            broadcastConnectionStatus('disconnected');
-            const logType = reconnectAttempts > 1 ? 'error' : 'warn';
-            addLog('WebSocket Error: Connection failed', logType);
-        };
-
     } catch (e) {
+        if (attemptGeneration !== connectionGeneration) return;
         isConnecting = false;
         const logType = reconnectAttempts > 1 ? 'error' : 'warn';
         const errMsg = (e && e.message) ? e.message : String(e || 'Unknown connection error');
@@ -1517,7 +1540,10 @@ function emit(event, data) {
     const mustWaitForRoomData = awaitingRoomData
         && event !== EVENTS.JOIN_ROOM
         && event !== EVENTS.GET_ROOMS;
-    if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined && !mustWaitForRoomData) {
+    if (socket && socket.readyState === WebSocket.OPEN
+        && isNamespaceJoined
+        && !mustWaitForRoomData
+        && !flushInProgress) {
         try {
             const msg = encodeSocketEvent(event, data, chatSecretGuard);
             socket.send(msg);
@@ -1606,24 +1632,49 @@ function applyQueuedRoomPolicy(roomId, policy, reason) {
  * Drain logical queue entries only after ROOM_DATA confirms the current room,
  * role and lobby. Pacing counts materialized wire frames, not logical entries.
  * A two-frame media intent is kept whole at a batch boundary and retained in
- * full if either send fails; replaying its first frame again is idempotent and
- * preserves the final desired state on the next reconnect.
+ * full if either send fails. Replaying its first legacy frame can repeat a
+ * canonical revision/activity side effect, but the ordered full retry remains
+ * final-state recoverable without a new delivery-ACK protocol.
  */
-async function flushEventQueue() {
+async function flushEventQueue(replaySettingsOverride = undefined) {
     if (flushTimer || flushInProgress || awaitingRoomData) return;
     if (!socket || socket.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
-    flushInProgress = true;
+    const flushToken = {};
+    const flushConnectionGeneration = connectionGeneration;
+    const flushSocket = socket;
+    const flushRoomId = currentRoom?.roomId || null;
+    flushInProgress = flushToken;
     try {
         // Resolve privacy settings before taking queue ownership. If new work
-        // arrives during the drain, keep the original logical entries too; a
-        // later idempotent replay is safer than losing the concurrent intent.
-        const replaySettings = eventQueue.some(isQueuedMediaIntent) ? await getSettings() : null;
+        // arrives during the drain, keep it behind the original logical entries;
+        // final-state retry is safer than losing concurrent intent.
+        const replaySettings = replaySettingsOverride !== undefined
+            ? replaySettingsOverride
+            : (eventQueue.some(isQueuedMediaIntent) ? await getSettings() : null);
+        if (flushConnectionGeneration !== connectionGeneration
+            || socket !== flushSocket
+            || currentRoom?.roomId !== flushRoomId
+            || awaitingRoomData) {
+            return;
+        }
+        applyQueuedRoomPolicy(flushRoomId, {
+            canControl: !(controlMode === CONTROL_MODES.HOST_ONLY && hostPeerId && !amController()),
+            activeLobby: !!episodeLobby,
+            desynced: hcmDesynced,
+            authoritativeLobby: !!currentRoom?.activeLobby
+        }, 'Queue replay authority changed');
         const drainSource = eventQueue;
         const drainVersion = eventQueueVersion;
         const result = await drainQueuedBatch(drainSource, {
             roomId: currentRoom?.roomId || null,
             maxWireEvents: FLUSH_BATCH_SIZE,
             sendFrame: async (frame, entry) => {
+                if (flushConnectionGeneration !== connectionGeneration
+                    || socket !== flushSocket
+                    || currentRoom?.roomId !== flushRoomId
+                    || awaitingRoomData) {
+                    return false;
+                }
                 let payload = frame.data && typeof frame.data === 'object' ? { ...frame.data } : {};
                 if (isQueuedMediaIntent(entry)) {
                     payload = withTitlePrivacy(payload, replaySettings, ['mediaTitle']);
@@ -1654,14 +1705,19 @@ async function flushEventQueue() {
         if (result.sentWireEvents > 0) {
             addLog(`Replayed ${result.sentWireEvents} queued wire event${result.sentWireEvents === 1 ? '' : 's'}`, 'info');
         }
-        if (eventQueue.length > 0 && socket?.readyState === WebSocket.OPEN && isNamespaceJoined) {
+        if (eventQueue.length > 0
+            && flushConnectionGeneration === connectionGeneration
+            && socket === flushSocket
+            && socket?.readyState === WebSocket.OPEN
+            && isNamespaceJoined
+            && !awaitingRoomData) {
             flushTimer = setTimeout(() => {
                 flushTimer = null;
                 flushEventQueue().catch(error => addLog(`Queue replay failed: ${error.message}`, 'warn'));
             }, FLUSH_BATCH_INTERVAL_MS);
         }
     } finally {
-        flushInProgress = false;
+        if (flushInProgress === flushToken) flushInProgress = null;
     }
 }
 
@@ -1739,7 +1795,7 @@ function markCanonicalMediaStateHandled(roomId, revision) {
 
 async function tryApplyPendingCanonicalMediaState() {
     const roomId = currentRoom?.roomId;
-    const pending = canonicalMediaStateTracker.getPending(roomId);
+    const pending = canonicalMediaStateTracker.getPendingProjected(roomId);
     if (!pending || !roomId) return { status: 'none' };
 
     const { mediaState } = pending;
@@ -1756,6 +1812,9 @@ async function tryApplyPendingCanonicalMediaState() {
 
     const tabId = normalizeTabId(currentTabId);
     if (tabId === null || currentTargetHasVideo !== true) return { status: 'pending_no_target' };
+    const targetGeneration = targetActivationGeneration;
+    const targetFrameId = normalizeFrameId(currentTargetFrameId);
+    const targetDocumentId = currentTargetDocumentId;
 
     try {
         const response = await sendMessageToContentTab(tabId, {
@@ -1763,6 +1822,11 @@ async function tryApplyPendingCanonicalMediaState() {
             mediaState
         });
         if (currentRoom?.roomId !== roomId) return { status: 'stale_room' };
+        if (!isCurrentTargetIdentity(tabId, targetGeneration)
+            || normalizeFrameId(currentTargetFrameId) !== targetFrameId
+            || currentTargetDocumentId !== targetDocumentId) {
+            return { status: 'stale_target' };
+        }
         const latestPending = canonicalMediaStateTracker.getPending(roomId);
         if (latestPending?.mediaState.revision !== mediaState.revision) return { status: 'superseded' };
 
@@ -1821,7 +1885,8 @@ async function handleCanonicalRoomData(data, hasPendingLocalIntent) {
 }
 
 // --- Event Handlers ---
-async function handleServerEvent(event, data) {
+async function handleServerEvent(event, data, expectedConnectionGeneration = connectionGeneration) {
+    if (expectedConnectionGeneration !== connectionGeneration) return;
     if (!data) {
         addLog(`Ignored server event ${event} due to empty payload`, 'warn');
         return;
@@ -1841,6 +1906,10 @@ async function handleServerEvent(event, data) {
     }
     switch (event) {
         case EVENTS.ROOM_DATA: {
+            if (pendingRoomDataRoomId && data.roomId !== pendingRoomDataRoomId) {
+                addLog(`Ignored stale ROOM_DATA for ${data.roomId}`, 'warn');
+                return;
+            }
             if (currentRoom?.roomId !== data.roomId) {
                 invalidateChatSession();
                 clearChatActivity();
@@ -1870,23 +1939,40 @@ async function handleServerEvent(event, data) {
                 currentRoom.peers = [];
             }
 
-            // Recover server-tracked active Episode Lobby if present
-            if (!data?.activeLobby && episodeLobby) {
+            // ROOM_DATA is authoritative for an already-active server lobby,
+            // but a locally-created offline lobby has not reached the relay
+            // yet and must remain owned by its initiator until queued replay.
+            const hasQueuedLocalLobby = eventQueue.some(entry =>
+                entry?.event === EVENTS.EPISODE_LOBBY
+                && (!entry.roomId || entry.roomId === data.roomId)
+            );
+            if (!data?.activeLobby && episodeLobby && !hasQueuedLocalLobby) {
                 clearEpisodeLobbyState();
                 addLog('Discarded stale local Episode Lobby after ROOM_DATA confirmed it ended', 'info');
-            } else if (data && data.activeLobby && !episodeLobby) {
+            } else if (data?.activeLobby) {
+                const sameLobby = episodeLobby
+                    && episodeLobby.expectedTitle === data.activeLobby.expectedTitle
+                    && episodeLobby.initiatorPeerId === data.activeLobby.initiatorPeerId;
+                if (!sameLobby && episodeLobbyTimeout) {
+                    clearTimeout(episodeLobbyTimeout);
+                    episodeLobbyTimeout = null;
+                }
                 episodeLobby = {
                     expectedTitle: data.activeLobby.expectedTitle,
                     initiatorPeerId: data.activeLobby.initiatorPeerId,
                     readyPeers: data.activeLobby.readyPeers,
-                    createdAt: Date.now()
+                    createdAt: sameLobby && Number.isFinite(episodeLobby.createdAt)
+                        ? episodeLobby.createdAt
+                        : Date.now()
                 };
                 persistEpisodeLobby();
                 broadcastLobbyUpdate();
-                addLog(`Recovered active episode lobby from server: "${episodeLobby.expectedTitle}"`, 'info');
+                if (!sameLobby) {
+                    addLog(`Recovered active episode lobby from server: "${episodeLobby.expectedTitle}"`, 'info');
+                }
 
                 // Notify content script to start polling
-                if (currentTabId) {
+                if (!sameLobby && currentTabId) {
                     const tabId = parseInt(currentTabId);
                     if (!isNaN(tabId)) {
                         sendMessageToCurrentContent({
@@ -1908,6 +1994,15 @@ async function handleServerEvent(event, data) {
             // Inform Website Bridge & Popup
             const joinStatusMsg = { type: 'JOIN_STATUS', success: true, message: 'Joined' };
             await broadcastJoinStatus(joinStatusMsg);
+            if (expectedConnectionGeneration !== connectionGeneration) return;
+            // Resolve replay privacy before declaring ROOM_DATA complete. Local
+            // commands remain queued during this await, and any intervening
+            // role/lobby event is reflected by the policy below before the
+            // canonical precedence decision is made.
+            const replaySettings = eventQueue.some(isQueuedMediaIntent)
+                ? await getSettings()
+                : null;
+            if (expectedConnectionGeneration !== connectionGeneration) return;
             awaitingRoomData = false;
             pendingRoomDataRoomId = null;
 
@@ -1917,13 +2012,14 @@ async function handleServerEvent(event, data) {
             const queuePolicy = applyQueuedRoomPolicy(data.roomId, {
                 canControl: !lostRoomAuthority,
                 activeLobby: !!episodeLobby,
-                desynced: hcmDesynced
+                desynced: hcmDesynced,
+                authoritativeLobby: !!data.activeLobby
             }, lostRoomAuthority
                 ? 'Host Control role changed while offline'
                 : (episodeLobby ? 'Active Episode Lobby takes precedence' : 'Reconnect queue policy'));
 
             await handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent);
-            await flushEventQueue();
+            await flushEventQueue(replaySettings);
             break;
         }
         case EVENTS.CONTROL_MODE:
@@ -2026,6 +2122,10 @@ async function handleServerEvent(event, data) {
         case EVENTS.PAUSE:
         case EVENTS.SEEK:
         case EVENTS.FORCE_SYNC_PREPARE:
+            if (event === EVENTS.FORCE_SYNC_PREPARE && episodeLobby) {
+                if (currentRoom) currentRoom.activeLobby = null;
+                clearEpisodeLobbyState();
+            }
             if (data.senderId && typeof data.seq === 'number') {
                 const lastSeq = lastSeqBySender[data.senderId];
                 if (lastSeq !== undefined && data.seq <= lastSeq) {
@@ -2087,6 +2187,10 @@ async function handleServerEvent(event, data) {
             }
             break;
         case EVENTS.FORCE_SYNC_EXECUTE:
+            if (episodeLobby) {
+                if (currentRoom) currentRoom.activeLobby = null;
+                clearEpisodeLobbyState();
+            }
             if (data?.senderId && typeof data.seq === 'number') {
                 const lastSeq = lastSeqBySender[data.senderId];
                 if (lastSeq !== undefined && data.seq <= lastSeq) break;
@@ -2228,6 +2332,14 @@ async function handleServerEvent(event, data) {
             break;
         case EVENTS.EPISODE_LOBBY:
             if (data.senderId && data.expectedTitle) {
+                if (currentRoom) {
+                    currentRoom.activeLobby = {
+                        expectedTitle: data.expectedTitle,
+                        initiatorPeerId: data.senderId,
+                        readyPeers: [data.senderId]
+                    };
+                    if (storageInitialized) chrome.storage.session.set({ currentRoom });
+                }
                 addLog(`Episode lobby from ${data.senderId}: "${data.expectedTitle}"`, 'info');
                 // If we already have a lobby for this same title, treat as dedup
                 if (episodeLobby && sameEpisode(episodeLobby.expectedTitle, data.expectedTitle)) {
@@ -2269,9 +2381,17 @@ async function handleServerEvent(event, data) {
                     addLog(`Episode ready from ${data.senderId} (${episodeLobby.readyPeers.length})`, 'info');
                     checkEpisodeLobbyCompletion();
                 }
+                if (currentRoom?.activeLobby) {
+                    currentRoom.activeLobby.readyPeers = [...episodeLobby.readyPeers];
+                    if (storageInitialized) chrome.storage.session.set({ currentRoom });
+                }
             }
             break;
         case EVENTS.EPISODE_LOBBY_CANCEL:
+            if (currentRoom) {
+                currentRoom.activeLobby = null;
+                if (storageInitialized) chrome.storage.session.set({ currentRoom });
+            }
             if (episodeLobby) {
                 const title = episodeLobby.expectedTitle;
                 clearEpisodeLobbyState();
@@ -4078,7 +4198,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         reconnectStartTime = null;
         reconnectAttempts = 0;
         chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null });
-        forceDisconnect();
+        forceDisconnect({ preserveEventQueue: true });
         connect();
         sendResponse({ status: 'ok' });
     } else if (message.type === 'GET_STATUS') {

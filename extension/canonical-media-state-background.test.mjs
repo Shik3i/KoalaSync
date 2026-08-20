@@ -57,6 +57,10 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(backgroundSource).toContain('tryApplyPendingCanonicalMediaState().catch(() => {})');
         expect(backgroundSource).toMatch(/currentTargetHasVideo\) \{\s*await tryApplyPendingCanonicalMediaState\(\)/);
         expect(backgroundSource.match(/clearCanonicalMediaRecovery\(\)/g)?.length).toBeGreaterThanOrEqual(4);
+        const apply = functionBody(backgroundSource, 'tryApplyPendingCanonicalMediaState', 'handleCanonicalRoomData');
+        expect(apply).toContain('getPendingProjected(roomId)');
+        expect(apply).toContain('targetActivationGeneration');
+        expect(apply).toContain("return { status: 'stale_target' }");
     });
 
     it('protects intentional desync, active Episode Lobby and queued reconnect intent', () => {
@@ -67,7 +71,7 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(roomData).toContain('if (hasPendingLocalIntent)');
         expect(backgroundSource).toContain('awaitingRoomData = true');
         expect(backgroundSource).toContain('await handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)');
-        expect(backgroundSource).toContain('await flushEventQueue()');
+        expect(backgroundSource).toContain('await flushEventQueue(replaySettings)');
     });
 
     it('reuses existing seek abstractions, suppression and drift tolerance', () => {
