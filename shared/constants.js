@@ -82,8 +82,12 @@ export const CAPABILITIES = {
     HOST_CONTROL: 'host-control',
     CO_HOST: 'co-host',  // owner promotes guests to additional controllers
     CHAT: 'chat',        // legacy server capability used by the first chat beta
-    CHAT_V1: 'chat-v1'   // versioned client/server chat wire contract
+    CHAT_V1: 'chat-v1',  // versioned client/server chat wire contract
+    MEDIA_STATE_V1: 'media-state-v1' // server-authoritative room playback recovery snapshot
 };
+
+// Relay and extension media-time validation must use the same upper bound.
+export const MAX_MEDIA_TIME = 86400;
 
 export const HEARTBEAT_INTERVAL = 15000; // 15s
 export const FORCE_SYNC_TIMEOUT = 8500; // 8.5s timeout for force sync ACKs (must be > content.js poll timeout of 8s)

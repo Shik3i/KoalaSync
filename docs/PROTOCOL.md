@@ -83,12 +83,66 @@ Payload:
   "hostPeerId": "string or null",
   "controlMode": "everyone | host-only",
   "controllers": ["peerId"],
-  "capabilities": ["host-control", "co-host", "chat", "chat-v1"]
+  "mediaState": "canonical media state object or null",
+  "capabilities": ["host-control", "co-host", "chat", "chat-v1", "media-state-v1"]
 }
 ```
 
 `room_data` is sent to the joining socket. It is not the general broadcast used
 for every later room update.
+
+## Canonical Media State v1
+
+Relays advertise this optional recovery primitive with `"media-state-v1"` in
+`room_data.capabilities`. Each active room stores at most one state:
+
+```json
+{
+  "revision": 42,
+  "playbackState": "playing",
+  "currentTime": 1234.5,
+  "updatedAt": 1787234425123,
+  "updatedBy": "peer-id"
+}
+```
+
+The internal `currentTime` is the media position at server-owned `updatedAt`.
+Playing state advances lazily when a snapshot is requested; paused state stays
+fixed. `revision`, `updatedAt`, and `updatedBy` are server-owned. Clients cannot
+spoof them. The wire snapshot contains the already-projected `currentTime`,
+`revision`, `playbackState`, and `updatedBy`, so clients never compare client and
+server wall clocks.
+
+Only accepted, sanitized room controls update canonical state:
+
+- `play` uses its valid `currentTime`, or an existing effective canonical position.
+- `pause` uses its valid `currentTime`, or freezes an existing effective position.
+- `seek` prefers `targetTime` (with `currentTime` compatibility) and preserves the
+  established playback state.
+- `force_sync_prepare` records only temporary coordination state. Its matching
+  `force_sync_execute` commits the prepared target as playing.
+
+`peer_status` heartbeats are observations and never rewrite canonical intent.
+Per-sender `seq` still orders commands from one sender; canonical `revision`
+orders server-accepted room transitions. Neither replaces the other.
+
+On join/reconnect, a capable extension applies a valid snapshot once through an
+extension-internal recovery message. Existing seek/page-API and native-event
+suppression prevent `play`, `pause`, or `seek` echoes. Pending recovery is scoped
+to the room/revision in `chrome.storage.session`, waits for the selected media
+target lifecycle, and is cleared on leave/switch. Intentional host-only guest
+desync and an active Episode Lobby take precedence over snapshot recovery.
+
+Compatibility is additive: new clients use old behavior with a relay that omits
+the capability; old clients ignore the extra `room_data` field from a new relay.
+A new relay canonicalizes every accepted legacy `play`, `pause`, `seek`, and
+matching Force Sync command regardless of `join_room.clientCapabilities`, while
+relaying the established event names, payloads, and order unchanged. This makes
+server-first rollout safe: old clients populate recovery state without needing to
+understand or acknowledge it, and new clients consume it only when the relay
+advertises the capability. No protocol-version or minimum-version bump is
+required. Offline `play`/`pause`/`seek` compaction is planned separately and is
+not part of Media State v1.
 
 ## Ephemeral encrypted chat
 
@@ -253,7 +307,9 @@ them with the same sanitized relay envelope as other room events, including
 
 ### `force_sync_execute`
 
-Payload includes `targetTime`. In `host-only` mode, only controllers may send it.
+The current extension sends sequence/action metadata but no target; the relay uses
+the validated target retained from the matching `force_sync_prepare`. In
+`host-only` mode, only controllers may send it.
 The relay also allows a matching initiator's execute event after that initiator
 started the prepare step, even if their controller state changed before execute.
 

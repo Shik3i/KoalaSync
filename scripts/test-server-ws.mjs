@@ -22,11 +22,14 @@ async function c() {
 }
 function s(ws, evt, d={}) { ws.send(`42${JSON.stringify([evt,d])}`); }
 function a(ws) { if (ws._m.length) { const r=ws._m.shift(); return r.startsWith('42') ? JSON.parse(r.substring(2)) : r; } return new Promise((resolve, reject) => { const t=setTimeout(()=>reject(Error('timeout')),3e3); const h=(d)=>{clearTimeout(t);ws.removeListener('message',h);const r=d.toString();resolve(r.startsWith('42')?JSON.parse(r.substring(2)):r);};ws.on('message',h);}); }
-async function w(ws, evt, ms=3000) { const st=Date.now(); while(Date.now()-st<ms) { for(let i=0;i<ws._m.length;i++){const r=ws._m[i];ws._m.splice(i,1);if(r.startsWith('42')){try{const[e]=JSON.parse(r.substring(2));if(e===evt)return e}catch{/* skip */}}} await new Promise(r=>setTimeout(r,50));} throw Error(`wait:${evt}`); }
+async function w(ws, evt, ms=3000) { const st=Date.now(); while(Date.now()-st<ms) { for(let i=0;i<ws._m.length;i++){const r=ws._m[i];ws._m.splice(i,1);if(r.startsWith('42')){try{const[e,d]=JSON.parse(r.substring(2));if(e===evt)return d}catch{/* skip */}}} await new Promise(r=>setTimeout(r,50));} throw Error(`wait:${evt}`); }
 async function j(ws, rid, pid, pw=null, clientCapabilities=undefined) {
     s(ws,'join_room',{roomId:rid,peerId:pid,password:pw,protocolVersion:'1.0.0',clientCapabilities});
-    assert.equal((await a(ws))[0],'room_data');
+    const [event, data] = await a(ws);
+    assert.equal(event,'room_data');
+    return data;
 }
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function close() { clients.forEach(w=>{try{w.close()}catch{/* ignore */}}); clients.length=0; }
 // Test suite opens >10 connections/min — clear the IP connection counter so the
 // connection rate limiter doesn't mask test failures (test-only, never at runtime).
@@ -76,7 +79,279 @@ try {
         'ROOM_DATA advertises the host-control capability');
     assert.ok(capData.capabilities.includes('chat'), 'ROOM_DATA advertises the chat capability');
     assert.ok(capData.capabilities.includes('chat-v1'), 'ROOM_DATA advertises the versioned chat capability');
+    assert.ok(capData.capabilities.includes('media-state-v1'), 'ROOM_DATA advertises canonical media state v1');
+    assert.equal(capData.mediaState, null, 'a new room starts without invented canonical media state');
     assert.equal(capData.chatHistory, undefined, 'ROOM_DATA never contains chat history');
+    close();
+    resetConnectionRate();
+
+    // --- Mixed-version rollout: pre-media-state extension + current extension ---
+    // Legacy intentionally omits clientCapabilities entirely and uses only the
+    // pre-feature JOIN/PLAY/PAUSE/SEEK/Force Sync wire contract. The current
+    // client advertises only its existing chat capability; media-state support
+    // is a relay capability and is never required for server acquisition.
+    const mixedMediaRid = 'mixed-media-'+Date.now();
+    const legacyMedia = await c(), currentMedia = await c();
+    const legacyRoomData = await j(legacyMedia, mixedMediaRid, 'legacy-media');
+    const currentRoomData = await j(currentMedia, mixedMediaRid, 'current-media', null, ['chat-v1']);
+    assert.equal(legacyRoomData.roomId, mixedMediaRid, 'legacy ROOM_DATA keeps roomId type/meaning');
+    assert.ok(Array.isArray(legacyRoomData.peers), 'legacy ROOM_DATA keeps peers array');
+    assert.equal(typeof legacyRoomData.controlMode, 'string', 'legacy ROOM_DATA keeps controlMode type');
+    assert.ok(Array.isArray(legacyRoomData.controllers), 'legacy ROOM_DATA keeps controllers array');
+    assert.equal(legacyRoomData.mediaState, null, 'new ROOM_DATA field is additive and initially null');
+    assert.ok(currentRoomData.capabilities.includes('media-state-v1'), 'current client sees relay capability');
+    legacyMedia._m.length = currentMedia._m.length = 0;
+
+    const assertUnchangedMediaWire = (payload, label) => {
+        for (const field of ['revision', 'mediaState', 'updatedAt', 'updatedBy']) {
+            assert.equal(payload[field], undefined, `${label} does not add canonical field ${field}`);
+        }
+    };
+
+    // Legacy -> current: ordinary live relay is unchanged while internal state advances.
+    s(legacyMedia, 'play', { currentTime: 100, seq: 1, actionTimestamp: 1001 });
+    const legacyPlayRelay = await w(currentMedia, 'play');
+    assert.equal(legacyPlayRelay.currentTime, 100);
+    assert.equal(legacyPlayRelay.senderId, 'legacy-media');
+    assertUnchangedMediaWire(legacyPlayRelay, 'legacy PLAY relay');
+    assert.deepEqual(mod.rooms.get(mixedMediaRid).mediaState, {
+        revision: 1,
+        playbackState: 'playing',
+        currentTime: 100,
+        updatedAt: mod.rooms.get(mixedMediaRid).mediaState.updatedAt,
+        updatedBy: 'legacy-media'
+    }, 'legacy PLAY canonicalizes without a media-state client capability');
+
+    s(legacyMedia, 'seek', { currentTime: 1200, targetTime: 1200, seq: 2, actionTimestamp: 1002 });
+    const legacySeekRelay = await w(currentMedia, 'seek');
+    assert.equal(legacySeekRelay.currentTime, 1200);
+    assert.equal(legacySeekRelay.targetTime, 1200);
+    assertUnchangedMediaWire(legacySeekRelay, 'legacy SEEK relay');
+    assert.deepEqual(mod.rooms.get(mixedMediaRid).mediaState, {
+        revision: 2,
+        playbackState: 'playing',
+        currentTime: 1200,
+        updatedAt: mod.rooms.get(mixedMediaRid).mediaState.updatedAt,
+        updatedBy: 'legacy-media'
+    });
+
+    s(legacyMedia, 'pause', { currentTime: 1200, seq: 3, actionTimestamp: 1003 });
+    const legacyPauseRelay = await w(currentMedia, 'pause');
+    assert.equal(legacyPauseRelay.currentTime, 1200);
+    assertUnchangedMediaWire(legacyPauseRelay, 'legacy PAUSE relay');
+    assert.deepEqual(mod.rooms.get(mixedMediaRid).mediaState, {
+        revision: 3,
+        playbackState: 'paused',
+        currentTime: 1200,
+        updatedAt: mod.rooms.get(mixedMediaRid).mediaState.updatedAt,
+        updatedBy: 'legacy-media'
+    });
+
+    // Current -> legacy: old receive path sees the same ordinary events and fields.
+    s(currentMedia, 'play', { currentTime: 1300, seq: 1, actionTimestamp: 2001 });
+    const currentPlayRelay = await w(legacyMedia, 'play');
+    assert.equal(currentPlayRelay.currentTime, 1300);
+    assertUnchangedMediaWire(currentPlayRelay, 'current PLAY relay to legacy client');
+    s(currentMedia, 'seek', { currentTime: 1400, targetTime: 1400, seq: 2, actionTimestamp: 2002 });
+    const currentSeekRelay = await w(legacyMedia, 'seek');
+    assert.equal(currentSeekRelay.targetTime, 1400);
+    assertUnchangedMediaWire(currentSeekRelay, 'current SEEK relay to legacy client');
+
+    // Legacy Force Sync needs no new target on EXECUTE, event or ACK. Canonical
+    // bookkeeping remains internal and commits only after the existing execute.
+    const beforeLegacyPrepare = { ...mod.rooms.get(mixedMediaRid).mediaState };
+    s(legacyMedia, 'force_sync_prepare', { targetTime: 1600, seq: 4, actionTimestamp: 1004 });
+    const legacyPrepareRelay = await w(currentMedia, 'force_sync_prepare');
+    assert.equal(legacyPrepareRelay.targetTime, 1600);
+    assertUnchangedMediaWire(legacyPrepareRelay, 'legacy Force Sync PREPARE relay');
+    assert.deepEqual(mod.rooms.get(mixedMediaRid).mediaState, beforeLegacyPrepare,
+        'legacy PREPARE remains choreography and does not commit canonical state');
+    s(currentMedia, 'force_sync_ack', { seq: 3 });
+    const currentAckRelay = await w(legacyMedia, 'force_sync_ack');
+    assert.equal(currentAckRelay.senderId, 'current-media');
+    assertUnchangedMediaWire(currentAckRelay, 'existing Force Sync ACK relay');
+    s(legacyMedia, 'force_sync_execute', { seq: 5, actionTimestamp: 1005 });
+    const legacyExecuteRelay = await w(currentMedia, 'force_sync_execute');
+    assert.equal(legacyExecuteRelay.targetTime, undefined, 'legacy EXECUTE still requires no target field');
+    assertUnchangedMediaWire(legacyExecuteRelay, 'legacy Force Sync EXECUTE relay');
+    assert.deepEqual(mod.rooms.get(mixedMediaRid).mediaState, {
+        revision: beforeLegacyPrepare.revision + 1,
+        playbackState: 'playing',
+        currentTime: 1600,
+        updatedAt: mod.rooms.get(mixedMediaRid).mediaState.updatedAt,
+        updatedBy: 'legacy-media'
+    }, 'legacy Force Sync EXECUTE commits only internal canonical state');
+
+    // Host Control remains the sole authorization chokepoint, independent of
+    // media-state client knowledge.
+    s(legacyMedia, 'set_control_mode', { controlMode: 'host-only' });
+    await w(legacyMedia, 'control_mode');
+    await w(currentMedia, 'control_mode');
+    legacyMedia._m.length = currentMedia._m.length = 0;
+    const mixedHostBaseline = { ...mod.rooms.get(mixedMediaRid).mediaState };
+    s(currentMedia, 'seek', { currentTime: 1650, targetTime: 1650, seq: 4, actionTimestamp: 2004 });
+    let mixedGuestRejected = false;
+    try { await w(legacyMedia, 'seek', 600); } catch { mixedGuestRejected = true; }
+    assert.ok(mixedGuestRejected, 'current guest command remains rejected in mixed host-only room');
+    assert.deepEqual(mod.rooms.get(mixedMediaRid).mediaState, mixedHostBaseline,
+        'rejected mixed-version guest command does not mutate or revise canonical state');
+
+    s(legacyMedia, 'seek', { currentTime: 1700, targetTime: 1700, seq: 6, actionTimestamp: 1006 });
+    const legacyHostSeek = await w(currentMedia, 'seek');
+    assert.equal(legacyHostSeek.targetTime, 1700, 'allowed legacy controller command relays normally');
+    assert.equal(mod.rooms.get(mixedMediaRid).mediaState.updatedBy, 'legacy-media');
+    assert.equal(mod.rooms.get(mixedMediaRid).mediaState.currentTime, 1700);
+
+    // Make the final stable intent legacy-owned, then reconnect only the current client.
+    s(legacyMedia, 'pause', { currentTime: 1700, seq: 7, actionTimestamp: 1007 });
+    await w(currentMedia, 'pause');
+    const legacyFinalRevision = mod.rooms.get(mixedMediaRid).mediaState.revision;
+    const currentMediaRejoin = await c();
+    const mixedRejoinData = await j(currentMediaRejoin, mixedMediaRid, 'current-media', null, ['chat-v1']);
+    assert.equal(mixedRejoinData.mediaState.revision, legacyFinalRevision);
+    assert.equal(mixedRejoinData.mediaState.playbackState, 'paused');
+    assert.equal(mixedRejoinData.mediaState.currentTime, 1700);
+    assert.equal(mixedRejoinData.mediaState.updatedBy, 'legacy-media',
+        'current reconnect snapshot reflects the legacy client latest accepted intent');
+    assert.equal(legacyMedia._m.some(raw => raw.includes('media_state')), false,
+        'legacy client receives no new canonical event or ACK requirement');
+    close();
+    resetConnectionRate();
+
+    // --- Canonical Media State v1: late join, pause, seek and reconnect ---
+    const msrid = 'media-state-'+Date.now();
+    const msa = await c();
+    const initialMediaRoom = await j(msa, msrid, 'msa');
+    assert.equal(initialMediaRoom.mediaState, null, 'media state is initially null');
+
+    s(msa, 'play', { currentTime: 100, revision: 999, updatedBy: 'spoofed' });
+    await delay(120);
+    const msb = await c();
+    const playingJoin = await j(msb, msrid, 'msb');
+    assert.equal(playingJoin.mediaState.revision, 1, 'first accepted PLAY creates revision 1');
+    assert.equal(playingJoin.mediaState.playbackState, 'playing');
+    assert.ok(playingJoin.mediaState.currentTime >= 100.08 && playingJoin.mediaState.currentTime < 101,
+        `playing late join receives projected position (${playingJoin.mediaState.currentTime})`);
+    assert.equal(playingJoin.mediaState.updatedBy, 'msa', 'updatedBy is server-tracked identity');
+
+    s(msa, 'pause', { currentTime: 150 });
+    await delay(40);
+    const pausedRevision = mod.rooms.get(msrid).mediaState.revision;
+    await delay(100);
+    const msc = await c();
+    const pausedJoin = await j(msc, msrid, 'msc');
+    assert.equal(pausedJoin.mediaState.revision, pausedRevision);
+    assert.equal(pausedJoin.mediaState.playbackState, 'paused');
+    assert.equal(pausedJoin.mediaState.currentTime, 150, 'paused late join position does not advance');
+
+    s(msa, 'seek', { currentTime: 500, targetTime: 600 });
+    await delay(40);
+    const seekState = mod.rooms.get(msrid).mediaState;
+    assert.equal(seekState.currentTime, 600, 'SEEK uses targetTime rather than currentTime');
+    assert.equal(seekState.playbackState, 'paused', 'SEEK preserves canonical playback state');
+
+    s(msa, 'play', { currentTime: 1800 });
+    await delay(60);
+    const reconnect1 = await c();
+    const reconnectFirst = await j(reconnect1, msrid, 'reconnect');
+    reconnect1.close();
+    await delay(120);
+    const beforePeerDedupe = { ...mod.rooms.get(msrid).mediaState };
+    const reconnect2 = await c();
+    const reconnectSecond = await j(reconnect2, msrid, 'reconnect');
+    assert.equal(reconnectSecond.mediaState.revision, reconnectFirst.mediaState.revision,
+        'lazy clock projection does not increment revision');
+    assert.ok(reconnectSecond.mediaState.currentTime > reconnectFirst.mediaState.currentTime,
+        'reconnect receives a newly projected playing position');
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforePeerDedupe,
+        'peer dedupe/reconnect does not reset or revise canonical state');
+
+    const beforeOrderingRevision = mod.rooms.get(msrid).mediaState.revision;
+    s(msa, 'seek', { targetTime: 100 });
+    await delay(30);
+    s(msb, 'seek', { targetTime: 200 });
+    await delay(40);
+    const orderedState = mod.rooms.get(msrid).mediaState;
+    assert.equal(orderedState.revision, beforeOrderingRevision + 2, 'accepted controllers increment revision in server order');
+    assert.equal(orderedState.currentTime, 200, 'last accepted controller wins');
+    assert.equal(orderedState.updatedBy, 'msb');
+    s(msb, 'seek', { targetTime: 300 });
+    await delay(30);
+    s(msa, 'seek', { targetTime: 400 });
+    await delay(40);
+    const reverseOrderedState = mod.rooms.get(msrid).mediaState;
+    assert.equal(reverseOrderedState.revision, orderedState.revision + 2);
+    assert.equal(reverseOrderedState.currentTime, 400, 'reversing server order reverses the winning controller');
+    assert.equal(reverseOrderedState.updatedBy, 'msa');
+
+    // Heartbeats remain observations and cannot rewrite canonical intent.
+    const beforeHeartbeat = { ...reverseOrderedState };
+    s(msa, 'peer_status', { playbackState: 'paused', currentTime: 999 });
+    await delay(40);
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforeHeartbeat, 'PEER_STATUS does not mutate canonical state');
+
+    // Force Sync PREPARE is choreography; matching EXECUTE commits its final target.
+    s(msa, 'force_sync_prepare', { targetTime: 700 });
+    await delay(40);
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforeHeartbeat, 'Force Sync PREPARE does not mutate canonical state');
+    s(msa, 'force_sync_execute', {});
+    await delay(40);
+    const forceSyncState = mod.rooms.get(msrid).mediaState;
+    assert.equal(forceSyncState.revision, beforeHeartbeat.revision + 1);
+    assert.equal(forceSyncState.playbackState, 'playing');
+    assert.equal(forceSyncState.currentTime, 700);
+
+    // Active Episode Lobby is additive ROOM_DATA state and does not rewrite mediaState.
+    s(msa, 'episode_lobby', { expectedTitle: 'S02E03' });
+    await delay(40);
+    const beforeLobbyJoin = { ...mod.rooms.get(msrid).mediaState };
+    const msLobbyJoiner = await c();
+    const lobbyRoomData = await j(msLobbyJoiner, msrid, 'ms-lobby');
+    assert.equal(lobbyRoomData.activeLobby.expectedTitle, 'S02E03');
+    assert.equal(lobbyRoomData.mediaState.revision, beforeLobbyJoin.revision);
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforeLobbyJoin, 'Episode Lobby does not mutate canonical state');
+    s(msa, 'leave_room', {});
+    await delay(50);
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforeLobbyJoin,
+        'host disconnect/reassignment preserves canonical state and revision');
+    close();
+    resetConnectionRate();
+
+    // --- Canonical Media State v1: Host Control and validation chokepoints ---
+    const msgateRid = 'media-gate-'+Date.now();
+    const msgHost = await c(), msgGuest = await c(), msgUnjoined = await c();
+    await j(msgHost, msgateRid, 'msg-host');
+    await j(msgGuest, msgateRid, 'msg-guest');
+    s(msgHost, 'play', { currentTime: 10 });
+    await delay(40);
+    s(msgHost, 'set_control_mode', { controlMode: 'host-only' });
+    await w(msgGuest, 'control_mode');
+    msgHost._m.length = msgGuest._m.length = 0;
+    const gatedBaseline = { ...mod.rooms.get(msgateRid).mediaState };
+
+    s(msgGuest, 'seek', { targetTime: 900 });
+    await delay(80);
+    assert.deepEqual(mod.rooms.get(msgateRid).mediaState, gatedBaseline,
+        'host-only rejected guest cannot mutate canonical state or revision');
+
+    s(msgHost, 'seek', { targetTime: 800 });
+    await delay(40);
+    assert.equal(mod.rooms.get(msgateRid).mediaState.revision, gatedBaseline.revision + 1);
+    assert.equal(mod.rooms.get(msgateRid).mediaState.currentTime, 800);
+
+    const validationBaseline = { ...mod.rooms.get(msgateRid).mediaState };
+    for (const invalidPayload of [{ targetTime: null }, { targetTime: '50' }, { targetTime: {} }, {}]) {
+        s(msgHost, 'seek', invalidPayload);
+    }
+    s(msgUnjoined, 'seek', { roomId: msgateRid, targetTime: 999, updatedBy: 'msg-host', revision: 999999 });
+    await delay(80);
+    assert.deepEqual(mod.rooms.get(msgateRid).mediaState, validationBaseline,
+        'invalid and unjoined/cross-room payloads cannot corrupt canonical state');
+
+    s(msgHost, 'leave_room', {});
+    s(msgGuest, 'leave_room', {});
+    await delay(80);
+    assert.equal(mod.rooms.has(msgateRid), false, 'empty-room cleanup removes canonical state with the room');
     close();
     resetConnectionRate();
 

@@ -32,6 +32,27 @@ Ensures all peers are buffered and synchronized before resuming:
    > **Network Transit Buffer Rule**: The orchestrator (`background.js`) must always use a timeout at least 500ms longer than the worker (`content.js`) to account for IPC and network transit time. Never align them exactly 1:1, as this will introduce a race condition on slow connections.
 4. **Resume**: All peers call `play()` simultaneously.
 
+## 3.1 Canonical Media State v1
+
+The relay keeps one optional, in-memory canonical playback state per active room.
+Accepted `PLAY`, `PAUSE`, and `SEEK` commands advance a server-owned revision.
+Playing positions advance lazily from the server update time; paused positions do
+not. Heartbeats remain observational and do not mutate canonical state.
+
+`ROOM_DATA` materializes the playing position at snapshot creation and advertises
+the optional `media-state-v1` capability. A joining/reconnecting client validates
+the room/revision, respects Host Control solo mode and Episode Lobby, then sends an
+internal `APPLY_CANONICAL_MEDIA_STATE` message to the existing content/video path.
+That path reuses frame election, Netflix/Disney page-API seeks, native play/pause,
+the 2-second drift tolerance, and programmatic-event suppression. The apply is
+one-shot recovery: it creates no action history, notification, command ACK, or
+relay media event.
+
+Force Sync remains a two-phase ACK protocol. `PREPARE` is temporary choreography;
+the matching `EXECUTE` commits its validated target to canonical state. Per-sender
+`seq`, peer heartbeats, and the existing reconnect event queue remain separate.
+Offline media-command compaction is intentionally deferred.
+
 ## 4. Episode Auto-Sync
 Maintains continuous synchronized viewing when watching series:
 1. **Detection**: `content.js` monitors the Media Session API for title changes.

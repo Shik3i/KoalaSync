@@ -54,6 +54,15 @@ async function getExtensionState(context, extensionId, message) {
     ));
 }
 
+async function applyCanonicalMediaState(context, extensionId, tabId, mediaState) {
+    return withExtensionPage(context, extensionId, page => page.evaluate(async ({ tabId, mediaState }) => {
+        return chrome.tabs.sendMessage(tabId, {
+            type: 'APPLY_CANONICAL_MEDIA_STATE',
+            mediaState
+        });
+    }, { tabId, mediaState }));
+}
+
 async function setAudioSettings(context, extensionId, settings) {
     return withExtensionPage(context, extensionId, page => page.evaluate(
         value => chrome.storage.local.set({ audioSettings: value }),
@@ -261,6 +270,46 @@ test('applies remote play, pause and seek to the framed player', async ({ contex
         () => page.evaluate(() => document.querySelector('iframe').contentDocument.querySelector('video').currentTime),
         { message: 'remote seek should move the framed player' }
     ).toBeGreaterThan(5);
+});
+
+test('applies canonical recovery without echoing media commands or activity', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    const historyBefore = await getExtensionState(context, extensionId, { type: 'GET_HISTORY' });
+
+    const playingApply = await applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 10,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    });
+    expect(playingApply).toMatchObject({ status: 'applied', revision: 10 });
+    await expect.poll(() => page.locator('#player').evaluate(video => ({
+        paused: video.paused,
+        currentTime: video.currentTime
+    }))).toMatchObject({ paused: false });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(5);
+
+    const pausedApply = await applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 11,
+        playbackState: 'paused',
+        currentTime: 10,
+        updatedBy: 'peer-a'
+    });
+    expect(pausedApply).toMatchObject({ status: 'applied', revision: 11 });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(true);
+    await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(9);
+
+    // Wait past seek debounce and play/pause coalescing windows. A leaked native
+    // echo would have reached background.js and appeared as user activity by now.
+    await page.waitForTimeout(700);
+    const historyAfter = await getExtensionState(context, extensionId, { type: 'GET_HISTORY' });
+    expect(historyAfter).toEqual(historyBefore);
 });
 
 test('reinjects after the target tab navigates', async ({ context, extensionId, baseURL }) => {

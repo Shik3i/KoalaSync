@@ -8,6 +8,7 @@ import { clearChatKeyCache, decryptChatMessage, encryptChatMessage, generateChat
 import { buildChatRelayPayload, encodeSocketEvent } from './chat-wire.js';
 import { createChatEchoTracker, createChatSendLimiter, createLatestTaskQueue, normalizeRoomId, shouldShowChatNotification } from './chat-session.js';
 import { createChatActivityStore } from './chat-activity.js';
+import { canonicalMediaStateFromRoomData, createCanonicalMediaStateTracker } from './canonical-media-state.js';
 import { HOST_ACCESS_REQUIRED_STATUS, normalizeTabId, inspectTabHostAccess, isHostAccessError, addTabHostAccessRequest, removeTabHostAccessRequest } from './host-access.js';
 import {
     MEDIA_FRAME_ACCESS_REQUIRED,
@@ -238,6 +239,15 @@ let isNamespaceJoined = false;
 let lastActionState = { action: null, senderId: null, timestamp: 0, acks: [] };
 let localSeq = 0;                         // Monotonically increasing command sequence for this peer
 const lastSeqBySender = {};               // senderId → last received seq (stale command guard)
+const canonicalMediaStateTracker = createCanonicalMediaStateTracker();
+const CANONICAL_MEDIA_EVENTS = new Set([
+    EVENTS.PLAY,
+    EVENTS.PAUSE,
+    EVENTS.SEEK,
+    EVENTS.FORCE_SYNC_PREPARE,
+    EVENTS.FORCE_SYNC_EXECUTE
+]);
+let flushedMediaControlsBeforeRoomData = false;
 
 // --- Host Control Mode ---
 let controlMode = CONTROL_MODES.EVERYONE;  // 'everyone' | 'host-only'
@@ -258,6 +268,18 @@ function serverSupportsChat() {
 }
 const CLIENT_CAPABILITIES = Object.freeze([CAPABILITIES.CHAT_V1]);
 
+function persistCanonicalMediaRecovery() {
+    if (!storageInitialized) return;
+    chrome.storage.session.set({
+        canonicalMediaRecovery: canonicalMediaStateTracker.snapshot()
+    }).catch(() => {});
+}
+
+function clearCanonicalMediaRecovery() {
+    canonicalMediaStateTracker.clear();
+    persistCanonicalMediaRecovery();
+}
+
 function invalidateChatSession() {
     chatSessionGeneration++;
     chatReceiveQueue = Promise.resolve();
@@ -274,6 +296,7 @@ function clearChatActivity() {
 async function clearFailedJoinCredentials() {
     webJoinCoordinator.invalidate();
     connectIntent = false;
+    clearCanonicalMediaRecovery();
     chatSecretGuard = '';
     invalidateChatSession();
     await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
@@ -364,7 +387,7 @@ function ensureState() {
                 'currentTargetFrameId', 'currentTargetDocumentId', 'currentTargetHasVideo',
                 'selectedTabId', 'selectedTabTitle', 'selectionErrorTabId', 'selectionErrorMessage',
                 'episodeLobby', 'localSeq', 'lastSeqBySender', 'expectedAcksCount', 'roomIdleSince', 'lastContentHeartbeatAt',
-                'hcmDesynced', 'chatActivityTimeline'
+                'hcmDesynced', 'chatActivityTimeline', 'canonicalMediaRecovery'
             ], (data) => {
                 clearTimeout(storageTimeout);
                 if (data.expectedAcksCount !== undefined) expectedAcksCount = data.expectedAcksCount;
@@ -413,6 +436,10 @@ function ensureState() {
                 // the host, or the room is in 'everyone'). Without this, the first heartbeat
                 // after SW restart would broadcast a bogus Solo flag for up to 15s.
                 hcmEnforceDesyncInvariant();
+                canonicalMediaStateTracker.restore(
+                    data.canonicalMediaRecovery,
+                    currentRoom?.roomId || null
+                );
                 if (data.lastActionState) lastActionState = data.lastActionState;
                 
                 if (data.eventQueue) eventQueue = [...eventQueue, ...data.eventQueue].slice(0, 50);
@@ -883,7 +910,12 @@ function adoptReportingFrame(sender) {
     const senderFrameId = normalizeFrameId(sender.frameId);
     if (senderFrameId === normalizeFrameId(currentTargetFrameId)
         && (!currentTargetDocumentId || sender.documentId === currentTargetDocumentId)) {
-        return false;
+        if (currentTargetHasVideo === true) return false;
+        currentTargetHasVideo = true;
+        stopMediaDiscoveryPoll();
+        chrome.storage.session.set({ currentTargetHasVideo }).catch(() => {});
+        tryApplyPendingCanonicalMediaState().catch(() => {});
+        return true;
     }
 
     currentTargetFrameId = senderFrameId;
@@ -897,6 +929,7 @@ function adoptReportingFrame(sender) {
         currentTargetDocumentId,
         currentTargetHasVideo
     }).catch(() => {});
+    tryApplyPendingCanonicalMediaState().catch(() => {});
     return true;
 }
 
@@ -998,6 +1031,7 @@ async function leaveRoomAfterIdleGrace(reason) {
     emit(EVENTS.LEAVE_ROOM, { peerId });
     forceDisconnect();
     currentRoom = null;
+    clearCanonicalMediaRecovery();
     clearChatActivity();
     controlMode = CONTROL_MODES.EVERYONE;
     hostPeerId = null;
@@ -1104,6 +1138,8 @@ async function connect() {
 
         // --- Phase 4: WebSocket Init ---
         try {
+            canonicalMediaStateTracker.beginRecovery(settings.roomId || currentRoom?.roomId || null);
+            persistCanonicalMediaRecovery();
             const url = new URL(finalUrl);
             url.pathname = '/socket.io/';
             url.searchParams.set('EIO', '4');
@@ -1155,6 +1191,12 @@ async function connect() {
                         protocolVersion: PROTOCOL_VERSION
                     });
                 }
+                // Preserve the existing immediate queue-drain behavior. Remember
+                // whether local media intent was flushed before ROOM_DATA so an
+                // older snapshot cannot snap the player backward on reconnect.
+                flushedMediaControlsBeforeRoomData = eventQueue.some(item =>
+                    item && CANONICAL_MEDIA_EVENTS.has(item.event)
+                );
                 flushEventQueue();
             } else if (msg.startsWith('42')) {
                 try {
@@ -1583,6 +1625,95 @@ function stopPing() {
     missedPongs = 0;
 }
 
+function markCanonicalMediaStateHandled(roomId, revision) {
+    if (!canonicalMediaStateTracker.markHandled(roomId, revision)) return false;
+    persistCanonicalMediaRecovery();
+    return true;
+}
+
+async function tryApplyPendingCanonicalMediaState() {
+    const roomId = currentRoom?.roomId;
+    const pending = canonicalMediaStateTracker.getPending(roomId);
+    if (!pending || !roomId) return { status: 'none' };
+
+    const { mediaState } = pending;
+    if (hcmDesynced) {
+        markCanonicalMediaStateHandled(roomId, mediaState.revision);
+        addLog(`Canonical media state r${mediaState.revision} skipped: local guest is desynced`, 'info');
+        return { status: 'ignored_desynced' };
+    }
+    if (episodeLobby) {
+        markCanonicalMediaStateHandled(roomId, mediaState.revision);
+        addLog(`Canonical media state r${mediaState.revision} skipped: episode lobby is active`, 'info');
+        return { status: 'ignored_episode_lobby' };
+    }
+
+    const tabId = normalizeTabId(currentTabId);
+    if (tabId === null || currentTargetHasVideo !== true) return { status: 'pending_no_target' };
+
+    try {
+        const response = await sendMessageToContentTab(tabId, {
+            type: 'APPLY_CANONICAL_MEDIA_STATE',
+            mediaState
+        });
+        if (currentRoom?.roomId !== roomId) return { status: 'stale_room' };
+        const latestPending = canonicalMediaStateTracker.getPending(roomId);
+        if (latestPending?.mediaState.revision !== mediaState.revision) return { status: 'superseded' };
+
+        if (response?.status === 'applied') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            const drift = Number.isFinite(response.drift) ? ` (drift ${response.drift.toFixed(2)}s)` : '';
+            addLog(`Applied canonical media state r${mediaState.revision}${drift}`, 'success');
+        } else if (response?.status === 'ignored_desynced') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            addLog(`Canonical media state r${mediaState.revision} skipped: content is desynced`, 'info');
+        } else if (response?.status === 'invalid') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            addLog(`Canonical media state r${mediaState.revision} rejected by content validation`, 'warn');
+        }
+        return response || { status: 'no_response' };
+    } catch (error) {
+        addLog(`Canonical media state r${mediaState.revision} pending: ${error.message}`, 'warn');
+        return { status: 'pending_unreachable' };
+    }
+}
+
+async function handleCanonicalRoomData(data, hadQueuedMediaControls) {
+    canonicalMediaStateTracker.adoptRoom(data?.roomId || null);
+    const canonicalSnapshot = canonicalMediaStateFromRoomData(data);
+    if (canonicalSnapshot.status === 'unsupported' || canonicalSnapshot.status === 'empty') {
+        persistCanonicalMediaRecovery();
+        return;
+    }
+
+    if (canonicalSnapshot.status === 'invalid') {
+        addLog('Ignored invalid canonical media state in ROOM_DATA', 'warn');
+        persistCanonicalMediaRecovery();
+        return;
+    }
+    const { mediaState } = canonicalSnapshot;
+
+    const received = canonicalMediaStateTracker.receive(data.roomId, mediaState);
+    if (received.status === 'stale') {
+        addLog(`Canonical media state ignored: stale revision ${mediaState.revision}`, 'info');
+        return;
+    }
+    if (received.status !== 'pending') return;
+
+    persistCanonicalMediaRecovery();
+    addLog(`Canonical media state received: r${mediaState.revision} ${mediaState.playbackState} @ ${mediaState.currentTime.toFixed(2)}s`, 'info');
+
+    if (hadQueuedMediaControls) {
+        markCanonicalMediaStateHandled(data.roomId, mediaState.revision);
+        addLog(`Canonical media state r${mediaState.revision} skipped: queued local media controls are authoritative for this reconnect`, 'info');
+        return;
+    }
+    const result = await tryApplyPendingCanonicalMediaState();
+    if (result.status === 'pending_no_target') {
+        addLog(`Canonical media state r${mediaState.revision} pending: no media target`, 'info');
+    }
+}
+
 // --- Event Handlers ---
 async function handleServerEvent(event, data) {
     if (!data) {
@@ -1603,7 +1734,9 @@ async function handleServerEvent(event, data) {
         return;
     }
     switch (event) {
-        case EVENTS.ROOM_DATA:
+        case EVENTS.ROOM_DATA: {
+            const hadQueuedMediaControls = flushedMediaControlsBeforeRoomData;
+            flushedMediaControlsBeforeRoomData = false;
             if (currentRoom?.roomId !== data.roomId) {
                 invalidateChatSession();
                 clearChatActivity();
@@ -1668,7 +1801,9 @@ async function handleServerEvent(event, data) {
             // Inform Website Bridge & Popup
             const joinStatusMsg = { type: 'JOIN_STATUS', success: true, message: 'Joined' };
             await broadcastJoinStatus(joinStatusMsg);
+            await handleCanonicalRoomData(data, hadQueuedMediaControls);
             break;
+        }
         case EVENTS.CONTROL_MODE:
             // Host Control Mode changed (toggle or host-leave fallback).
             controlMode = data.controlMode || CONTROL_MODES.EVERYONE;
@@ -3243,6 +3378,9 @@ async function activateTargetTab(tabId, tabTitle, {
             return { status: 'superseded' };
         }
         updateBadgeStatus();
+        if (currentTargetHasVideo) {
+            await tryApplyPendingCanonicalMediaState();
+        }
         return {
             status: 'ok',
             tabId: selectedTabId,
@@ -3656,6 +3794,7 @@ function leaveOldRoomIfSwitching(newRoomId) {
         addLog(`Switching rooms: leaving ${currentRoom.roomId} to join ${newRoomId}`, 'info');
         forceDisconnect();
         currentRoom = null;
+        clearCanonicalMediaRecovery();
         clearChatActivity();
         controlMode = CONTROL_MODES.EVERYONE;
         hostPeerId = null;
@@ -4076,6 +4215,13 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         // heartbeat survives SW restarts (idle timeout, crash).
         hcmDesynced = !!message.desynced;
         if (storageInitialized) chrome.storage.session.set({ hcmDesynced });
+        if (hcmDesynced) {
+            const pending = canonicalMediaStateTracker.getPending(currentRoom?.roomId);
+            if (pending) {
+                markCanonicalMediaStateHandled(pending.roomId, pending.mediaState.revision);
+                addLog(`Canonical media state r${pending.mediaState.revision} skipped: local guest chose desynced mode`, 'info');
+            }
+        }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'LEAVE_ROOM') {
         webJoinCoordinator.invalidate();
@@ -4086,6 +4232,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null });
         emit(EVENTS.LEAVE_ROOM, { peerId });
         currentRoom = null;
+        clearCanonicalMediaRecovery();
         clearChatActivity();
         controlMode = CONTROL_MODES.EVERYONE;
         hostPeerId = null;

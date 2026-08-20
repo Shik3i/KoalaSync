@@ -83,6 +83,7 @@
         EPISODE_LOBBY: "episode_lobby",
         EPISODE_READY: "episode_ready"
     };
+    const MAX_MEDIA_TIME = 86400;
     // --- SHARED_EVENTS_INJECT_END ---
 
     // Suppresses native event reporting after a programmatic action.
@@ -1212,6 +1213,47 @@
         }
     }
 
+    function applyCanonicalMediaState(mediaState) {
+        if (!mediaState || typeof mediaState !== 'object'
+            || !Number.isSafeInteger(mediaState.revision) || mediaState.revision < 1
+            || (mediaState.playbackState !== 'playing' && mediaState.playbackState !== 'paused')
+            || typeof mediaState.currentTime !== 'number'
+            || !Number.isFinite(mediaState.currentTime)
+            || mediaState.currentTime < 0
+            || mediaState.currentTime > MAX_MEDIA_TIME) {
+            return { status: 'invalid' };
+        }
+        if (hcmDesynced) return { status: 'ignored_desynced' };
+
+        const video = findVideo();
+        if (!video) return { status: 'no_video' };
+
+        const currentTime = getSyncCurrentTime(video);
+        const drift = currentTime === null ? null : mediaState.currentTime - currentTime;
+        const shouldSeek = drift === null || Math.abs(drift) >= MIN_SEEK_DELTA;
+
+        try {
+            // Paused recovery pauses before seeking; playing recovery seeks before
+            // starting. Both paths reuse the same site/page-API abstractions and
+            // native-event suppression as ordinary remote commands.
+            if (mediaState.playbackState === 'paused' && !video.paused) {
+                tryMediaAction(EVENTS.PAUSE);
+            }
+            if (shouldSeek) {
+                _setSuppress('seek');
+                seekVideo(video, mediaState.currentTime);
+            }
+            if (mediaState.playbackState === 'playing' && video.paused) {
+                tryMediaAction(EVENTS.PLAY);
+            }
+            scheduleProactiveHeartbeat();
+            return { status: 'applied', revision: mediaState.revision, drift, sought: shouldSeek };
+        } catch (error) {
+            reportLog(`Canonical media state apply failed: ${error.message}`, 'warn');
+            return { status: 'apply_failed' };
+        }
+    }
+
     // --- Helper: Wait until video is ready for playback (buffered & seeked) ---
     function pollSeekReady(targetTime, timeoutMs = 8000) {
         return new Promise((resolve) => {
@@ -1309,6 +1351,11 @@
         if (message.type === 'REQUEST_HEARTBEAT') {
             sendHeartbeat();
             sendResponse({ ok: true });
+            return true;
+        }
+
+        if (message.type === 'APPLY_CANONICAL_MEDIA_STATE') {
+            sendResponse(applyCanonicalMediaState(message.mediaState));
             return true;
         }
 

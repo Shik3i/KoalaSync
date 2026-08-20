@@ -4,8 +4,13 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { EVENTS, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES } from '../shared/constants.js';
+import { EVENTS, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, MAX_MEDIA_TIME } from '../shared/constants.js';
 import { createChatEnvelope } from './chat.js';
+import {
+    commitForceSyncMediaState,
+    snapshotMediaState,
+    updateMediaStateFromControl
+} from './media-state.js';
 import {
     buildHealthPayload,
     checkCooldown,
@@ -178,7 +183,8 @@ const SERVER_CAPABILITIES = [
     CAPABILITIES.HOST_CONTROL,
     CAPABILITIES.CO_HOST,
     CAPABILITIES.CHAT,
-    CAPABILITIES.CHAT_V1
+    CAPABILITIES.CHAT_V1,
+    CAPABILITIES.MEDIA_STATE_V1
 ];
 
 function normalizeClientCapabilities(value) {
@@ -283,6 +289,7 @@ function removePeerFromRoom(socketId, roomId, reason) {
         // H-1: a leaving initiator strands the room's force-sync — release the
         // slot so a future controller's PREPARE can take over cleanly.
         if (room.forceSyncInitiator === peerId) room.forceSyncInitiator = null;
+        if (room.forceSyncTarget?.initiatorPeerId === peerId) room.forceSyncTarget = null;
         if (room.hostPeerId === peerId) {
             // Owner left → reassign owner + fall back to 'everyone' so the room is
             // never stuck locked, and reset the controller set to just the new owner.
@@ -445,7 +452,13 @@ io.on('connection', (socket) => {
                             // controller's FORCE_SYNC_EXECUTE through the host-only gate — without
                             // it, demoting a co-host mid-force-sync would drop their EXECUTE and
                             // leave every peer stuck paused.
-                            forceSyncInitiator: null
+                            forceSyncInitiator: null,
+                            // Canonical Media State v1 is lazy, room-local and absent until
+                            // the first accepted command establishes a trustworthy position.
+                            mediaState: null,
+                            // PREPARE is choreography, not stable room intent. Retain its
+                            // validated target only so the matching EXECUTE can commit it.
+                            forceSyncTarget: null
                         };
                         rooms.set(roomId, room);
                         createdByMe = true;
@@ -528,6 +541,7 @@ io.on('connection', (socket) => {
             peerToSocket.set(peerId, socket.id);
 
             socket.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, username: username || null, tabTitle: tabTitle || null, mediaTitle: mediaTitle || null, status: 'joined' });
+            const snapshotAt = Date.now();
             socket.emit(EVENTS.ROOM_DATA, {
                 roomId,
                 peers: Array.from(room.peers).map(sid => room.peerData.get(sid)),
@@ -535,6 +549,7 @@ io.on('connection', (socket) => {
                 hostPeerId: room.hostPeerId || null,
                 controlMode: room.controlMode || CONTROL_MODES.EVERYONE,
                 controllers: room.controllers ? Array.from(room.controllers) : [],
+                mediaState: snapshotMediaState(room.mediaState, snapshotAt),
                 capabilities: SERVER_CAPABILITIES
             });
             log('ROOM', `Peer ${peerId} joined: ${roomId.substring(0, 3)}***`);
@@ -617,7 +632,7 @@ io.on('connection', (socket) => {
                         tabTitle:      data.tabTitle      === null ? null : (data.tabTitle      !== undefined ? (clamp(data.tabTitle, 100)  ?? existing.tabTitle)      : existing.tabTitle),
                         mediaTitle:    data.mediaTitle    === null ? null : (data.mediaTitle    !== undefined ? (clamp(data.mediaTitle, 100) ?? existing.mediaTitle)   : existing.mediaTitle),
                         playbackState: data.playbackState !== undefined ? (validState(data.playbackState) ?? existing.playbackState) : existing.playbackState,
-                        currentTime:   data.currentTime   === null ? null : (data.currentTime   !== undefined ? (clampNum(data.currentTime, 0, 86400) ?? existing.currentTime)   : existing.currentTime),
+                        currentTime:   data.currentTime   === null ? null : (data.currentTime   !== undefined ? (clampNum(data.currentTime, 0, MAX_MEDIA_TIME) ?? existing.currentTime)   : existing.currentTime),
                         volume:        data.volume        !== undefined ? (clampNum(data.volume, 0, 1) ?? existing.volume)                 : existing.volume,
                         muted:         data.muted         !== undefined ? (validBool(data.muted) ?? existing.muted)                       : existing.muted,
                         desynced:      data.desynced      !== undefined ? (validBool(data.desynced) === true) : (existing.desynced || false),
@@ -628,8 +643,8 @@ io.on('connection', (socket) => {
                     const relayPayload = {
                         senderId:        mapping.peerId,
                         seq:             clampNum(data.seq, 0, Number.MAX_SAFE_INTEGER),
-                        currentTime:     data.currentTime === null ? null : clampNum(data.currentTime, 0, 86400),
-                        targetTime:      clampNum(data.targetTime, 0, 86400),
+                        currentTime:     data.currentTime === null ? null : clampNum(data.currentTime, 0, MAX_MEDIA_TIME),
+                        targetTime:      clampNum(data.targetTime, 0, MAX_MEDIA_TIME),
                         playbackState:   validState(data.playbackState),
                         username:        clamp(data.username, 30),
                         tabTitle:        data.tabTitle === null ? null : clamp(data.tabTitle, 100),
@@ -645,6 +660,32 @@ io.on('connection', (socket) => {
                     };
                     // Strip undefined keys for clean wire format
                     Object.keys(relayPayload).forEach(k => relayPayload[k] === undefined && delete relayPayload[k]);
+
+                    // Canonical Media State v1: mutate only after rate limiting,
+                    // room mapping, Host Control authorization and sanitization.
+                    // Heartbeats remain observational and never enter this path.
+                    const mediaStateNow = Date.now();
+                    updateMediaStateFromControl(room, eventName, relayPayload, mapping.peerId, {
+                        now: mediaStateNow,
+                        senderPlaybackState: existing.playbackState
+                    });
+                    if (eventName === EVENTS.FORCE_SYNC_PREPARE) {
+                        room.forceSyncTarget = Number.isFinite(relayPayload.targetTime)
+                            ? { initiatorPeerId: mapping.peerId, targetTime: relayPayload.targetTime }
+                            : null;
+                    } else if (eventName === EVENTS.FORCE_SYNC_EXECUTE) {
+                        const forceSyncTarget = room.forceSyncTarget;
+                        if (forceSyncTarget?.initiatorPeerId === mapping.peerId) {
+                            commitForceSyncMediaState(
+                                room,
+                                forceSyncTarget.targetTime,
+                                mapping.peerId,
+                                mediaStateNow
+                            );
+                        }
+                        room.forceSyncTarget = null;
+                    }
+
                     socket.to(mapping.roomId).emit(eventName, relayPayload);
 
                     // --- Side-effects: Server-side Episode Lobby Tracking ---

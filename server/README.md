@@ -104,5 +104,6 @@ For focused server checks, see `scripts/test-server-ops.mjs`, `scripts/test-serv
 | File | Purpose |
 |---|---|
 | `index.js` | Express + Socket.IO server: room management, relay loop, graceful shutdown |
+| `media-state.js` | Canonical room media clock, control updates, and projected ROOM_DATA snapshots |
 | `rate-limiter.js` | Connection, event, health, and auth rate limiting with 6 functions + cleanup intervals |
 | `ops.js` | Health endpoint helpers, metrics payload builder, auth validation |
