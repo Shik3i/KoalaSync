@@ -50,8 +50,31 @@ relay media event.
 
 Force Sync remains a two-phase ACK protocol. `PREPARE` is temporary choreography;
 the matching `EXECUTE` commits its validated target to canonical state. Per-sender
-`seq`, peer heartbeats, and the existing reconnect event queue remain separate.
-Offline media-command compaction is intentionally deferred.
+`seq`, peer heartbeats, and the reconnect queue remain separate mechanisms.
+
+## 3.2 Offline Media Intent
+
+Canonical Media State and Offline Media Intent have different ownership:
+
+- Canonical Media State is the relay's last accepted shared playback truth.
+- Offline Media Intent is one room-scoped client representation of local
+  `PLAY`/`PAUSE`/`SEEK` commands that have not reached the relay yet.
+
+Contiguous offline controls merge into a bounded logical queue entry. Every
+retained coordination event, including Force Sync and Episode Lobby events, is
+an ordering barrier. Stale offline `PING`, `PONG`, heartbeat `PEER_STATUS`, and
+`EVENT_ACK` frames are not persisted because they are no longer meaningful after
+reconnect. Force Sync ACK remains transactional and is not dropped or merged.
+
+Media intent waits for the reconnecting room's `ROOM_DATA`. An authorized intent
+takes precedence over the older canonical snapshot, materializes into the
+minimum ordered legacy `SEEK` plus `PLAY`/`PAUSE` frames needed by old peers, and
+thereby advances relay canonical state normally. With no intent, canonical
+recovery is unchanged. Role loss discards room-driving intent before recovery;
+intentional Host Control solo mode and an active Episode Lobby remain
+authoritative. MV3 session restoration migrates the previous raw queue format,
+preserves barriers, repairs `localSeq` monotonically, and rejects another room's
+intent.
 
 ## 4. Episode Auto-Sync
 Maintains continuous synchronized viewing when watching series:

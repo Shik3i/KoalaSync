@@ -9,6 +9,19 @@ import { buildChatRelayPayload, encodeSocketEvent } from './chat-wire.js';
 import { createChatEchoTracker, createChatSendLimiter, createLatestTaskQueue, normalizeRoomId, shouldShowChatNotification } from './chat-session.js';
 import { createChatActivityStore } from './chat-activity.js';
 import { canonicalMediaStateFromRoomData, createCanonicalMediaStateTracker } from './canonical-media-state.js';
+import {
+    drainQueuedBatch,
+    enqueueQueuedEvent,
+    isMediaQueueEvent,
+    isQueuedMediaIntent,
+    maxQueuedSequence,
+    mediaIntentNeedsSequenceReservation,
+    normalizePersistedEventQueue,
+    queuedMediaIntentCount,
+    queuedWireCount,
+    reconcileQueuedRoomIntent,
+    reserveLatestMediaIntentSequence
+} from './offline-media-intent.js';
 import { HOST_ACCESS_REQUIRED_STATUS, normalizeTabId, inspectTabHostAccess, isHostAccessError, addTabHostAccessRequest, removeTabHostAccessRequest } from './host-access.js';
 import {
     MEDIA_FRAME_ACCESS_REQUIRED,
@@ -234,20 +247,16 @@ let storageInitialized = false;
 let pendingLogs = [];
 let pendingHistory = [];
 let eventQueue = [];
+let eventQueueVersion = 0;
 let flushTimer = null; // paces draining of eventQueue after (re)connect
+let flushInProgress = false;
 let isNamespaceJoined = false;
+let awaitingRoomData = false;
+let pendingRoomDataRoomId = null;
 let lastActionState = { action: null, senderId: null, timestamp: 0, acks: [] };
 let localSeq = 0;                         // Monotonically increasing command sequence for this peer
 const lastSeqBySender = {};               // senderId → last received seq (stale command guard)
 const canonicalMediaStateTracker = createCanonicalMediaStateTracker();
-const CANONICAL_MEDIA_EVENTS = new Set([
-    EVENTS.PLAY,
-    EVENTS.PAUSE,
-    EVENTS.SEEK,
-    EVENTS.FORCE_SYNC_PREPARE,
-    EVENTS.FORCE_SYNC_EXECUTE
-]);
-let flushedMediaControlsBeforeRoomData = false;
 
 // --- Host Control Mode ---
 let controlMode = CONTROL_MODES.EVERYONE;  // 'everyone' | 'host-only'
@@ -296,6 +305,7 @@ function clearChatActivity() {
 async function clearFailedJoinCredentials() {
     webJoinCoordinator.invalidate();
     connectIntent = false;
+    clearEventQueue();
     clearCanonicalMediaRecovery();
     chatSecretGuard = '';
     invalidateChatSession();
@@ -442,7 +452,6 @@ function ensureState() {
                 );
                 if (data.lastActionState) lastActionState = data.lastActionState;
                 
-                if (data.eventQueue) eventQueue = [...eventQueue, ...data.eventQueue].slice(0, 50);
                 if (data.isForceSyncInitiator !== undefined && isForceSyncInitiator === false) {
                     isForceSyncInitiator = data.isForceSyncInitiator;
                 }
@@ -482,10 +491,19 @@ function ensureState() {
                     }
                 }
 
-                if (data.localSeq !== undefined && !isNaN(data.localSeq)) localSeq = data.localSeq;
+                if (Number.isSafeInteger(data.localSeq) && data.localSeq >= 0) localSeq = data.localSeq;
+                eventQueue = normalizePersistedEventQueue(
+                    [...eventQueue, ...(Array.isArray(data.eventQueue) ? data.eventQueue : [])],
+                    currentRoom?.roomId || null
+                );
+                eventQueueVersion++;
+                // An MV3 restart can restore queue and sequence writes in either
+                // order. Never let the sender sequence fall behind persisted work.
+                localSeq = Math.max(localSeq, maxQueuedSequence(eventQueue));
                 if (data.lastSeqBySender && typeof data.lastSeqBySender === 'object') Object.assign(lastSeqBySender, data.lastSeqBySender);
 
                 storageInitialized = true;
+                chrome.storage.session.set({ eventQueue, localSeq }).catch(() => {});
                 
                 // Process any early logs/history that weren't captured in the spread
                 if (pendingLogs.length > 0) {
@@ -728,6 +746,8 @@ function forceDisconnect() {
     currentServerUrl = null;
     isConnecting = false;
     isNamespaceJoined = false;
+    awaitingRoomData = false;
+    pendingRoomDataRoomId = null;
     invalidateChatSession();
     isForceSyncInitiator = false;
     expectedAcksCount = 0;
@@ -735,7 +755,9 @@ function forceDisconnect() {
     lastContentHeartbeatAt = null;
     forceSyncAcks.clear();
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    flushInProgress = false;
     eventQueue = [];
+    eventQueueVersion++;
     chrome.storage.session.set({
         isForceSyncInitiator: false,
         forceSyncAcks: [],
@@ -1082,6 +1104,7 @@ async function connect() {
         try {
             if (!peerId) peerId = await getPeerId();
             settings = await getSettings();
+            pendingRoomDataRoomId = settings.roomId || currentRoom?.roomId || null;
         } catch (e) {
             throw new Error(`[Storage Error] ${e.message}`);
         }
@@ -1180,6 +1203,8 @@ async function connect() {
                 addLog('Joined Namespace /', 'success');
                 const settings = await getSettings();
                 if (settings.roomId) {
+                    awaitingRoomData = true;
+                    pendingRoomDataRoomId = settings.roomId;
                     const sharedTitles = getSharedTitleFields(settings);
                     emit(EVENTS.JOIN_ROOM, { 
                         roomId: settings.roomId, 
@@ -1190,14 +1215,11 @@ async function connect() {
                         clientCapabilities: CLIENT_CAPABILITIES,
                         protocolVersion: PROTOCOL_VERSION
                     });
+                } else {
+                    awaitingRoomData = false;
+                    pendingRoomDataRoomId = null;
+                    flushEventQueue();
                 }
-                // Preserve the existing immediate queue-drain behavior. Remember
-                // whether local media intent was flushed before ROOM_DATA so an
-                // older snapshot cannot snap the player backward on reconnect.
-                flushedMediaControlsBeforeRoomData = eventQueue.some(item =>
-                    item && CANONICAL_MEDIA_EVENTS.has(item.event)
-                );
-                flushEventQueue();
             } else if (msg.startsWith('42')) {
                 try {
                     const payload = JSON.parse(msg.substring(2));
@@ -1215,6 +1237,8 @@ async function connect() {
         socket.onclose = () => {
             isConnecting = false;
             isNamespaceJoined = false;
+            awaitingRoomData = false;
+            pendingRoomDataRoomId = null;
             invalidateChatSession();
             stopPing();
             if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -1490,7 +1514,10 @@ function scheduleReconnect() {
 // Slow reconnect logic is now handled in the keepAlive alarm
 
 function emit(event, data) {
-    if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
+    const mustWaitForRoomData = awaitingRoomData
+        && event !== EVENTS.JOIN_ROOM
+        && event !== EVENTS.GET_ROOMS;
+    if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined && !mustWaitForRoomData) {
         try {
             const msg = encodeSocketEvent(event, data, chatSecretGuard);
             socket.send(msg);
@@ -1522,41 +1549,120 @@ function emitLive(event, data) {
 }
 
 function queueEvent(event, data) {
-    eventQueue.push({ event, data });
-    if (eventQueue.length > 50) {
-        eventQueue.shift();
+    const queueRoomId = currentRoom?.roomId || pendingRoomDataRoomId;
+    const queued = enqueueQueuedEvent(eventQueue, event, data, { roomId: queueRoomId });
+    eventQueue = queued.queue;
+    eventQueueVersion++;
+
+    if (isMediaQueueEvent(event)) {
+        const latest = eventQueue.at(-1);
+        if (mediaIntentNeedsSequenceReservation(latest)) {
+            const nextSequence = Math.max(localSeq, maxQueuedSequence(eventQueue)) + 1;
+            const reserved = reserveLatestMediaIntentSequence(eventQueue, queueRoomId, nextSequence);
+            eventQueue = reserved.queue;
+            if (reserved.reserved) {
+                localSeq = nextSequence;
+                chrome.storage.session.set({ localSeq }).catch(() => {});
+            }
+        }
+        const sourceCount = isQueuedMediaIntent(eventQueue.at(-1))
+            ? eventQueue.at(-1).intent.sourceEventCount
+            : 0;
+        if (sourceCount === 1) {
+            addLog('Offline media intent queued; replay deferred until ROOM_DATA', 'info');
+        } else if ([10, 50, 100, 500, 1000].includes(sourceCount)) {
+            addLog(`Collapsed ${sourceCount} queued media commands into one intent`, 'info');
+        }
+    }
+    if (queued.dropped > 0) {
         addLog('Event queue cap reached, dropping oldest event', 'warn');
     }
-    chrome.storage.session.set({ eventQueue });
+    chrome.storage.session.set({ eventQueue }).catch(() => {});
+}
+
+function clearEventQueue() {
+    if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+    }
+    eventQueue = [];
+    eventQueueVersion++;
+    chrome.storage.session.set({ eventQueue: [] }).catch(() => {});
+}
+
+function applyQueuedRoomPolicy(roomId, policy, reason) {
+    const result = reconcileQueuedRoomIntent(eventQueue, { roomId, ...policy });
+    eventQueue = result.queue;
+    eventQueueVersion++;
+    const { discarded } = result;
+    if (discarded > 0) {
+        chrome.storage.session.set({ eventQueue }).catch(() => {});
+        addLog(`${reason}: discarded ${discarded} queued room action${discarded === 1 ? '' : 's'}`, 'warn');
+    }
+    return result;
 }
 
 /**
- * Drain the offline event queue in paced batches. A reconnect after a long
- * outage can leave up to 50 queued events; dumping them in one tick would
- * exceed the server's per-socket event budget and get us disconnected right
- * after rejoining. We send FLUSH_BATCH_SIZE events, then wait
- * FLUSH_BATCH_INTERVAL_MS before the next batch. Remaining events drain across
- * subsequent batches; if the connection drops mid-drain, the rest stay queued.
+ * Drain logical queue entries only after ROOM_DATA confirms the current room,
+ * role and lobby. Pacing counts materialized wire frames, not logical entries.
+ * A two-frame media intent is kept whole at a batch boundary and retained in
+ * full if either send fails; replaying its first frame again is idempotent and
+ * preserves the final desired state on the next reconnect.
  */
-function flushEventQueue() {
-    if (flushTimer) return; // a drain is already in progress
-    const drainBatch = () => {
-        flushTimer = null;
-        if (!socket || socket.readyState !== WebSocket.OPEN || !isNamespaceJoined) {
-            return; // lost the connection — leave the rest queued for next connect
-        }
-        let sent = 0;
-        while (eventQueue.length > 0 && sent < FLUSH_BATCH_SIZE) {
-            const queuedMsg = eventQueue.shift();
-            emit(queuedMsg.event, queuedMsg.data);
-            sent++;
+async function flushEventQueue() {
+    if (flushTimer || flushInProgress || awaitingRoomData) return;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
+    flushInProgress = true;
+    try {
+        // Resolve privacy settings before taking queue ownership. If new work
+        // arrives during the drain, keep the original logical entries too; a
+        // later idempotent replay is safer than losing the concurrent intent.
+        const replaySettings = eventQueue.some(isQueuedMediaIntent) ? await getSettings() : null;
+        const drainSource = eventQueue;
+        const drainVersion = eventQueueVersion;
+        const result = await drainQueuedBatch(drainSource, {
+            roomId: currentRoom?.roomId || null,
+            maxWireEvents: FLUSH_BATCH_SIZE,
+            sendFrame: async (frame, entry) => {
+                let payload = frame.data && typeof frame.data === 'object' ? { ...frame.data } : {};
+                if (isQueuedMediaIntent(entry)) {
+                    payload = withTitlePrivacy(payload, replaySettings, ['mediaTitle']);
+                    payload.peerId = peerId;
+                }
+                return emitLive(frame.event, payload);
+            }
+        });
+        if (eventQueueVersion === drainVersion) {
+            eventQueue = result.queue;
+            eventQueueVersion++;
+        } else {
+            // enqueueQueuedEvent preserves object identity for untouched queue
+            // entries. Remove only entries the drain completed, leaving any
+            // concurrently appended or merged work in place. A partial intent
+            // failure returns the complete entry in result.queue, so it is not
+            // included in consumedEntries and remains retryable as a unit.
+            const consumedCount = drainSource.length - result.queue.length;
+            const consumedEntries = new Set(drainSource.slice(0, consumedCount));
+            eventQueue = eventQueue.filter(entry => !consumedEntries.has(entry));
+            eventQueueVersion++;
+            addLog('Queue changed during replay; reconciled completed and concurrent work', 'info');
         }
         chrome.storage.session.set({ eventQueue }).catch(() => {});
-        if (eventQueue.length > 0) {
-            flushTimer = setTimeout(drainBatch, FLUSH_BATCH_INTERVAL_MS);
+        if (result.droppedStaleIntents > 0) {
+            addLog(`Dropped ${result.droppedStaleIntents} stale media intent${result.droppedStaleIntents === 1 ? '' : 's'} for a previous room`, 'warn');
         }
-    };
-    drainBatch();
+        if (result.sentWireEvents > 0) {
+            addLog(`Replayed ${result.sentWireEvents} queued wire event${result.sentWireEvents === 1 ? '' : 's'}`, 'info');
+        }
+        if (eventQueue.length > 0 && socket?.readyState === WebSocket.OPEN && isNamespaceJoined) {
+            flushTimer = setTimeout(() => {
+                flushTimer = null;
+                flushEventQueue().catch(error => addLog(`Queue replay failed: ${error.message}`, 'warn'));
+            }, FLUSH_BATCH_INTERVAL_MS);
+        }
+    } finally {
+        flushInProgress = false;
+    }
 }
 
 function addToHistory(action, senderId) {
@@ -1678,7 +1784,7 @@ async function tryApplyPendingCanonicalMediaState() {
     }
 }
 
-async function handleCanonicalRoomData(data, hadQueuedMediaControls) {
+async function handleCanonicalRoomData(data, hasPendingLocalIntent) {
     canonicalMediaStateTracker.adoptRoom(data?.roomId || null);
     const canonicalSnapshot = canonicalMediaStateFromRoomData(data);
     if (canonicalSnapshot.status === 'unsupported' || canonicalSnapshot.status === 'empty') {
@@ -1703,9 +1809,9 @@ async function handleCanonicalRoomData(data, hadQueuedMediaControls) {
     persistCanonicalMediaRecovery();
     addLog(`Canonical media state received: r${mediaState.revision} ${mediaState.playbackState} @ ${mediaState.currentTime.toFixed(2)}s`, 'info');
 
-    if (hadQueuedMediaControls) {
+    if (hasPendingLocalIntent) {
         markCanonicalMediaStateHandled(data.roomId, mediaState.revision);
-        addLog(`Canonical media state r${mediaState.revision} skipped: queued local media controls are authoritative for this reconnect`, 'info');
+        addLog(`Canonical media state r${mediaState.revision} skipped: authorized queued local intent takes precedence`, 'info');
         return;
     }
     const result = await tryApplyPendingCanonicalMediaState();
@@ -1735,8 +1841,6 @@ async function handleServerEvent(event, data) {
     }
     switch (event) {
         case EVENTS.ROOM_DATA: {
-            const hadQueuedMediaControls = flushedMediaControlsBeforeRoomData;
-            flushedMediaControlsBeforeRoomData = false;
             if (currentRoom?.roomId !== data.roomId) {
                 invalidateChatSession();
                 clearChatActivity();
@@ -1767,7 +1871,10 @@ async function handleServerEvent(event, data) {
             }
 
             // Recover server-tracked active Episode Lobby if present
-            if (data && data.activeLobby && !episodeLobby) {
+            if (!data?.activeLobby && episodeLobby) {
+                clearEpisodeLobbyState();
+                addLog('Discarded stale local Episode Lobby after ROOM_DATA confirmed it ended', 'info');
+            } else if (data && data.activeLobby && !episodeLobby) {
                 episodeLobby = {
                     expectedTitle: data.activeLobby.expectedTitle,
                     initiatorPeerId: data.activeLobby.initiatorPeerId,
@@ -1801,7 +1908,22 @@ async function handleServerEvent(event, data) {
             // Inform Website Bridge & Popup
             const joinStatusMsg = { type: 'JOIN_STATUS', success: true, message: 'Joined' };
             await broadcastJoinStatus(joinStatusMsg);
-            await handleCanonicalRoomData(data, hadQueuedMediaControls);
+            awaitingRoomData = false;
+            pendingRoomDataRoomId = null;
+
+            const lostRoomAuthority = controlMode === CONTROL_MODES.HOST_ONLY
+                && hostPeerId
+                && !amController();
+            const queuePolicy = applyQueuedRoomPolicy(data.roomId, {
+                canControl: !lostRoomAuthority,
+                activeLobby: !!episodeLobby,
+                desynced: hcmDesynced
+            }, lostRoomAuthority
+                ? 'Host Control role changed while offline'
+                : (episodeLobby ? 'Active Episode Lobby takes precedence' : 'Reconnect queue policy'));
+
+            await handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent);
+            await flushEventQueue();
             break;
         }
         case EVENTS.CONTROL_MODE:
@@ -4013,6 +4135,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             episodeLobby: episodeLobby,
             reconnectAttempts,
             reconnectSlowMode: reconnectFailed,
+            queuedLogicalEvents: eventQueue.length,
+            queuedMediaIntents: queuedMediaIntentCount(eventQueue, currentRoom?.roomId || pendingRoomDataRoomId),
+            queuedWireEvents: queuedWireCount(eventQueue),
             roomId: currentRoom ? currentRoom.roomId : null,
             serverUrl: currentServerUrl,
             version: chrome.runtime.getManifest().version,
@@ -4216,6 +4341,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         hcmDesynced = !!message.desynced;
         if (storageInitialized) chrome.storage.session.set({ hcmDesynced });
         if (hcmDesynced) {
+            applyQueuedRoomPolicy(currentRoom?.roomId, { desynced: true }, 'Intentional solo mode');
             const pending = canonicalMediaStateTracker.getPending(currentRoom?.roomId);
             if (pending) {
                 markCanonicalMediaStateHandled(pending.roomId, pending.mediaState.revision);

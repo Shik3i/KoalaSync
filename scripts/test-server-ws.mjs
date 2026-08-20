@@ -5,6 +5,11 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { connectionCounts, clearRateLimitMaps } from '../server/rate-limiter.js';
+import {
+    enqueueQueuedEvent,
+    materializeMediaIntent,
+    reserveLatestMediaIntentSequence
+} from '../extension/offline-media-intent.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(__dirname, '..', 'server', 'package.json'));
@@ -67,6 +72,71 @@ try {
     // Leave
     s(p1,'leave_room',{}); const [ev,d]=await a(p2); assert.equal(ev,'peer_status');assert.equal(d.status,'left');
 
+    close();
+    resetConnectionRate();
+
+    // --- Combined reconnect model: compacted new-client intent over legacy wire ---
+    // The queue is entirely client-side. Feed its materialized PLAY/PAUSE/SEEK
+    // frames through the real relay and an old-client-like receiver to prove the
+    // optimization needs no new event, capability or ACK.
+    const coalescedRid = 'coalesced-media-'+Date.now();
+    const legacyReceiver = await c(), coalescingSender = await c();
+    await j(legacyReceiver, coalescedRid, 'legacy-receiver');
+    await j(coalescingSender, coalescedRid, 'coalesce-sender', null, ['chat-v1']);
+    legacyReceiver._m.length = coalescingSender._m.length = 0;
+
+    s(legacyReceiver, 'play', { currentTime: 100, seq: 1, actionTimestamp: 1 });
+    await w(coalescingSender, 'play');
+    const canonicalBeforeReplay = { ...mod.rooms.get(coalescedRid).mediaState };
+
+    let compactedQueue = enqueueQueuedEvent([], 'play', {
+        currentTime: 500,
+        seq: 10,
+        actionTimestamp: 10
+    }, { roomId: coalescedRid }).queue;
+    compactedQueue = reserveLatestMediaIntentSequence(compactedQueue, coalescedRid, 11).queue;
+    for (const [targetTime, seq] of [[540, 12], [600, 13]]) {
+        compactedQueue = enqueueQueuedEvent(compactedQueue, 'seek', {
+            currentTime: targetTime,
+            targetTime,
+            seq,
+            actionTimestamp: seq
+        }, { roomId: coalescedRid }).queue;
+    }
+    compactedQueue = enqueueQueuedEvent(compactedQueue, 'pause', {
+        currentTime: 605,
+        seq: 14,
+        actionTimestamp: 14
+    }, { roomId: coalescedRid }).queue;
+    assert.equal(compactedQueue.length, 1, 'offline playback burst is one logical queue entry');
+    const replayFrames = materializeMediaIntent(compactedQueue[0]);
+    assert.deepEqual(replayFrames.map(frame => frame.event), ['seek', 'pause'],
+        'compacted intent uses only the minimum existing legacy events');
+
+    const legacyReplayPayloads = [];
+    for (const frame of replayFrames) {
+        s(coalescingSender, frame.event, frame.data);
+        legacyReplayPayloads.push([frame.event, await w(legacyReceiver, frame.event)]);
+    }
+    assert.equal(legacyReplayPayloads[0][1].targetTime, 605);
+    assert.equal(legacyReplayPayloads[1][1].currentTime, 605);
+    for (const [event, payload] of legacyReplayPayloads) {
+        assert.ok(event === 'seek' || event === 'pause');
+        assert.equal(payload.mediaState, undefined);
+        assert.equal(payload.revision, undefined);
+    }
+    const canonicalAfterReplay = mod.rooms.get(coalescedRid).mediaState;
+    assert.equal(canonicalAfterReplay.revision, canonicalBeforeReplay.revision + replayFrames.length);
+    assert.equal(canonicalAfterReplay.playbackState, 'paused');
+    assert.equal(canonicalAfterReplay.currentTime, 605);
+    assert.equal(canonicalAfterReplay.updatedBy, 'coalesce-sender');
+
+    const coalescedLateJoiner = await c();
+    const coalescedLateRoom = await j(coalescedLateJoiner, coalescedRid, 'coalesced-late');
+    assert.equal(coalescedLateRoom.mediaState.revision, canonicalAfterReplay.revision);
+    assert.equal(coalescedLateRoom.mediaState.playbackState, 'paused');
+    assert.equal(coalescedLateRoom.mediaState.currentTime, 605);
+    assert.equal(coalescedLateRoom.mediaState.updatedBy, 'coalesce-sender');
     close();
     resetConnectionRate();
 

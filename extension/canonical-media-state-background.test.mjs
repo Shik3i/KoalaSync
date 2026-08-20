@@ -64,8 +64,10 @@ describe('canonical ROOM_DATA recovery contract', () => {
         const roomData = functionBody(backgroundSource, 'handleCanonicalRoomData', 'handleServerEvent');
         expect(apply).toContain('if (hcmDesynced)');
         expect(apply).toContain('if (episodeLobby)');
-        expect(roomData).toContain('if (hadQueuedMediaControls)');
-        expect(backgroundSource).toContain('flushedMediaControlsBeforeRoomData = eventQueue.some');
+        expect(roomData).toContain('if (hasPendingLocalIntent)');
+        expect(backgroundSource).toContain('awaitingRoomData = true');
+        expect(backgroundSource).toContain('await handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)');
+        expect(backgroundSource).toContain('await flushEventQueue()');
     });
 
     it('reuses existing seek abstractions, suppression and drift tolerance', () => {

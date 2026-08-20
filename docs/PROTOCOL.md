@@ -141,8 +141,29 @@ relaying the established event names, payloads, and order unchanged. This makes
 server-first rollout safe: old clients populate recovery state without needing to
 understand or acknowledge it, and new clients consume it only when the relay
 advertises the capability. No protocol-version or minimum-version bump is
-required. Offline `play`/`pause`/`seek` compaction is planned separately and is
-not part of Media State v1.
+required. Offline `play`/`pause`/`seek` compaction remains the separate
+client-owned layer described below rather than part of the relay capability.
+
+### Offline media intent
+
+Offline media intent is client-side queue state, not a relay protocol feature.
+An updated extension coalesces contiguous unsent `play`, `pause`, and `seek`
+commands for one room. Retained non-media events are ordering barriers. On a
+successful rejoin, the extension first reads `room_data` so current Host Control
+and Episode Lobby authority can be applied, then replays an authorized intent as
+the minimum existing legacy media-event sequence. Actual wire frames, rather
+than logical queue entries, consume the paced reconnect budget.
+
+Pending authorized local intent takes precedence over an older canonical
+snapshot because it has not yet been accepted by the relay. Its legacy replay
+then updates canonical state like any other accepted control. Without pending
+intent, canonical recovery proceeds normally. Intent made stale by a room switch,
+role loss, intentional solo mode, or an active Episode Lobby is discarded and
+cannot suppress server recovery.
+
+This requires no event, capability, ACK, protocol-version, or minimum-version
+change. Old relays receive ordinary `play`/`pause`/`seek`; old peers see only the
+same existing relayed events.
 
 ## Ephemeral encrypted chat
 
