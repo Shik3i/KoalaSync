@@ -1791,12 +1791,22 @@ elements.serverUrl.addEventListener('change', () => {
 
 elements.tabs.forEach(btn => {
     btn.addEventListener('click', () => {
-        elements.tabs.forEach(b => b.classList.remove('active'));
-        elements.contents.forEach(c => c.classList.remove('active'));
+        elements.tabs.forEach(b => {
+            b.classList.remove('active');
+            b.setAttribute('aria-selected', 'false');
+            b.tabIndex = -1;
+        });
+        elements.contents.forEach(c => {
+            c.classList.remove('active');
+            c.setAttribute('aria-hidden', 'true');
+        });
         btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        btn.tabIndex = 0;
         
         const targetContent = document.getElementById(btn.dataset.tab);
         targetContent.classList.add('active');
+        targetContent.removeAttribute('aria-hidden');
         
         targetContent.classList.remove('tab-active-animate');
         void targetContent.offsetWidth; // Force reflow to restart animation
@@ -1807,6 +1817,20 @@ elements.tabs.forEach(btn => {
         if (btn.dataset.tab === 'tab-sync') refreshHistory();
         
         chrome.storage.local.set({ activeTab: btn.dataset.tab });
+    });
+
+    btn.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        const visibleTabs = [...elements.tabs].filter(tab => window.getComputedStyle(tab).display !== 'none');
+        const currentIndex = visibleTabs.indexOf(btn);
+        const nextIndex = event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+                ? visibleTabs.length - 1
+                : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + visibleTabs.length) % visibleTabs.length;
+        event.preventDefault();
+        visibleTabs[nextIndex].focus();
+        visibleTabs[nextIndex].click();
     });
 });
 

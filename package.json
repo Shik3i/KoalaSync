@@ -5,13 +5,14 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "build:extension": "node scripts/build-extension.cjs",
     "indexnow": "node website/submit-indexnow.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "prepare:release": "node scripts/prepare-release.mjs",
     "subset-flags": "node website/tools/subset-flag-font.mjs",
     "test": "npm run verify",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.mjs",

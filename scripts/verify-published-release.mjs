@@ -85,7 +85,8 @@ async function verify() {
     if (run('git', ['cat-file', '-t', tagRef]).trim() !== 'tag') {
         throw new Error(`${options.tag} must be an annotated tag`);
     }
-    run('git', ['merge-base', '--is-ancestor', tagRef, 'HEAD']);
+    run('git', ['merge-base', '--is-ancestor', tagRef, 'origin/main']);
+    const tagCommit = run('git', ['rev-list', '-n', '1', tagRef]).trim();
 
     const temporaryDirectory = options.assetDir
         ? null
@@ -132,7 +133,14 @@ async function verify() {
             validateManifest(browserName, manifest, version);
             assertRuntimeBuild(browserName, archivePath, version);
             if (!options.skipAttestation && !options.assetDir) {
-                run('gh', ['attestation', 'verify', archivePath, '--repo', repo], { capture: false });
+                run('gh', [
+                    'attestation', 'verify', archivePath,
+                    '--repo', repo,
+                    '--signer-workflow', `${repo}/.github/workflows/release.yml`,
+                    '--source-ref', tagRef,
+                    '--source-digest', tagCommit,
+                    '--deny-self-hosted-runners'
+                ], { capture: false });
             }
         }
         validateArchiveParity(archiveEntries.chrome, archiveEntries.firefox);

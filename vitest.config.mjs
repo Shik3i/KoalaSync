@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { VITEST_COVERAGE_INCLUDE } from './scripts/coverage-plan.mjs';
 
 export default defineConfig({
     test: {
@@ -20,12 +21,7 @@ export default defineConfig({
             // by Vitest. Browser entry points and subprocess integration tests
             // have separate E2E/integration gates and must not be reported as
             // zero-coverage unit-test targets.
-            include: [
-                'server/{chat,ops,rate-limiter}.js',
-                'shared/{blacklist,invite-links,names}.js',
-                'extension/{chat-activity,chat-crypto,chat-format,chat-session,chat-wire,episode-utils,host-access,media-frame-target,title-privacy}.js',
-                'scripts/release-artifact-checks.mjs'
-            ],
+            include: VITEST_COVERAGE_INCLUDE,
             exclude: [
                 '**/node_modules/**'
             ],

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     checkAdminMetricsAuthRate,
     checkAuthRate,
@@ -12,6 +12,11 @@ import {
     CHAT_MESSAGE_RATE_LIMIT,
     CHAT_MESSAGE_RATE_WINDOW_MS,
     chatMessageCounts,
+    connectionCounts,
+    eventCounts,
+    healthCounts,
+    adminMetricsAuthCounts,
+    roomListCooldowns,
     failedAuthAttempts,
     LEAVE_ROOM_RATE_LIMIT,
     LEAVE_ROOM_RATE_WINDOW_MS,
@@ -179,6 +184,56 @@ describe('remaining relay rate limits', () => {
             stopRateLimitCleanup();
             stopRateLimitCleanup();
         }).not.toThrow();
+    });
+
+    it('clears every rate-limit map', () => {
+        const maps = [
+            connectionCounts,
+            failedAuthAttempts,
+            eventCounts,
+            chatMessageCounts,
+            healthCounts,
+            adminMetricsAuthCounts,
+            roomListCooldowns,
+            leaveRoomCounts
+        ];
+        maps.forEach((map, index) => map.set(`key-${index}`, { count: 1 }));
+        clearRateLimitMaps();
+        maps.forEach(map => expect(map.size).toBe(0));
+    });
+
+    it('removes expired and disconnected entries in both cleanup intervals', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-08-21T10:00:00Z'));
+        const now = Date.now();
+        const sockets = new Map([['connected', {}]]);
+        connectionCounts.set('expired-ip', { count: 1, resetTime: now - 1 });
+        connectionCounts.set('live-ip', { count: 1, resetTime: now + 120000 });
+        eventCounts.set('disconnected', { count: 1, resetTime: now + 120000 });
+        eventCounts.set('connected', { count: 1, resetTime: now + 120000 });
+        chatMessageCounts.set('disconnected', { count: 1, resetTime: now + 120000 });
+        leaveRoomCounts.set('disconnected', { count: 1, resetTime: now + 120000 });
+        healthCounts.set('expired-health', { count: 1, resetTime: now - 1 });
+        adminMetricsAuthCounts.set('expired-admin', { count: 1, resetTime: now - 1 });
+        roomListCooldowns.set('disconnected', now);
+        roomListCooldowns.set('connected', now);
+        failedAuthAttempts.set('expired-auth', { count: 1, lastAttempt: now - (16 * 60 * 1000) });
+        failedAuthAttempts.set('live-auth', { count: 1, lastAttempt: now });
+
+        startRateLimitCleanup({ sockets: { sockets } });
+        await vi.advanceTimersByTimeAsync(60000);
+        expect([...connectionCounts.keys()]).toEqual(['live-ip']);
+        expect([...eventCounts.keys()]).toEqual(['connected']);
+        expect(chatMessageCounts.size).toBe(0);
+        expect(leaveRoomCounts.size).toBe(0);
+        expect(healthCounts.size).toBe(0);
+        expect(adminMetricsAuthCounts.size).toBe(0);
+        expect([...roomListCooldowns.keys()]).toEqual(['connected']);
+
+        await vi.advanceTimersByTimeAsync(14 * 60 * 1000);
+        expect([...failedAuthAttempts.keys()]).toEqual(['live-auth']);
+        stopRateLimitCleanup();
+        vi.useRealTimers();
     });
 });
 

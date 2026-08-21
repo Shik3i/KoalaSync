@@ -19,6 +19,8 @@ npm run test:e2e:race      # @race scenarios, repeated 20 times
 | :--- | :--- |
 | `detection.spec.mjs` | Runs the shipped `findVideo()` against the fixture pages |
 | `extension.spec.mjs` | Loads `dist/chrome`, injects into a tab, applies remote play/pause/seek |
+| `room-sync.spec.mjs` | Starts a local relay and proves two packed clients, relay restart, and MV3 worker recovery |
+| `popup-accessibility.spec.mjs` | Checks visible control names and keyboard tab activation in the real popup |
 | `fixture-server.mjs` | Static server for the fixtures, with byte-range support for media |
 | `fixtures/pages/` | One page per scenario |
 | `fixtures/media/` | Small generated clips (see below) |

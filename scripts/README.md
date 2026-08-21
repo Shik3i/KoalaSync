@@ -10,6 +10,7 @@ npm run verify
 npm run lint
 npm run test:unit
 npm run test:coverage
+npm run prepare:release -- 3.1.5
 ```
 
 - `npm run build:extension` runs `scripts/build-extension.cjs`.
@@ -17,6 +18,7 @@ npm run test:coverage
 - `npm run lint` runs ESLint across the repository.
 - `npm run test:unit` runs Vitest tests.
 - `npm run test:coverage` runs the same tests with the enforced coverage floor.
+- `npm run prepare:release -- MAJOR.MINOR.PATCH` updates every release-version source consistently before the release PR.
 
 ## build-extension.cjs
 
@@ -89,10 +91,17 @@ both global and risk-specific per-module floors. Browser entry points
 (`background.js`, `content.js`, and `popup.js`) and server process startup are
 deliberately measured by extension E2E and integration tests instead of being
 reported as zero-coverage unit code.
+`scripts/check-coverage-inventory.mjs` additionally requires every JavaScript
+source file to be classified as V8-covered or assigned to a named external
+integration gate. New unclassified files fail `npm run verify`.
 
 ## Published Release Verification
 
-After a GitHub Release is created, the release workflow runs:
+Before publication, the release workflow validates the exact annotated SemVer
+tag, requires it to point at current `origin/main`, requires successful
+`verify`, `node20`, and `e2e` checks, and runs the complete gates again. It then
+creates a draft release, publishes and smoke-tests the relay image, and only
+afterwards makes the GitHub Release public. The published-asset gate runs:
 
 ```bash
 node scripts/verify-published-release.mjs v3.1.4 --repo Shik3i/KoalaSync

@@ -1413,16 +1413,16 @@
                     </a>
                 </div>
 
-    <div class="tabs">
-        <button class="tab-btn active" data-tab="tab-room" data-i18n="TAB_ROOM" data-i18n-title="TAB_ROOM_TOOLTIP" title="Room settings and connection">Room</button>
-        <button class="tab-btn" data-tab="tab-sync" data-i18n="TAB_SYNC" data-i18n-title="TAB_SYNC_TOOLTIP" title="Video sync controls and remote actions">Sync</button>
-        <button class="tab-btn" data-tab="tab-settings" data-i18n="TAB_SETTINGS" data-i18n-title="TAB_SETTINGS_TOOLTIP" title="Extension preferences">Settings</button>
-        <button class="tab-btn" data-tab="tab-dev" data-i18n="TAB_STATUS" data-i18n-title="TAB_STATUS_TOOLTIP" title="Advanced Diagnostics & Logs">Status</button>
-        <button id="devToolsTabBtn" class="tab-btn" data-tab="tab-devtools" style="display:none;">Dev</button>
+    <div class="tabs" role="tablist" aria-label="KoalaSync sections">
+        <button id="tab-room-button" class="tab-btn active" role="tab" aria-selected="true" aria-controls="tab-room" data-tab="tab-room" data-i18n="TAB_ROOM" data-i18n-title="TAB_ROOM_TOOLTIP" title="Room settings and connection">Room</button>
+        <button id="tab-sync-button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-sync" tabindex="-1" data-tab="tab-sync" data-i18n="TAB_SYNC" data-i18n-title="TAB_SYNC_TOOLTIP" title="Video sync controls and remote actions">Sync</button>
+        <button id="tab-settings-button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" data-tab="tab-settings" data-i18n="TAB_SETTINGS" data-i18n-title="TAB_SETTINGS_TOOLTIP" title="Extension preferences">Settings</button>
+        <button id="tab-dev-button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-dev" tabindex="-1" data-tab="tab-dev" data-i18n="TAB_STATUS" data-i18n-title="TAB_STATUS_TOOLTIP" title="Advanced Diagnostics & Logs">Status</button>
+        <button id="devToolsTabBtn" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-devtools" tabindex="-1" data-tab="tab-devtools" style="display:none;">Dev</button>
     </div>
 
     <!-- Room Tab -->
-    <div id="tab-room" class="tab-content active">
+    <div id="tab-room" class="tab-content active" role="tabpanel" aria-labelledby="tab-room-button">
 
         <!-- JOIN SECTION: Visible when not in a room -->
         <div id="section-join">
@@ -1510,7 +1510,7 @@
     </div>
 
     <!-- Sync Tab -->
-    <div id="tab-sync" class="tab-content">
+    <div id="tab-sync" class="tab-content" role="tabpanel" aria-labelledby="tab-sync-button" aria-hidden="true">
         <!-- SYNC ACTIVE: Visible when in a room -->
         <div id="sync-active">
         <div class="form-group" style="position: relative;">
@@ -1576,7 +1576,7 @@
     </div>
     
     <!-- Settings Tab -->
-    <div id="tab-settings" class="tab-content">
+    <div id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-settings-button" aria-hidden="true">
         <details class="form-group" name="settings-accordion" open>
             <summary title="Change your username, theme, and language." data-i18n="LABEL_SETTINGS_GROUP_PROFILE" data-i18n-title="LABEL_SETTINGS_GROUP_PROFILE_TOOLTIP">Profile &amp; Appearance</summary>
             <div class="details-content">
@@ -1813,7 +1813,7 @@
     </div>
 
     <!-- Dev Tab -->
-    <div id="tab-dev" class="tab-content">
+    <div id="tab-dev" class="tab-content" role="tabpanel" aria-labelledby="tab-dev-button" aria-hidden="true">
         <label title="Current WebSocket connection state" data-i18n="LABEL_CONN_STATUS" data-i18n-title="LABEL_CONN_STATUS_TOOLTIP">Connection Status</label>
         <div id="connStatus" class="info-card" style="display:flex; align-items:center; gap: 10px;">
             <span id="connDot" class="status-dot status-offline"></span>
@@ -1845,7 +1845,7 @@
         <div id="logList"></div>
     </div>
 
-    <div id="tab-devtools" class="tab-content">
+    <div id="tab-devtools" class="tab-content" role="tabpanel" aria-labelledby="devToolsTabBtn" aria-hidden="true">
         <label>Remote Seek</label>
         <div class="info-card" style="display:flex; gap:8px; margin-bottom:15px;">
             <button id="remoteSeekBack" class="secondary" style="flex:1; font-size:12px;">-30s</button>

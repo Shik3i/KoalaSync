@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     HOST_ACCESS_REQUIRED_STATUS,
     addTabHostAccessRequest,
@@ -16,6 +16,8 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('host access helpers', () => {
+    afterEach(() => vi.useRealTimers());
+
     it('normalizes only positive safe tab IDs', () => {
         expect(HOST_ACCESS_REQUIRED_STATUS).toBe('host_permission_required');
         for (const invalid of [null, undefined, '', 0, true, [42], '42.5', Number.MAX_SAFE_INTEGER + 1]) {
@@ -38,6 +40,11 @@ describe('host access helpers', () => {
         });
         expect(describeTabUrl('chrome://extensions/')).toBeNull();
         expect(describeTabUrl('not a url')).toBeNull();
+        expect(describeTabUrl('file:///Users/koala/movie.mp4')).toEqual({
+            url: 'file:///Users/koala/movie.mp4',
+            host: 'local file',
+            originPattern: 'file:///*'
+        });
     });
 
     it('checks the selected tab origin and preserves an unknown callback result', async () => {
@@ -112,8 +119,42 @@ describe('host access helpers', () => {
         };
         await expect(requestOriginPermission(callbackChrome, 'https://video.example/*')).resolves.toBe(true);
         await expect(requestOriginPermission({ permissions: {} }, 'https://video.example/*')).resolves.toBeNull();
+        await expect(requestOriginPermission(callbackChrome, '')).resolves.toBeNull();
+        await expect(requestOriginPermission({
+            permissions: { request: async () => { throw new Error('denied'); } }
+        }, 'https://video.example/*')).resolves.toBe(false);
+        await expect(addTabHostAccessRequest({
+            permissions: { addHostAccessRequest: async () => { throw new Error('denied'); } }
+        }, 42)).resolves.toBe(false);
+        await expect(removeTabHostAccessRequest({
+            permissions: { removeHostAccessRequest: async () => { throw new Error('denied'); } }
+        }, 42)).resolves.toBe(false);
         expect(isHostAccessError(new Error('Missing host permission for the tab'))).toBe(true);
         expect(isHostAccessError(new Error('No tab with id: 42'))).toBe(false);
+    });
+
+    it('treats permission inspection errors and timeouts as advisory unknowns', async () => {
+        const base = {
+            tabs: { get: async () => ({ url: 'https://video.example/watch' }) }
+        };
+        await expect(inspectTabHostAccess({
+            ...base,
+            permissions: { contains: async () => { throw new Error('permission API failed'); } }
+        }, 42)).resolves.toMatchObject({ granted: null });
+
+        await expect(inspectTabHostAccess({
+            ...base,
+            runtime: { lastError: { message: 'permission callback failed' } },
+            permissions: { contains: (_request, callback) => callback(false) }
+        }, 42)).resolves.toMatchObject({ granted: null });
+
+        vi.useFakeTimers();
+        const pending = inspectTabHostAccess({
+            ...base,
+            permissions: { contains: () => undefined }
+        }, 42);
+        await vi.advanceTimersByTimeAsync(1000);
+        await expect(pending).resolves.toMatchObject({ granted: null });
     });
 });
 

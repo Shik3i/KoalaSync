@@ -21,13 +21,20 @@ describe('title privacy', () => {
         expect(normalizeTabTitle('(12) Testvideo - YouTube')).toBe('Testvideo - YouTube');
         expect(normalizeTabTitle('[999+] Testvideo - YouTube')).toBe('Testvideo - YouTube');
         expect(normalizeTabTitle('(500) Days of Summer')).toBe('Days of Summer');
+        for (const title of ['[7] Testvideo', '(99+) Testvideo', '(999+) Testvideo', '(101) Testvideo', '[101] Testvideo']) {
+            expect(normalizeTabTitle(title)).toBe('Testvideo');
+        }
+        expect(normalizeTabTitle(null)).toBeNull();
         expect(normalizeTabTitle('   ')).toBeNull();
+        expect(sanitizeTabTitle('', true)).toBeNull();
     });
 
     it('keeps tab-title and media-title privacy independent', () => {
         expect(sanitizeTabTitle('(12) Private Tab', true)).toBe('Private Tab');
         expect(sanitizeTabTitle('Private Tab', false)).toBeNull();
         expect(sanitizeSharedTitle('Example Movie', 'full')).toBe('Example Movie');
+        expect(sanitizeSharedTitle('', 'full')).toBeNull();
+        expect(sanitizeSharedTitle(null, 'full')).toBeNull();
         expect(sanitizeSharedTitle('Show Name - S01/E04 - Title', 'episode')).toBe('S01E04');
         expect(sanitizeSharedTitle('Folge 7 - Private Server', 'episode')).toBe('EP007');
         expect(sanitizeSharedTitle('Example Movie', 'episode')).toBeNull();
