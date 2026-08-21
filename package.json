@@ -15,7 +15,11 @@
     "subset-flags": "node website/tools/subset-flag-font.mjs",
     "test": "npm run verify",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.mjs",
-    "test:e2e:install": "playwright install chromium chromium-headless-shell",
+    "test:e2e:detection": "playwright test --config tests/e2e/playwright.config.mjs --project=detection-chromium --project=detection-firefox --project=detection-webkit",
+    "test:e2e:extension": "playwright test --config tests/e2e/playwright.config.mjs --project=extension-chromium",
+    "test:e2e:install": "playwright install chromium chromium-headless-shell firefox webkit",
+    "test:e2e:race": "playwright test --config tests/e2e/playwright.config.mjs --project=extension-chromium --grep @race --repeat-each=20",
+    "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run",
     "verify": "node scripts/verify-release.mjs"
   },

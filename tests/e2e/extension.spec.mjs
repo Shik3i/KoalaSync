@@ -737,7 +737,7 @@ test('polling video state on a page with no video does not restart the target', 
         .toBe('true');
 });
 
-test('stays ready on a page whose ad frames keep mutating', async ({ context, extensionId, baseURL }) => {
+test('@race stays ready on a page whose ad frames keep mutating', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(90000);
     // Live ad churn wakes the media-frame monitor several times a second. Each
     // wake used to schedule a trailing refresh that rebuilt the target

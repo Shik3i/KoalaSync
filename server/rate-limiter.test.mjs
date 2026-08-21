@@ -1,28 +1,50 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
+    checkAdminMetricsAuthRate,
+    checkAuthRate,
+    checkConnectionRate,
+    checkEventRate,
+    checkHealthRate,
     checkLeaveRoomRate,
     checkChatMessageRate,
+    CONNECTION_RATE_LIMIT,
+    EVENT_RATE_LIMIT,
     CHAT_MESSAGE_RATE_LIMIT,
     CHAT_MESSAGE_RATE_WINDOW_MS,
     chatMessageCounts,
+    failedAuthAttempts,
     LEAVE_ROOM_RATE_LIMIT,
     LEAVE_ROOM_RATE_WINDOW_MS,
     rateLimitDenied,
     leaveRoomCounts,
-    clearRateLimitMaps
+    clearRateLimitMaps,
+    recordAuthFailure,
+    startRateLimitCleanup,
+    stopRateLimitCleanup
 } from './rate-limiter.js';
+
+function resetRateLimits() {
+    stopRateLimitCleanup();
+    clearRateLimitMaps();
+    Object.assign(rateLimitDenied, {
+        connections: 0,
+        events: 0,
+        health: 0,
+        adminMetricsAuth: 0,
+        roomList: 0,
+        leaveRoom: 0,
+        chatMessages: 0
+    });
+}
 
 describe('LEAVE_ROOM Rate Limiter', () => {
     const testSocketId = 'test-socket-123';
 
     beforeEach(() => {
-        clearRateLimitMaps();
-        rateLimitDenied.leaveRoom = 0;
+        resetRateLimits();
     });
 
-    afterEach(() => {
-        clearRateLimitMaps();
-    });
+    afterEach(resetRateLimits);
 
     it('should allow LEAVE_ROOM within limit', () => {
         // Test within the rate limit
@@ -98,7 +120,7 @@ describe('LEAVE_ROOM Rate Limiter', () => {
         checkLeaveRoomRate(testSocketId);
         expect(leaveRoomCounts.size).toBe(1);
 
-        clearRateLimitMaps();
+        resetRateLimits();
         expect(leaveRoomCounts.size).toBe(0);
     });
 });
@@ -106,12 +128,9 @@ describe('LEAVE_ROOM Rate Limiter', () => {
 describe('CHAT_MESSAGE Rate Limiter', () => {
     const socketId = 'chat-socket';
 
-    beforeEach(() => {
-        clearRateLimitMaps();
-        rateLimitDenied.chatMessages = 0;
-    });
+    beforeEach(resetRateLimits);
 
-    afterEach(() => clearRateLimitMaps());
+    afterEach(resetRateLimits);
 
     it('allows ten messages per ten-second window and blocks the next', () => {
         for (let i = 0; i < CHAT_MESSAGE_RATE_LIMIT; i++) {
@@ -126,6 +145,40 @@ describe('CHAT_MESSAGE Rate Limiter', () => {
         const entry = chatMessageCounts.get(socketId);
         entry.resetTime = Date.now() - CHAT_MESSAGE_RATE_WINDOW_MS - 1;
         expect(checkChatMessageRate(socketId)).toBe(true);
+    });
+});
+
+describe('remaining relay rate limits', () => {
+    beforeEach(resetRateLimits);
+    afterEach(resetRateLimits);
+
+    it.each([
+        ['connection', checkConnectionRate, CONNECTION_RATE_LIMIT, 'ip-1', 'connections'],
+        ['event', checkEventRate, EVENT_RATE_LIMIT, 'socket-1', 'events'],
+        ['health', checkHealthRate, 10, 'ip-2', 'health'],
+        ['admin metrics auth', checkAdminMetricsAuthRate, 5, 'ip-3', 'adminMetricsAuth']
+    ])('enforces the %s window and increments its denial counter', (_label, check, limit, key, counter) => {
+        for (let attempt = 0; attempt < limit; attempt++) expect(check(key)).toBe(true);
+        expect(check(key)).toBe(false);
+        expect(rateLimitDenied[counter]).toBe(1);
+        expect(check(`${key}-other`)).toBe(true);
+    });
+
+    it('scopes failed authentication attempts to IP and room', () => {
+        for (let attempt = 0; attempt < 5; attempt++) recordAuthFailure('10.0.0.1', 'room-a');
+        expect(checkAuthRate('10.0.0.1', 'room-a')).toBe(false);
+        expect(checkAuthRate('10.0.0.1', 'room-b')).toBe(true);
+        expect(failedAuthAttempts.get('10.0.0.1:room-a')).toMatchObject({ count: 5 });
+    });
+
+    it('starts cleanup only once and can stop safely', () => {
+        const io = { sockets: { sockets: new Map() } };
+        expect(() => {
+            startRateLimitCleanup(io);
+            startRateLimitCleanup(io);
+            stopRateLimitCleanup();
+            stopRateLimitCleanup();
+        }).not.toThrow();
     });
 });
 

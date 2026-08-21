@@ -25,6 +25,27 @@ export default defineConfig({
             args: ['--autoplay-policy=no-user-gesture-required']
         }
     },
+    projects: [
+        {
+            name: 'detection-chromium',
+            testMatch: 'detection.spec.mjs',
+            use: { browserName: 'chromium' }
+        },
+        {
+            name: 'detection-firefox',
+            testMatch: 'detection.spec.mjs',
+            use: { browserName: 'firefox' }
+        },
+        {
+            name: 'detection-webkit',
+            testMatch: 'detection.spec.mjs',
+            use: { browserName: 'webkit' }
+        },
+        {
+            name: 'extension-chromium',
+            testIgnore: 'detection.spec.mjs'
+        }
+    ],
     webServer: {
         command: `node "${fileURLToPath(new URL('./fixture-server.mjs', import.meta.url))}" ${PORT}`,
         url: `http://localhost:${PORT}/pages/simple-player.html`,

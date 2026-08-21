@@ -66,12 +66,12 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium chromium-headless-shell
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium chromium-headless-shell firefox webkit
 
       # The extension specs load dist/chrome, so the artifact has to exist.
       - name: Build the extension
         run: npm run build:extension
 
-      - name: Run extension E2E smoke tests
+      - name: Run cross-browser detection and extension E2E tests
         run: npm run test:e2e

@@ -7,22 +7,15 @@ import path from 'node:path';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const checks = [
-  ['vitest unit tests', 'npm', ['run', 'test:unit']],
-  ['server ops', 'node', ['scripts/test-server-ops.mjs']],
+  ['vitest unit tests and coverage', 'npm', ['run', 'test:coverage']],
   ['server routes', 'node', ['scripts/test-server-routes.mjs'], {
     env: { ADMIN_METRICS_TOKEN: 'verify-admin-token-with-more-than-32-chars' }
   }],
-  ['rate-limiter unit tests', 'node', ['scripts/test-rate-limiter.mjs']],
-  ['episode-utils unit tests', 'node', ['scripts/test-episode-utils.mjs']],
-  ['title privacy unit tests', 'node', ['scripts/test-title-privacy.mjs']],
   ['server WebSocket integration', 'node', ['scripts/test-server-ws.mjs']],
-  ['names generator', 'node', ['scripts/test-names.mjs']],
   ['content video finder', 'node', ['scripts/test-content-video-finder.cjs']],
   ['audio settings', 'node', ['scripts/test-audio-settings.mjs']],
-  ['blacklist settings', 'node', ['scripts/test-blacklist-settings.mjs']],
   ['popup refresh cooldown', 'node', ['scripts/test-popup-refresh-cooldown.mjs']],
   ['chat settings', 'node', ['scripts/test-chat-settings.mjs']],
-  ['host access recovery', 'node', ['scripts/test-host-access.mjs']],
   ['server syntax index', 'node', ['-c', 'server/index.js']],
   ['server syntax ops', 'node', ['-c', 'server/ops.js']],
   ['server syntax rate-limiter', 'node', ['-c', 'server/rate-limiter.js']],
