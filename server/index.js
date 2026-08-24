@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { EVENTS, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES } from '../shared/constants.js';
+import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES } from '../shared/constants.js';
 import { createChatEnvelope } from './chat.js';
 import {
     buildHealthPayload,
@@ -922,8 +922,7 @@ io.on('connection', (socket) => {
 });
 
 // Active Room & Dead Peer Cleanup (Every 2m)
-const roomCleanupInterval = setInterval(() => {
-    const now = Date.now();
+export function cleanupInactiveRooms(now = Date.now()) {
     const roomCutoff = now - (2 * 60 * 60 * 1000); // 2 hours
     const peerCutoff = now - (5 * 60 * 1000);      // 5 minutes
     
@@ -942,7 +941,13 @@ const roomCleanupInterval = setInterval(() => {
         }
         for (const sid of staleSids) {
             const deadSocket = io.sockets?.sockets?.get(sid);
-            if (deadSocket) deadSocket.leave(roomId);
+            if (deadSocket) {
+                deadSocket.emit(EVENTS.ERROR, {
+                    code: ERROR_CODES.PEER_TIMED_OUT,
+                    message: 'Removed from room after inactivity'
+                });
+                deadSocket.leave(roomId);
+            }
             log('CLEANUP', `Pruning dead peer from room ${roomId.substring(0, 3)}***`);
             try {
                 removePeerFromRoom(sid, roomId, 'reaper');
@@ -954,12 +959,25 @@ const roomCleanupInterval = setInterval(() => {
         // 2. Prune empty or inactive rooms
         const currentRoom = rooms.get(roomId);
         if (currentRoom && (currentRoom.peers.size === 0 || currentRoom.lastActivity < roomCutoff)) {
-            io.to(roomId).emit(EVENTS.ERROR, { message: 'Room closed' });
+            io.to(roomId).emit(EVENTS.ERROR, {
+                code: ERROR_CODES.ROOM_CLOSED,
+                message: 'Room closed'
+            });
+            // A terminal room timeout is a real leave for every member. Clear
+            // the same socket/peer indexes as an explicit leave so a later join
+            // cannot be mistaken for the stale membership.
+            for (const sid of Array.from(currentRoom.peers)) {
+                const memberSocket = io.sockets?.sockets?.get(sid);
+                if (memberSocket) memberSocket.leave(roomId);
+                removePeerFromRoom(sid, roomId, 'room-timeout');
+            }
             rooms.delete(roomId);
             log('CLEANUP', `Deleted room ${roomId.substring(0, 3)}*** (Empty/Inactive)`);
         }
     }
-}, 2 * 60 * 1000);
+}
+
+const roomCleanupInterval = setInterval(cleanupInactiveRooms, 2 * 60 * 1000);
 
 export function startServer(port = PORT, host) {
     if (httpServer.listening) return Promise.resolve(httpServer);

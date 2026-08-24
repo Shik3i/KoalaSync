@@ -467,6 +467,7 @@ function contentTarget(tabId, selected, discoveredFrameIds = null) {
         documentId,
         frameUrl: typeof selected?.result?.href === 'string' ? selected.result.href : null,
         hasVideo: !!selected?.result?.bestVideo,
+        visibilityConfirmed: selected?.result?.parentFrameVisible === true,
         scriptTarget: documentId
             ? { tabId, documentIds: [documentId] }
             : (frameId === 0 ? { tabId } : { tabId, frameIds: [frameId] })

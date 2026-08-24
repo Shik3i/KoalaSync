@@ -27,3 +27,34 @@ test('popup exposes names and keyboard access for every visible control', async 
     await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#tab-settings')).toBeVisible();
 });
+
+test('popup root remains 360px when a dynamic child overflows', async ({ context, extensionId }) => {
+    const page = await openPopup(context, extensionId, { openEditor: false });
+    const geometry = await page.evaluate(() => {
+        const probe = document.createElement('div');
+        probe.id = 'popup-overflow-probe';
+        probe.style.width = '1200px';
+        probe.style.height = '1px';
+        document.body.appendChild(probe);
+
+        const htmlStyle = window.getComputedStyle(document.documentElement);
+        const bodyStyle = window.getComputedStyle(document.body);
+        return {
+            htmlWidth: document.documentElement.getBoundingClientRect().width,
+            bodyWidth: document.body.getBoundingClientRect().width,
+            htmlOverflowX: htmlStyle.overflowX,
+            bodyOverflowX: bodyStyle.overflowX,
+            bodyContain: bodyStyle.contain,
+            probeWidth: probe.getBoundingClientRect().width
+        };
+    });
+
+    expect(geometry).toEqual({
+        htmlWidth: 360,
+        bodyWidth: 360,
+        htmlOverflowX: 'hidden',
+        bodyOverflowX: 'hidden',
+        bodyContain: 'inline-size',
+        probeWidth: 1200
+    });
+});

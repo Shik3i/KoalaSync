@@ -184,6 +184,7 @@ describe('cross-origin media-frame targeting', () => {
             documentId: 'document-8',
             frameUrl: 'https://player-8.example/embed',
             hasVideo: true,
+            visibilityConfirmed: true,
             // Reported back so the caller can address these frames directly when
             // a later all-frames sweep is rejected wholesale.
             discoveredFrameIds: [0, 8],
@@ -242,6 +243,7 @@ describe('cross-origin media-frame targeting', () => {
             documentId: null,
             frameUrl: null,
             hasVideo: false,
+            visibilityConfirmed: false,
             discoveredFrameIds: [0, 6],
             scriptTarget: { tabId: 42 }
         });
@@ -582,6 +584,7 @@ describe('embedded player access diagnosis', () => {
             documentId: null,
             frameUrl: null,
             hasVideo: false,
+            visibilityConfirmed: false,
             discoveredFrameIds: [0],
             scriptTarget: { tabId: 42 }
         });

@@ -67,6 +67,25 @@ try {
     close();
     resetConnectionRate();
 
+    // --- Stale peer reaper: terminal timeout + clean rejoin ---
+    const staleClient = await c();
+    const staleRoomId = 'stale-'+Date.now();
+    await j(staleClient, staleRoomId, 'stale-peer');
+    staleClient._m.length = 0;
+    const staleRoom = mod.rooms.get(staleRoomId);
+    staleRoom.peerData.values().next().value.lastSeen = 1;
+    mod.cleanupInactiveRooms(Date.now());
+    const [staleEvent, staleData] = await a(staleClient);
+    assert.equal(staleEvent, 'error');
+    assert.equal(staleData.code, 'peer_timed_out');
+    assert.equal(staleData.message, 'Removed from room after inactivity');
+    assert.equal(mod.rooms.has(staleRoomId), false, 'stale peer room is deleted');
+    staleClient._m.length = 0;
+    await j(staleClient, staleRoomId, 'stale-peer');
+    assert.equal(mod.rooms.has(staleRoomId), true, 'stale peer can rejoin cleanly');
+    close();
+    resetConnectionRate();
+
     // --- Capabilities: ROOM_DATA advertises server features for client detection ---
     const capClient = await c();
     s(capClient, 'join_room', { roomId: 'cap-'+Date.now(), peerId: 'capp', protocolVersion: '1.0.0' });
@@ -77,6 +96,27 @@ try {
     assert.ok(capData.capabilities.includes('chat'), 'ROOM_DATA advertises the chat capability');
     assert.ok(capData.capabilities.includes('chat-v1'), 'ROOM_DATA advertises the versioned chat capability');
     assert.equal(capData.chatHistory, undefined, 'ROOM_DATA never contains chat history');
+    close();
+    resetConnectionRate();
+
+    // --- Terminal room timeout: coded error + complete membership cleanup ---
+    const timeoutClient = await c();
+    const timeoutRoomId = 'timeout-'+Date.now();
+    await j(timeoutClient, timeoutRoomId, 'timeout-peer');
+    timeoutClient._m.length = 0;
+    mod.rooms.get(timeoutRoomId).lastActivity = 0;
+    mod.cleanupInactiveRooms(Date.now());
+    const [timeoutEvent, timeoutData] = await a(timeoutClient);
+    assert.equal(timeoutEvent, 'error');
+    assert.equal(timeoutData.code, 'room_closed');
+    assert.equal(timeoutData.message, 'Room closed');
+    assert.equal(mod.rooms.has(timeoutRoomId), false, 'inactive room is deleted');
+    timeoutClient._m.length = 0;
+
+    // The same connected socket must be able to join that room again. This
+    // proves timeout cleanup removed its stale socketToRoom membership.
+    await j(timeoutClient, timeoutRoomId, 'timeout-peer');
+    assert.equal(mod.rooms.has(timeoutRoomId), true, 'timed-out peer can rejoin cleanly');
     close();
     resetConnectionRate();
 

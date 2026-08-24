@@ -39,12 +39,15 @@ describe('chat crypto', () => {
         const secret = generateChatSecret(webcrypto);
         let deriveCalls = 0;
         let releaseDerive;
+        let markDeriveStarted;
+        const deriveStarted = new Promise(resolve => { markDeriveStarted = resolve; });
         const delayedCrypto = {
             ...webcrypto,
             subtle: {
                 importKey: (...args) => webcrypto.subtle.importKey(...args),
                 deriveKey: async (...args) => {
                     deriveCalls++;
+                    markDeriveStarted();
                     await new Promise(resolve => { releaseDerive = resolve; });
                     return webcrypto.subtle.deriveKey(...args);
                 }
@@ -52,7 +55,7 @@ describe('chat crypto', () => {
         };
         const first = deriveChatKey('ROOM-1', secret, delayedCrypto);
         const second = deriveChatKey('ROOM-1', secret, delayedCrypto);
-        await Promise.resolve();
+        await deriveStarted;
         expect(deriveCalls).toBe(1);
         clearChatKeyCache();
         releaseDerive();
