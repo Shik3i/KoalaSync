@@ -51,9 +51,10 @@ async function connect(context, extensionId, { relayUrl, roomId, username }) {
 test('@race synchronizes two packed clients across relay and service-worker restarts', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(120000);
     const second = await launchExtensionContext();
-    const port = await reservePort();
-    let relay = await startRelay(port);
+    let relay = null;
     try {
+        const port = await reservePort();
+        relay = await startRelay(port);
         const firstUrl = `${baseURL}/pages/simple-player.html?client=first`;
         const secondUrl = `${baseURL}/pages/simple-player.html?client=second`;
         const firstPage = await context.newPage();

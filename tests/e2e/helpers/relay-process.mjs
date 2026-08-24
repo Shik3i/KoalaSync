@@ -37,7 +37,10 @@ export async function startRelay(port) {
             throw new Error(`relay exited with ${child.exitCode}: ${output.join('')}`);
         }
         try {
-            const response = await fetch(`http://127.0.0.1:${port}/health`);
+            const remainingMs = Math.max(1, deadline - Date.now());
+            const response = await fetch(`http://127.0.0.1:${port}/health`, {
+                signal: globalThis.AbortSignal.timeout(Math.min(1000, remainingMs))
+            });
             if (response.ok) return { child, output };
         } catch (_error) {
             // Relay is still starting.

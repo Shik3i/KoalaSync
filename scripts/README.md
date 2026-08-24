@@ -104,7 +104,7 @@ creates a draft release, publishes and smoke-tests the relay image, and only
 afterwards makes the GitHub Release public. The published-asset gate runs:
 
 ```bash
-node scripts/verify-published-release.mjs v3.1.4 --repo Shik3i/KoalaSync
+node scripts/verify-published-release.mjs vMAJOR.MINOR.PATCH --repo Shik3i/KoalaSync
 ```
 
 The verifier requires the exact three release assets, validates SHA-256 hashes,
