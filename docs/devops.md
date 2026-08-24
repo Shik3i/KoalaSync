@@ -4,30 +4,32 @@ This document describes the deployment and release process for KoalaSync.
 
 ## Tag-Based Releases
 
-KoalaSync uses a fully automated release pipeline triggered by Git tags. 
+KoalaSync uses a gated release pipeline triggered by immutable Git tags.
 
 > [!IMPORTANT]
-> **DO NOT** manually bump the version numbers in any files (such as `package.json`, `manifest.base.json`, `shared/constants.js`, etc.) before creating a release. 
-> Bumping versions manually is redundant, leads to conflicts, and is completely handled by the CI/CD pipeline.
+> **DO NOT** edit individual version files or tag an unmerged branch. Run
+> `npm run prepare:release -- MAJOR.MINOR.PATCH` on a branch, review all generated
+> source changes, and merge them through a pull request with successful CI.
 
 ### How it Works
 
-When you push a Git tag matching `v*` (e.g., `v2.5.1`), the GitHub Actions release workflow (`.github/workflows/release.yml`) is triggered. The workflow performs the following actions:
+When an annotated tag matching exact `vMAJOR.MINOR.PATCH` is pushed, the GitHub
+Actions workflow performs these ordered gates:
 
-1. **Extracts the version** from the tag (e.g., `2.5.1` from `v2.5.1`).
-2. **Injects the version** automatically into the following files:
-   - `extension/manifest.base.json`
-   - `shared/constants.js` (updates `APP_VERSION`)
-   - `package.json`
-   - `package-lock.json` (root package metadata)
-   - `website/version.json`
-   - `website/template.html` (updates `softwareVersion` schema)
-   - `README.md` (updates badge and announcement banner)
-   - `website/sitemap.xml` (updates `lastmod` dates)
-3. **Commits and pushes** these version updates back to the `main` branch automatically with the commit message `chore(release): update versions to vX.X.X [skip ci]`.
-4. **Builds the extension** for both Chrome and Firefox and publishes the zipped archives with a `SHA256SUMS` checksum file and signed provenance attestations.
-5. **Builds the website** and uploads website artifacts.
-6. **Builds and publishes** the Docker image for the relay server to the GitHub Container Registry (`ghcr.io`).
+1. Confirms that the tag is annotated, points exactly at current `origin/main`,
+   and matches every committed version source.
+2. Requires successful `verify`, `node20`, and `e2e` checks for that commit.
+3. Re-runs release verification, cross-browser E2E, and an unpublished relay
+   container smoke test.
+4. Builds and locally validates Chrome/Firefox archives, checksums, AMO output,
+   website output, archive parity, and manifests.
+5. Creates an attested **draft** GitHub Release.
+6. Publishes the multi-architecture relay image, verifies both platforms,
+   attestation identity, digest, tag source, and a running health check.
+7. Makes the GitHub Release public only after every preceding gate succeeds.
+
+The release workflow never writes to `main` and never derives shell code from a
+tag. Version changes must pass normal branch protection first.
 
 ---
 
@@ -35,18 +37,29 @@ When you push a Git tag matching `v*` (e.g., `v2.5.1`), the GitHub Actions relea
 
 To release a new version (e.g., `v2.5.1`), follow these steps:
 
-1. Make sure your local repository is synced on `main`:
+1. Create a release-preparation branch from current `main` and update every
+   version source atomically:
    ```bash
    git checkout main
    git pull origin main
+   git checkout -b release/v2.5.1
+   npm run prepare:release -- 2.5.1
+   npm run verify
    ```
-2. Create a local Git tag:
+2. Commit the release notes and prepared version changes, open a pull request,
+   and wait for required `verify`, `node20`, and `e2e` checks.
+3. After the PR is merged, fast-forward local `main` and create an **annotated**
+   tag on that exact commit:
    ```bash
-   git tag v2.5.1
+   git checkout main
+   git pull --ff-only origin main
+   git tag -a v2.5.1 -m "Release v2.5.1"
    ```
-3. Push the tag to GitHub:
+4. Verify the tag target, then push it once:
    ```bash
+   test "$(git rev-parse v2.5.1^{commit})" = "$(git rev-parse origin/main)"
    git push origin v2.5.1
    ```
 
-The release pipeline will take care of the rest! You can monitor the progress under the **Actions** tab of the GitHub repository.
+Never reuse or move a published tag. Monitor every release job and verify both
+the public GitHub assets and GHCR digest before calling the release complete.

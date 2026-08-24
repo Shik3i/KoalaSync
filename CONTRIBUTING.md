@@ -22,7 +22,7 @@ Please note that by participating in this project, you agree to abide by our [Co
 
 ### Prerequisites
 
-- **Node.js** v20.9+
+- **Node.js** v20.19+
 - **Docker** (for local relay server testing)
 
 ### Quick Start
@@ -96,7 +96,9 @@ KoalaSync uses a **single source of truth** for all protocol constants in `share
 ## Version Numbers
 
 > [!CAUTION]
-> **Never manually bump version numbers.** The CI pipeline injects the version from the git tag into `manifest.base.json`, `shared/constants.js`, and `package.json` during release builds. Manual bumps cause conflicts.
+> **Never edit release versions independently.** Release maintainers run
+> `npm run prepare:release -- MAJOR.MINOR.PATCH` on a branch and merge the
+> resulting version changes through a CI-green pull request before tagging.
 
 ---
 

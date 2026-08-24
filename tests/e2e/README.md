@@ -8,6 +8,9 @@ enough to control it.
 npm run test:e2e:install   # once, downloads the browsers
 npm run build:extension    # extension.spec.mjs loads dist/chrome
 npm run test:e2e
+npm run test:e2e:detection # finder only: Chromium, Firefox, WebKit
+npm run test:e2e:extension # packed extension only: Chromium MV3
+npm run test:e2e:race      # @race scenarios, repeated 20 times
 ```
 
 ## Layout
@@ -16,10 +19,18 @@ npm run test:e2e
 | :--- | :--- |
 | `detection.spec.mjs` | Runs the shipped `findVideo()` against the fixture pages |
 | `extension.spec.mjs` | Loads `dist/chrome`, injects into a tab, applies remote play/pause/seek |
+| `room-sync.spec.mjs` | Starts a local relay and proves two packed clients, relay restart, and MV3 worker recovery |
+| `popup-accessibility.spec.mjs` | Checks visible control names and keyboard tab activation in the real popup |
 | `fixture-server.mjs` | Static server for the fixtures, with byte-range support for media |
 | `fixtures/pages/` | One page per scenario |
 | `fixtures/media/` | Small generated clips (see below) |
 | `helpers/content-source.mjs` | Lifts the real finder out of `extension/content.js` |
+
+The detection fixtures run as three Playwright projects: Chromium, Firefox,
+and WebKit. Packed-extension tests remain Chromium-only because they exercise
+Chrome MV3 APIs and a persistent service-worker context. The scheduled
+`.github/workflows/race-tests.yml` lane repeats tests marked `@race` and uploads
+traces/results on failure.
 
 ## Two rules worth keeping
 
@@ -45,6 +56,7 @@ reads as a broken fixture instead of a scoring regression.
 | `late-frame.html` | Player frame attached after the page settled |
 | `shadow-player.html` | Player in a shadow root, tiny teaser in the light DOM |
 | `muted-player.html` | Mute must not disqualify the only player |
+| `display-contents-player.html` | A visible player survives a boxless `display: contents` wrapper |
 | `hidden-preload.html` | A `display:none` preload still reports 1080p; it must lose |
 | `ad-frame.html` | 1080p asset in a 300x250 ad slot must lose to the real player |
 | `background-loop.html` | Silent looping hero must lose despite being the largest |

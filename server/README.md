@@ -87,7 +87,9 @@ The server is covered by the root verification suite. From the repository root, 
 npm run verify
 ```
 
-For focused server checks, see `scripts/test-server-ops.mjs`, `scripts/test-server-routes.mjs`, `scripts/test-server-ws.mjs`, and `scripts/test-rate-limiter.mjs`.
+For focused server checks, run `npm run test:unit` for `server/ops.test.mjs`
+and `server/rate-limiter.test.mjs`, or use `scripts/test-server-routes.mjs` and
+`scripts/test-server-ws.mjs` for process-level integration coverage.
 
 ## Security
 - **Rate Limiting**: IP-based connection limits and socket-based event limits.
