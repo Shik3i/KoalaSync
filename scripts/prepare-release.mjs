@@ -65,6 +65,12 @@ export function prepareRelease(version, date = new Date()) {
         `Release-v${version}-blue`,
         'README.md release badge'
     );
+    updateText(
+        'README.md',
+        /New v\d+\.\d+\.\d+ Release!/gu,
+        `New v${version} Release!`,
+        'README.md release banner'
+    );
     console.log(`Prepared release v${version} at ${timestamp}`);
 }
 

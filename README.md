@@ -15,7 +15,7 @@
 
 <p align="center"><i>KoalaSync is a lightweight Browser Extension and Relay Server for synchronized video playback on almost any website with a video element—YouTube, Twitch, Netflix, Emby, Jellyfin, and beyond. Built with a focus on <b>Data Sovereignty</b> and <b>Performance</b>.</i></p>
 
-<p align="center"><a href="docs/CHANGELOG.md"><b>New v3.1.4 Release!</b> — See what's changed</a></p>
+<p align="center"><a href="docs/CHANGELOG.md"><b>New v3.1.5 Release!</b> — See what's changed</a></p>
 
 ### 🌟 Why KoalaSync?
 
