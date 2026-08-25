@@ -5,6 +5,14 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
+## [v3.1.5] — 2026-08-25
+
+This patch fixes room-exit cleanup and excessive popup width.
+
+### Fixed
+- **Room exit cleanup** — Fully unhooks the selected tab after manual leaves, inactivity timeouts, and room closures.
+- **Popup width** — Prevents dynamic content from stretching the popup on ultrawide displays.
+
 ## [v3.1.4] — 2026-08-21
 
 This patch restores player detection on pages that use boxless CSS wrappers,
