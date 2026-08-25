@@ -40,6 +40,11 @@ describe('local release gate contract', () => {
             'node scripts/release-preflight.mjs --sources "$VERSION"',
             'git commit -m "chore(release): update versions to v$VERSION [skip ci]"',
             'git push origin HEAD:main',
+            '  verify-prepared-release:',
+            '    needs: [preflight, prepare-release]',
+            '    runs-on: ubuntu-latest',
+            '    permissions:',
+            '      contents: read',
             'ref: ${{ needs.prepare-release.outputs.prepared-commit }}',
             'ref: ${{ needs.prepare-release.outputs.prepared-commit }}',
             'ref: ${{ needs.prepare-release.outputs.prepared-commit }}',
@@ -66,6 +71,10 @@ describe('local release gate contract', () => {
             'git push origin HEAD:main',
             'git push origin HEAD:main || true'
         ))).toThrow('stop when the automatic main push fails');
+        expect(() => validateReleaseWorkflowContract(workflow.replace(
+            /    permissions:\r?\n      contents: read\r?\n    steps:/u,
+            '    steps:'
+        ))).toThrow('explicitly limit GITHUB_TOKEN');
     });
 
     it('runs the complete CI-equivalent dependency, verify, and browser sequence', () => {
