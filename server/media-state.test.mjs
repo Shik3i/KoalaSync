@@ -67,6 +67,36 @@ describe('canonical media state', () => {
         expect(target.mediaState).toMatchObject({ revision: 5, currentTime: 200, updatedBy: 'b' });
     });
 
+    it('tracks only the current sender shared media title and honors an explicit privacy null', () => {
+        const target = room();
+        expect(updateMediaStateFromControl(
+            target,
+            EVENTS.PLAY,
+            { currentTime: 10, mediaTitle: 'Series S01E01' },
+            'a',
+            { now: 1000 }
+        )).toBe(true);
+        expect(snapshotMediaState(target.mediaState, 1000).mediaTitle).toBe('Series S01E01');
+
+        expect(updateMediaStateFromControl(
+            target,
+            EVENTS.SEEK,
+            { targetTime: 20 },
+            'b',
+            { now: 2000, senderMediaTitle: 'Series S01E02' }
+        )).toBe(true);
+        expect(target.mediaState.mediaTitle).toBe('Series S01E02');
+
+        expect(updateMediaStateFromControl(
+            target,
+            EVENTS.PAUSE,
+            { currentTime: 20, mediaTitle: null },
+            'b',
+            { now: 3000, senderMediaTitle: 'stale S01E01' }
+        )).toBe(true);
+        expect(target.mediaState).not.toHaveProperty('mediaTitle');
+    });
+
     it('ignores client-supplied playback state while seeking', () => {
         const target = room({ revision: 3, playbackState: 'paused', currentTime: 10, updatedAt: 1000, updatedBy: 'a' });
         expect(updateMediaStateFromControl(
@@ -103,7 +133,14 @@ describe('canonical media state', () => {
 
     it('commits Force Sync only at execute time', () => {
         const target = room({ revision: 4, playbackState: 'paused', currentTime: 90, updatedAt: 1000, updatedBy: 'a' });
-        expect(commitForceSyncMediaState(target, 500, 'b', 2000)).toBe(true);
-        expect(target.mediaState).toEqual({ revision: 5, playbackState: 'playing', currentTime: 500, updatedAt: 2000, updatedBy: 'b' });
+        expect(commitForceSyncMediaState(target, 500, 'b', 2000, 'Series S02E03')).toBe(true);
+        expect(target.mediaState).toEqual({
+            revision: 5,
+            playbackState: 'playing',
+            currentTime: 500,
+            updatedAt: 2000,
+            updatedBy: 'b',
+            mediaTitle: 'Series S02E03'
+        });
     });
 });

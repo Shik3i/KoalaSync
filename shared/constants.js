@@ -99,7 +99,7 @@ export const MAX_MEDIA_TIME = 86400;
 
 export const HEARTBEAT_INTERVAL = 15000; // 15s
 export const FORCE_SYNC_TIMEOUT = 8500; // 8.5s timeout for force sync ACKs (must be > content.js poll timeout of 8s)
-// Relay retention must outlive the client's ACK wait. Otherwise the timeout
-// fallback EXECUTE arrives exactly when the relay expires its prepared target.
-export const FORCE_SYNC_TARGET_TTL = FORCE_SYNC_TIMEOUT + 2000;
+// Log unexpectedly delayed EXECUTE delivery after the normal ACK wait plus
+// transport grace. The target remains valid until newer room playback replaces it.
+export const FORCE_SYNC_TARGET_DELAY_WARNING = FORCE_SYNC_TIMEOUT + 2000;
 export const EPISODE_LOBBY_TIMEOUT = 60000; // 60s timeout for episode lobby

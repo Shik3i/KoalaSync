@@ -18,6 +18,14 @@ describe('canonical media state validation', () => {
         expect(validateCanonicalMediaState(state(2))).toEqual(state(2));
     });
 
+    it('preserves an optional bounded media title and rejects invalid title types', () => {
+        expect(validateCanonicalMediaState({ ...state(2), mediaTitle: 'Series S01E02' }))
+            .toMatchObject({ mediaTitle: 'Series S01E02' });
+        expect(validateCanonicalMediaState({ ...state(2), mediaTitle: 'x'.repeat(120) }).mediaTitle)
+            .toHaveLength(100);
+        expect(validateCanonicalMediaState({ ...state(2), mediaTitle: 42 })).toBeNull();
+    });
+
     it.each([
         null,
         [],

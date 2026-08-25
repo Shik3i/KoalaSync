@@ -10,6 +10,11 @@ export function validateCanonicalMediaState(value) {
         || value.currentTime > MAX_MEDIA_TIME) {
         return null;
     }
+    if (value.mediaTitle !== undefined
+        && value.mediaTitle !== null
+        && typeof value.mediaTitle !== 'string') {
+        return null;
+    }
     const normalized = {
         revision: value.revision,
         playbackState: value.playbackState,
@@ -17,6 +22,9 @@ export function validateCanonicalMediaState(value) {
     };
     if (typeof value.updatedBy === 'string' && value.updatedBy) {
         normalized.updatedBy = value.updatedBy.substring(0, 16);
+    }
+    if (typeof value.mediaTitle === 'string' && value.mediaTitle) {
+        normalized.mediaTitle = value.mediaTitle.substring(0, 100);
     }
     return normalized;
 }

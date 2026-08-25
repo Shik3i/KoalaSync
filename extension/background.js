@@ -288,7 +288,10 @@ function serverSupports(cap) { return Array.isArray(serverCapabilities) && serve
 function serverSupportsChat() {
     return serverSupports(CAPABILITIES.CHAT_V1) || serverSupports(CAPABILITIES.CHAT);
 }
-const CLIENT_CAPABILITIES = Object.freeze([CAPABILITIES.CHAT_V1]);
+const CLIENT_CAPABILITIES = Object.freeze([
+    CAPABILITIES.CHAT_V1,
+    CAPABILITIES.MEDIA_STATE_V1
+]);
 
 function persistCanonicalMediaRecovery() {
     if (!storageInitialized) return;
@@ -1880,6 +1883,26 @@ function markCanonicalMediaStateHandled(roomId, revision) {
     return true;
 }
 
+function supersedeCanonicalMediaRecovery(reason) {
+    const roomId = currentRoom?.roomId;
+    const pending = canonicalMediaStateTracker.getPending(roomId);
+    if (!pending || !markCanonicalMediaStateHandled(roomId, pending.mediaState.revision)) {
+        return false;
+    }
+    addLog(`Canonical media state r${pending.mediaState.revision} superseded by ${reason}`, 'info');
+    return true;
+}
+
+function isCanonicalSupersedingControl(event, data) {
+    if (event === EVENTS.SEEK) {
+        return Number.isFinite(data?.targetTime) || Number.isFinite(data?.currentTime);
+    }
+    if (event === EVENTS.FORCE_SYNC_PREPARE) {
+        return Number.isFinite(data?.targetTime);
+    }
+    return event === EVENTS.PLAY || event === EVENTS.PAUSE || event === EVENTS.FORCE_SYNC_EXECUTE;
+}
+
 async function performPendingCanonicalMediaStateApply() {
     const roomId = currentRoom?.roomId;
     const pending = canonicalMediaStateTracker.getPendingProjected(roomId);
@@ -1904,9 +1927,21 @@ async function performPendingCanonicalMediaStateApply() {
     const targetDocumentId = currentTargetDocumentId;
 
     try {
-        const response = await sendMessageToContentTab(tabId, {
-            type: 'APPLY_CANONICAL_MEDIA_STATE',
-            mediaState
+        const response = await enqueueContentCommand(async () => {
+            if (currentRoom?.roomId !== roomId) return { status: 'stale_room' };
+            if (!isCurrentTargetIdentity(tabId, targetGeneration)
+                || normalizeFrameId(currentTargetFrameId) !== targetFrameId
+                || currentTargetDocumentId !== targetDocumentId) {
+                return { status: 'stale_target' };
+            }
+            const latest = canonicalMediaStateTracker.getPending(roomId);
+            if (latest?.mediaState.revision !== mediaState.revision) {
+                return { status: 'superseded' };
+            }
+            return sendMessageToContentTab(tabId, {
+                type: 'APPLY_CANONICAL_MEDIA_STATE',
+                mediaState
+            });
         });
         if (currentRoom?.roomId !== roomId) return { status: 'stale_room' };
         if (!isCurrentTargetIdentity(tabId, targetGeneration)
@@ -1924,6 +1959,9 @@ async function performPendingCanonicalMediaStateApply() {
         } else if (response?.status === 'ignored_desynced') {
             markCanonicalMediaStateHandled(roomId, mediaState.revision);
             addLog(`Canonical media state r${mediaState.revision} skipped: content is desynced`, 'info');
+        } else if (response?.status === 'ignored_episode_mismatch') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            addLog(`Canonical media state r${mediaState.revision} skipped: content is on a different episode`, 'info');
         } else if (response?.status === 'invalid') {
             markCanonicalMediaStateHandled(roomId, mediaState.revision);
             addLog(`Canonical media state r${mediaState.revision} rejected by content validation`, 'warn');
@@ -2246,6 +2284,9 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 lastSeqBySender[data.senderId] = data.seq;
                 _persistLastSeq();
             }
+            if (isCanonicalSupersedingControl(event, data)) {
+                supersedeCanonicalMediaRecovery(`newer ${event}`);
+            }
             if (data.senderId) {
                 addToHistory(event, data.senderId);
                 showNotification(data.senderId, event);
@@ -2308,6 +2349,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 lastSeqBySender[data.senderId] = data.seq;
                 _persistLastSeq();
             }
+            supersedeCanonicalMediaRecovery(`newer ${event}`);
             if (data?.senderId) {
                 addToHistory(event, data.senderId);
                 showNotification(data.senderId, event);
@@ -2443,6 +2485,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             break;
         case EVENTS.EPISODE_LOBBY:
             if (data.senderId && data.expectedTitle) {
+                supersedeCanonicalMediaRecovery(`newer ${event}`);
                 if (currentRoom) {
                     currentRoom.activeLobby = {
                         expectedTitle: data.expectedTitle,
@@ -2499,6 +2542,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             }
             break;
         case EVENTS.EPISODE_LOBBY_CANCEL:
+            supersedeCanonicalMediaRecovery(`newer ${event}`);
             if (currentRoom) {
                 currentRoom.activeLobby = null;
                 if (storageInitialized) chrome.storage.session.set({ currentRoom });
@@ -2531,6 +2575,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
 }
 
 function executeForceSync() {
+    supersedeCanonicalMediaRecovery('local force_sync_execute');
     if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
     isForceSyncInitiator = false;
     forceSyncAcks.clear();
@@ -2604,6 +2649,7 @@ function clearEpisodeLobbyState() {
 function cancelEpisodeLobby(reason) {
     if (!episodeLobby) return;
     const title = episodeLobby.expectedTitle;
+    supersedeCanonicalMediaRecovery('local episode_lobby_cancel');
     
     // Broadcast cancellation to room
     emit(EVENTS.EPISODE_LOBBY_CANCEL, { peerId });
@@ -2733,6 +2779,10 @@ function routeToContent(action, payload) {
         commandSenderId,
         0
     );
+    return enqueueContentCommand(deliver);
+}
+
+function enqueueContentCommand(deliver) {
     const queued = contentCommandQueue.catch(() => {}).then(deliver);
     contentCommandQueue = queued;
     return queued;
@@ -4824,6 +4874,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 payload.targetTime = targetTime;
             }
 
+            if (isCanonicalSupersedingControl(message.action, payload)) {
+                supersedeCanonicalMediaRecovery(`local ${message.action}`);
+            }
             const timestamp = Date.now();
             localSeq++;
             chrome.storage.session.set({ localSeq });
@@ -4883,7 +4936,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             sendChatActivity(message.action, peerId, timestamp);
 
             const isNonEssentialEvent = message.action === EVENTS.PLAY || message.action === EVENTS.PAUSE || message.action === EVENTS.SEEK;
-            if (isNonEssentialEvent && !hasOtherPeers) {
+            if (isNonEssentialEvent
+                && !hasOtherPeers
+                && !serverSupports(CAPABILITIES.MEDIA_STATE_V1)) {
                 sendResponse({ status: 'ok_solo' });
                 return;
             }
@@ -5159,6 +5214,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         if (episodeLobby) clearEpisodeLobbyState();
 
         // Create new lobby
+        supersedeCanonicalMediaRecovery('local episode_lobby');
         episodeLobby = {
             expectedTitle: lobbyTitle,
             initiatorPeerId: peerId,

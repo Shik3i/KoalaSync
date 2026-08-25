@@ -1270,10 +1270,18 @@
             || typeof mediaState.currentTime !== 'number'
             || !Number.isFinite(mediaState.currentTime)
             || mediaState.currentTime < 0
-            || mediaState.currentTime > MAX_MEDIA_TIME) {
+            || mediaState.currentTime > MAX_MEDIA_TIME
+            || (mediaState.mediaTitle !== undefined
+                && mediaState.mediaTitle !== null
+                && typeof mediaState.mediaTitle !== 'string')) {
             return { status: 'invalid' };
         }
         if (hcmDesynced) return { status: 'ignored_desynced' };
+        const localMediaTitle = getMediaTitle();
+        if (_autoSyncEnabled && isDifferentEpisode(mediaState.mediaTitle, localMediaTitle)) {
+            reportLog(`Canonical media state ignored: sender="${mediaState.mediaTitle || '?'}" vs mine="${localMediaTitle || '?'}"`, 'warn');
+            return { status: 'ignored_episode_mismatch' };
+        }
 
         const video = findVideo();
         if (!video) return { status: 'no_video' };

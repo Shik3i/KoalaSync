@@ -10,7 +10,7 @@ import {
     materializeMediaIntent,
     reserveLatestMediaIntentSequence
 } from '../extension/offline-media-intent.js';
-import { FORCE_SYNC_TARGET_TTL, FORCE_SYNC_TIMEOUT } from '../shared/constants.js';
+import { FORCE_SYNC_TARGET_DELAY_WARNING, FORCE_SYNC_TIMEOUT } from '../shared/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(__dirname, '..', 'server', 'package.json'));
@@ -83,7 +83,7 @@ try {
     const coalescedRid = 'coalesced-media-'+Date.now();
     const legacyReceiver = await c(), coalescingSender = await c();
     await j(legacyReceiver, coalescedRid, 'legacy-receiver');
-    await j(coalescingSender, coalescedRid, 'coalesce-sender', null, ['chat-v1']);
+    await j(coalescingSender, coalescedRid, 'coalesce-sender', null, ['chat-v1', 'media-state-v1']);
     legacyReceiver._m.length = coalescingSender._m.length = 0;
 
     s(legacyReceiver, 'play', { currentTime: 100, seq: 1, actionTimestamp: 1 });
@@ -175,12 +175,13 @@ try {
     // --- Mixed-version rollout: pre-media-state extension + current extension ---
     // Legacy intentionally omits clientCapabilities entirely and uses only the
     // pre-feature JOIN/PLAY/PAUSE/SEEK/Force Sync wire contract. The current
-    // client advertises only its existing chat capability; media-state support
-    // is a relay capability and is never required for server acquisition.
+    // Current clients additionally advertise that they maintain canonical state
+    // while solo. Recovery itself remains relay-gated and legacy clients still
+    // omit clientCapabilities entirely.
     const mixedMediaRid = 'mixed-media-'+Date.now();
     const legacyMedia = await c(), currentMedia = await c();
     const legacyRoomData = await j(legacyMedia, mixedMediaRid, 'legacy-media');
-    const currentRoomData = await j(currentMedia, mixedMediaRid, 'current-media', null, ['chat-v1']);
+    const currentRoomData = await j(currentMedia, mixedMediaRid, 'current-media', null, ['chat-v1', 'media-state-v1']);
     assert.equal(legacyRoomData.roomId, mixedMediaRid, 'legacy ROOM_DATA keeps roomId type/meaning');
     assert.ok(Array.isArray(legacyRoomData.peers), 'legacy ROOM_DATA keeps peers array');
     assert.equal(typeof legacyRoomData.controlMode, 'string', 'legacy ROOM_DATA keeps controlMode type');
@@ -294,7 +295,7 @@ try {
     await w(currentMedia, 'pause');
     const legacyFinalRevision = mod.rooms.get(mixedMediaRid).mediaState.revision;
     const currentMediaRejoin = await c();
-    const mixedRejoinData = await j(currentMediaRejoin, mixedMediaRid, 'current-media', null, ['chat-v1']);
+    const mixedRejoinData = await j(currentMediaRejoin, mixedMediaRid, 'current-media', null, ['chat-v1', 'media-state-v1']);
     assert.equal(mixedRejoinData.mediaState.revision, legacyFinalRevision);
     assert.equal(mixedRejoinData.mediaState.playbackState, 'paused');
     assert.equal(mixedRejoinData.mediaState.currentTime, 1700);
@@ -302,6 +303,27 @@ try {
         'current reconnect snapshot reflects the legacy client latest accepted intent');
     assert.equal(legacyMedia._m.some(raw => raw.includes('media_state')), false,
         'legacy client receives no new canonical event or ACK requirement');
+    currentMediaRejoin.close();
+    await delay(100);
+    assert.equal(mod.rooms.get(mixedMediaRid).mediaState, null,
+        'canonical state is cleared when only a legacy solo-suppressing client remains');
+    close();
+    resetConnectionRate();
+
+    // The inverse must remain true: a capable solo client keeps publishing
+    // PLAY/PAUSE/SEEK, so removing a legacy peer must not discard valid state.
+    const capableSoloRid = 'capable-solo-'+Date.now();
+    const capableSolo = await c(), transientLegacy = await c();
+    await j(capableSolo, capableSoloRid, 'capable-solo', null, ['chat-v1', 'media-state-v1']);
+    await j(transientLegacy, capableSoloRid, 'transient-legacy');
+    capableSolo._m.length = transientLegacy._m.length = 0;
+    s(capableSolo, 'play', { currentTime: 42, mediaTitle: 'Series S03E04' });
+    await w(transientLegacy, 'play');
+    const capableSoloState = { ...mod.rooms.get(capableSoloRid).mediaState };
+    transientLegacy.close();
+    await delay(100);
+    assert.deepEqual(mod.rooms.get(capableSoloRid).mediaState, capableSoloState,
+        'canonical state remains valid when the sole remaining client advertises media-state-v1');
     close();
     resetConnectionRate();
 
@@ -311,12 +333,18 @@ try {
     const initialMediaRoom = await j(msa, msrid, 'msa');
     assert.equal(initialMediaRoom.mediaState, null, 'media state is initially null');
 
-    s(msa, 'play', { currentTime: 100, revision: 999, updatedBy: 'spoofed' });
+    s(msa, 'play', {
+        currentTime: 100,
+        mediaTitle: 'Series S01E02',
+        revision: 999,
+        updatedBy: 'spoofed'
+    });
     await delay(120);
     const msb = await c();
     const playingJoin = await j(msb, msrid, 'msb');
     assert.equal(playingJoin.mediaState.revision, 1, 'first accepted PLAY creates revision 1');
     assert.equal(playingJoin.mediaState.playbackState, 'playing');
+    assert.equal(playingJoin.mediaState.mediaTitle, 'Series S01E02');
     assert.ok(playingJoin.mediaState.currentTime >= 100.08 && playingJoin.mediaState.currentTime < 101,
         `playing late join receives projected position (${playingJoin.mediaState.currentTime})`);
     assert.equal(playingJoin.mediaState.updatedBy, 'msa', 'updatedBy is server-tracked identity');
@@ -404,8 +432,8 @@ try {
         'authorized EXECUTE commits the latest target visible to legacy peers');
     assert.equal(competingForceState.updatedBy, 'msa');
 
-    // The initiator's normal ACK timeout must still fit inside relay target
-    // retention. This is the exact fallback boundary used by background.js.
+    // The initiator's normal ACK timeout stays below the relay's delayed-target
+    // warning boundary and commits normally.
     s(msa, 'force_sync_prepare', { targetTime: 925 });
     await w(msb, 'force_sync_prepare');
     mod.rooms.get(msrid).forceSyncTarget.preparedAt = Date.now() - FORCE_SYNC_TIMEOUT;
@@ -414,17 +442,38 @@ try {
     assert.equal(mod.rooms.get(msrid).mediaState.currentTime, 925,
         'relay grace accepts EXECUTE at the client ACK-timeout boundary');
 
+    // Even beyond the warning boundary, a target that no newer room action
+    // superseded remains the only safe way to release already-paused peers.
     s(msa, 'force_sync_prepare', { targetTime: 950 });
     await w(msb, 'force_sync_prepare');
     const beforeExpiredExecute = { ...mod.rooms.get(msrid).mediaState };
-    mod.rooms.get(msrid).forceSyncTarget.preparedAt = Date.now() - FORCE_SYNC_TARGET_TTL - 1;
+    mod.rooms.get(msrid).forceSyncTarget.preparedAt = Date.now() - FORCE_SYNC_TARGET_DELAY_WARNING - 1;
     msa._m.length = msb._m.length = 0;
     s(msa, 'force_sync_execute', {});
-    let expiredExecuteDropped = false;
-    try { await w(msb, 'force_sync_execute', 500); } catch { expiredExecuteDropped = true; }
-    assert.ok(expiredExecuteDropped, 'an expired Force Sync target rejects delayed EXECUTE');
-    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforeExpiredExecute);
+    await w(msb, 'force_sync_execute');
+    assert.equal(mod.rooms.get(msrid).mediaState.revision, beforeExpiredExecute.revision + 1);
+    assert.equal(mod.rooms.get(msrid).mediaState.currentTime, 950,
+        'a delayed EXECUTE still releases peers and commits its unsuperseded prepared target');
     assert.equal(mod.rooms.get(msrid).forceSyncTarget, null);
+
+    // A relay restart cannot recover transient PREPARE state. Preserve the old
+    // wire liveness fallback without inventing a canonical target.
+    const beforeUntrackedExecute = { ...mod.rooms.get(msrid).mediaState };
+    msa._m.length = msb._m.length = 0;
+    s(msa, 'force_sync_execute', {});
+    await w(msb, 'force_sync_execute');
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforeUntrackedExecute,
+        'an untracked compatibility EXECUTE relays without canonical mutation');
+
+    s(msa, 'force_sync_prepare', { targetTime: 975 });
+    await w(msb, 'force_sync_prepare');
+    s(msb, 'seek', { targetTime: 'invalid' });
+    await w(msa, 'seek');
+    assert.equal(mod.rooms.get(msrid).forceSyncTarget.targetTime, 975,
+        'a sanitized no-op SEEK does not supersede an in-flight prepared target');
+    s(msa, 'force_sync_execute', {});
+    await w(msb, 'force_sync_execute');
+    assert.equal(mod.rooms.get(msrid).mediaState.currentTime, 975);
 
     msa._m.length = msb._m.length = 0;
     s(msa, 'force_sync_prepare', { targetTime: 1_000 });
@@ -830,13 +879,20 @@ try {
     close();
     resetConnectionRate();
 
-    // A transient disconnect clears the Host Control exemption but not the
-    // validated room target. If the peer rejoins with current authority, its
-    // recovered EXECUTE must keep live playback and canonical state aligned.
+    // A transient disconnect removes the co-host role but not the validated
+    // room target. The same PREPARE initiator may still finish that already
+    // visible transaction after reconnecting as a host-only guest.
     const forceReconnectRid = 'force-reconnect-'+Date.now();
     const forceReconnectHost = await c(), forceReconnectPeer = await c();
     await j(forceReconnectHost, forceReconnectRid, 'force-host');
     await j(forceReconnectPeer, forceReconnectRid, 'force-peer');
+    forceReconnectHost._m.length = forceReconnectPeer._m.length = 0;
+    s(forceReconnectHost, 'set_control_mode', { controlMode: 'host-only' });
+    await w(forceReconnectHost, 'control_mode');
+    await w(forceReconnectPeer, 'control_mode');
+    forceReconnectHost._m.length = forceReconnectPeer._m.length = 0;
+    s(forceReconnectHost, 'set_peer_role', { peerId: 'force-peer', controller: true });
+    await w(forceReconnectPeer, 'control_mode');
     forceReconnectHost._m.length = forceReconnectPeer._m.length = 0;
     s(forceReconnectPeer, 'force_sync_prepare', { targetTime: 444 });
     await w(forceReconnectHost, 'force_sync_prepare');

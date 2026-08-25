@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TARGET_TTL, MAX_MEDIA_TIME } from '../shared/constants.js';
+import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TARGET_DELAY_WARNING, MAX_MEDIA_TIME } from '../shared/constants.js';
 import { createChatEnvelope } from './chat.js';
 import {
     commitForceSyncMediaState,
@@ -204,13 +204,19 @@ function normalizeClientCapabilities(value) {
     return [...new Set(value.slice(0, 16)
         .filter(capability => typeof capability === 'string')
         .map(capability => capability.substring(0, 32))
-        .filter(capability => capability === CAPABILITIES.CHAT_V1)
+        .filter(capability => capability === CAPABILITIES.CHAT_V1
+            || capability === CAPABILITIES.MEDIA_STATE_V1)
     )];
 }
 
 function clientSupportsChat(socket) {
     return Array.isArray(socket?.data?.clientCapabilities) &&
         socket.data.clientCapabilities.includes(CAPABILITIES.CHAT_V1);
+}
+
+function clientSupportsMediaState(socket) {
+    return Array.isArray(socket?.data?.clientCapabilities)
+        && socket.data.clientCapabilities.includes(CAPABILITIES.MEDIA_STATE_V1);
 }
 
 // M-4: minimum interval between CONTROL_MODE changes per room. Stops a rapidly
@@ -295,6 +301,16 @@ function removePeerFromRoom(socketId, roomId, reason) {
     //      limitation (no host grace period); see KNOWN_LIMITATIONS.md.
     const peerRejoining = peerJoinLocks.has(peerId);
     const peerGone = !isPeerStillConnected && !peerRejoining;
+    if (room.peers.size === 1 && !peerRejoining) {
+        const remainingSocketId = room.peers.values().next().value;
+        const remainingSocket = io.sockets.sockets.get(remainingSocketId);
+        if (!clientSupportsMediaState(remainingSocket)) {
+            // Pre-feature extensions suppress PLAY/PAUSE/SEEK while solo. Their
+            // last canonical snapshot can therefore become stale before the next
+            // join; absence is safer than applying known-unreliable room truth.
+            room.mediaState = null;
+        }
+    }
     if (peerGone && room.controllers && room.peers.size > 0) {
         const wasController = room.controllers.has(peerId);
         room.controllers.delete(peerId);
@@ -470,7 +486,10 @@ io.on('connection', (socket) => {
                             mediaState: null,
                             // PREPARE is choreography, not stable room intent. Retain its
                             // validated target only so the matching EXECUTE can commit it.
-                            forceSyncTarget: null
+                            forceSyncTarget: null,
+                            // Distinguishes an unknown target after relay restart from a
+                            // transaction explicitly replaced by newer room playback.
+                            forceSyncSuperseded: false
                         };
                         rooms.set(roomId, room);
                         createdByMe = true;
@@ -612,8 +631,11 @@ io.on('connection', (socket) => {
                     // FORCE_SYNC_EXECUTE still has to land after demotion —
                     // otherwise the already-relayed room-wide choreography
                     // would leave peers paused.
-                    const isOwnForceSyncExecute = eventName === EVENTS.FORCE_SYNC_EXECUTE &&
-                        room.forceSyncInitiator && mapping.peerId === room.forceSyncInitiator;
+                    const forceSyncInitiator = room.forceSyncTarget?.initiatorPeerId
+                        || room.forceSyncInitiator;
+                    const isOwnForceSyncExecute = eventName === EVENTS.FORCE_SYNC_EXECUTE
+                        && forceSyncInitiator
+                        && mapping.peerId === forceSyncInitiator;
                     if (!isOwnForceSyncExecute &&
                         room.controlMode === CONTROL_MODES.HOST_ONLY &&
                         !(room.controllers && room.controllers.has(mapping.peerId)) &&
@@ -687,37 +709,33 @@ io.on('connection', (socket) => {
                     Object.keys(relayPayload).forEach(k => relayPayload[k] === undefined && delete relayPayload[k]);
 
                     const mediaStateNow = Date.now();
-                    if (eventName === EVENTS.FORCE_SYNC_EXECUTE) {
-                        const forceSyncTarget = room.forceSyncTarget;
-                        const targetExpired = forceSyncTarget
-                            && (!Number.isFinite(forceSyncTarget.preparedAt)
-                                || mediaStateNow - forceSyncTarget.preparedAt > FORCE_SYNC_TARGET_TTL);
-                        if (!forceSyncTarget || targetExpired) {
-                            log('ROOM', `Dropped force_sync_execute ${targetExpired ? 'with an expired target' : 'without a prepared target'} from ${mapping.peerId}`);
-                            room.forceSyncInitiator = null;
-                            room.forceSyncTarget = null;
-                            return;
-                        }
-                    }
-                    if (eventName === EVENTS.PLAY
-                        || eventName === EVENTS.PAUSE
-                        || eventName === EVENTS.SEEK
-                        || eventName === EVENTS.EPISODE_LOBBY
-                        || eventName === EVENTS.EPISODE_LOBBY_CANCEL) {
-                        // A later room-driving action supersedes unfinished Force
-                        // Sync choreography. Do not let a delayed EXECUTE commit
-                        // an obsolete target after peers have moved elsewhere.
-                        room.forceSyncInitiator = null;
-                        room.forceSyncTarget = null;
-                    }
 
                     // Canonical Media State v1: mutate only after rate limiting,
                     // room mapping, Host Control authorization and sanitization.
                     // Heartbeats remain observational and never enter this path.
-                    updateMediaStateFromControl(room, eventName, relayPayload, mapping.peerId, {
-                        now: mediaStateNow,
-                        senderPlaybackState: existing.playbackState
-                    });
+                    const canonicalStateUpdated = updateMediaStateFromControl(
+                        room,
+                        eventName,
+                        relayPayload,
+                        mapping.peerId,
+                        {
+                            now: mediaStateNow,
+                            senderPlaybackState: existing.playbackState,
+                            senderMediaTitle: room.peerData.get(socket.id)?.mediaTitle
+                        }
+                    );
+                    const validLobbyTransition = (eventName === EVENTS.EPISODE_LOBBY
+                        && typeof relayPayload.expectedTitle === 'string'
+                        && relayPayload.expectedTitle.length > 0)
+                        || eventName === EVENTS.EPISODE_LOBBY_CANCEL;
+                    if (canonicalStateUpdated || validLobbyTransition) {
+                        // A later room-driving action supersedes unfinished Force
+                        // Sync choreography. Do not let a delayed EXECUTE commit
+                        // an obsolete target after peers have moved elsewhere.
+                        room.forceSyncSuperseded = true;
+                        room.forceSyncInitiator = null;
+                        room.forceSyncTarget = null;
+                    }
                     if (eventName === EVENTS.FORCE_SYNC_PREPARE) {
                         // A malformed PREPARE must neither pause peers nor grant
                         // the initiator a later Host Control EXECUTE exemption.
@@ -731,23 +749,42 @@ io.on('connection', (socket) => {
                         // control mode so an everyone -> host-only transition
                         // cannot strand that already-authorized transaction.
                         room.forceSyncInitiator = mapping.peerId;
+                        room.forceSyncSuperseded = false;
                         room.forceSyncTarget = {
                             initiatorPeerId: mapping.peerId,
                             targetTime: relayPayload.targetTime,
-                            preparedAt: mediaStateNow
+                            preparedAt: mediaStateNow,
+                            mediaTitle: room.peerData.get(socket.id)?.mediaTitle || null
                         };
                     } else if (eventName === EVENTS.FORCE_SYNC_EXECUTE) {
                         const forceSyncTarget = room.forceSyncTarget;
+                        if (!forceSyncTarget && room.forceSyncSuperseded) {
+                            log('ROOM', `Dropped obsolete force_sync_execute after newer room playback from ${mapping.peerId}`);
+                            room.forceSyncInitiator = null;
+                            return;
+                        }
                         if (forceSyncTarget) {
+                            const targetDelayed = !Number.isFinite(forceSyncTarget.preparedAt)
+                                || mediaStateNow - forceSyncTarget.preparedAt > FORCE_SYNC_TARGET_DELAY_WARNING;
+                            if (targetDelayed) {
+                                log('ROOM', `Relaying delayed force_sync_execute from ${mapping.peerId} to release prepared peers`);
+                            }
                             commitForceSyncMediaState(
                                 room,
                                 forceSyncTarget.targetTime,
                                 mapping.peerId,
-                                mediaStateNow
+                                mediaStateNow,
+                                forceSyncTarget.mediaTitle
                             );
+                        } else {
+                            // A relay restart loses transient PREPARE state while legacy
+                            // receivers can remain paused in their existing pages. Preserve
+                            // the old wire behavior, but do not invent a canonical target.
+                            log('ROOM', `Relaying force_sync_execute without server target from ${mapping.peerId}`);
                         }
                         room.forceSyncInitiator = null;
                         room.forceSyncTarget = null;
+                        room.forceSyncSuperseded = false;
                     }
 
                     socket.to(mapping.roomId).emit(eventName, relayPayload);

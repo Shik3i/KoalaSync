@@ -41,8 +41,10 @@ not. Heartbeats remain observational and do not mutate canonical state.
 
 `ROOM_DATA` materializes the playing position at snapshot creation and advertises
 the optional `media-state-v1` capability. A joining/reconnecting client validates
-the room/revision, respects Host Control solo mode and Episode Lobby, then sends an
-internal `APPLY_CANONICAL_MEDIA_STATE` message to the existing content/video path.
+the room/revision and optional privacy-sanitized media title, respects Host Control
+solo mode and Episode Lobby, then queues an internal
+`APPLY_CANONICAL_MEDIA_STATE` message on the same ordered content path as newer
+live commands.
 That path reuses frame election, Netflix/Disney page-API seeks, native play/pause,
 the 2-second drift tolerance, and programmatic-event suppression. Recovery only
 completes after playback state and position verification. Transient failures
@@ -52,10 +54,18 @@ snapshot advances from its local receipt time while waiting for a target, and
 the apply creates no action history, notification, command ACK, or relay media
 event.
 
+Current clients announce `media-state-v1` as an optional client capability and
+continue sending accepted media controls while alone on a capable relay. If a
+room instead falls back to one legacy client that suppresses solo controls, the
+relay clears canonical state so a future joiner receives no snapshot rather than
+known-unreliable playback truth.
+
 Force Sync remains a two-phase ACK protocol. A valid `PREPARE` is temporary
 room-wide choreography; the next authorized `EXECUTE` commits the latest target
-visible to peers to canonical state before the relay target TTL. That TTL is
-longer than the client ACK timeout so its scheduled fallback can still land. The
+visible to peers to canonical state. Delayed execution is logged but remains
+valid until newer accepted playback or lobby state explicitly supersedes it; an
+untracked post-restart execute retains legacy relay liveness without inventing a
+canonical target. The
 offline queue replays an adjacent `PREPARE`/`EXECUTE` pair in one paced batch and
 retains both if delivery fails. Per-sender
 `seq`, peer heartbeats, and the reconnect queue remain separate mechanisms. The

@@ -54,7 +54,7 @@ Payload:
   "password": "string, max 128, optional",
   "tabTitle": "string, max 100, optional",
   "mediaTitle": "string, max 100, optional",
-  "clientCapabilities": ["chat-v1"],
+  "clientCapabilities": ["chat-v1", "media-state-v1"],
   "protocolVersion": "string, max 16"
 }
 ```
@@ -110,8 +110,9 @@ The internal `currentTime` is the media position at server-owned `updatedAt`.
 Playing state advances lazily when a snapshot is requested; paused state stays
 fixed. `revision`, `updatedAt`, and `updatedBy` are server-owned. Clients cannot
 spoof them. The wire snapshot contains the already-projected `currentTime`,
-`revision`, `playbackState`, and `updatedBy`, so clients never compare client and
-server wall clocks.
+`revision`, `playbackState`, `updatedBy`, and an optional privacy-sanitized
+`mediaTitle`, so clients never compare client and server wall clocks and retain
+the existing cross-episode guard during recovery.
 
 Only accepted, sanitized room controls update canonical state:
 
@@ -121,11 +122,12 @@ Only accepted, sanitized room controls update canonical state:
   established playback state.
 - a valid `force_sync_prepare` records only temporary coordination state. The
   next authorized `force_sync_execute` commits the latest room-wide prepared
-  target as playing before `FORCE_SYNC_TARGET_TTL` expires. This relay TTL is
-  intentionally longer than the client's `FORCE_SYNC_TIMEOUT` ACK wait so the
-  normal timeout fallback remains deliverable. Expired targets are cleared and
-  cannot alter canonical state. The latest valid prepare is also the only
-  post-demotion execute exemption in Host Control mode.
+  target as playing. A target older than `FORCE_SYNC_TARGET_DELAY_WARNING` is
+  logged but remains executable until newer room playback supersedes it, because
+  receivers are already paused. An execute without retained target still uses
+  the legacy wire fallback after relay restart but cannot invent canonical state.
+  The latest valid prepare is also the only post-demotion or reconnect execute
+  exemption in Host Control mode.
 
 `peer_status` heartbeats are observations and never rewrite canonical intent.
 For current clients, the relay drops invalid, duplicate, or regressing `seq`
@@ -152,7 +154,12 @@ relaying the established event names, payloads, and order unchanged. This makes
 server-first rollout safe: old clients populate recovery state without needing to
 understand or acknowledge it, and new clients consume it only when the relay
 advertises the capability. No protocol-version or minimum-version bump is
-required. Offline `play`/`pause`/`seek` compaction remains the separate
+required. New clients also announce `"media-state-v1"` in optional
+`join_room.clientCapabilities`; this only tells a capable relay that the client
+keeps canonical state current while alone. When a room falls back to one legacy
+client, the relay clears potentially stale canonical state instead of recovering
+future joiners to unverified solo playback. Offline `play`/`pause`/`seek`
+compaction remains the separate
 client-owned layer described below rather than part of the relay capability.
 
 ### Offline media intent
@@ -347,9 +354,10 @@ The current extension sends sequence/action metadata but no target; the relay us
 the latest validated room target retained from `force_sync_prepare`. In
 `host-only` mode, only controllers may send it.
 The relay also allows that latest valid initiator's execute event after their
-controller state changed before execute. Invalid prepares are dropped and grant
-no exemption. The retained target expires after `FORCE_SYNC_TARGET_TTL`, which
-includes a relay grace period beyond the client's ACK timeout.
+controller state changed or their socket reconnected before execute. Invalid
+prepares are dropped and grant no exemption. Newer accepted playback/lobby state
+explicitly supersedes the prepared target, so its delayed execute is dropped.
+Otherwise, even a delayed execute is relayed to release paused receivers.
 
 ## Episode Lobby
 

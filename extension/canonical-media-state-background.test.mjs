@@ -22,6 +22,8 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(handler).toContain("canonicalSnapshot.status === 'empty'");
         expect(handler.indexOf('canonicalMediaStateFromRoomData(data)'))
             .toBeLessThan(handler.indexOf('canonicalMediaStateTracker.receive'));
+        expect(backgroundSource).toMatch(/CLIENT_CAPABILITIES[\s\S]{0,160}CAPABILITIES\.MEDIA_STATE_V1/);
+        expect(backgroundSource).toContain('!serverSupports(CAPABILITIES.MEDIA_STATE_V1)');
     });
 
     it('keeps legacy PLAY/PAUSE/SEEK, Force Sync, Episode Lobby, and Host Control handlers independent of canonical recovery', () => {
@@ -39,6 +41,8 @@ describe('canonical ROOM_DATA recovery contract', () => {
     it('uses a dedicated internal apply message without action/history/ACK machinery', () => {
         const apply = functionBody(backgroundSource, 'performPendingCanonicalMediaStateApply', 'tryApplyPendingCanonicalMediaState');
         expect(apply).toContain("type: 'APPLY_CANONICAL_MEDIA_STATE'");
+        expect(apply).toContain('enqueueContentCommand(async () =>');
+        expect(apply).toContain('canonicalMediaStateTracker.getPending(roomId)');
         expect(apply).not.toContain('routeToContent(');
         expect(apply).not.toContain('emit(');
         expect(apply).not.toContain('addToHistory(');
@@ -81,6 +85,17 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(backgroundSource).toContain('await flushEventQueue(replaySettings)');
     });
 
+    it('supersedes pending recovery only after newer local or accepted remote room control', () => {
+        const supersede = functionBody(backgroundSource, 'supersedeCanonicalMediaRecovery', 'performPendingCanonicalMediaStateApply');
+        expect(supersede).toContain('canonicalMediaStateTracker.getPending(roomId)');
+        expect(supersede).toContain('markCanonicalMediaStateHandled(roomId, pending.mediaState.revision)');
+        expect(backgroundSource).toContain('function isCanonicalSupersedingControl(event, data)');
+        expect(backgroundSource).toContain('supersedeCanonicalMediaRecovery(`newer ${event}`)');
+        expect(backgroundSource).toContain('supersedeCanonicalMediaRecovery(`local ${message.action}`)');
+        expect(backgroundSource.indexOf("sendResponse({ status: 'blocked_host_only' })"))
+            .toBeLessThan(backgroundSource.indexOf('supersedeCanonicalMediaRecovery(`local ${message.action}`)'));
+    });
+
     it('awaits media actions and verifies playback plus drift before acknowledging recovery', () => {
         const apply = functionBody(contentSource, 'applyCanonicalMediaState', 'pollSeekReady');
         expect(apply).toContain('Math.abs(drift) >= MIN_SEEK_DELTA');
@@ -92,6 +107,8 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(apply.indexOf("status: 'applied'"))
             .toBeGreaterThan(apply.indexOf('await pollCanonicalMediaState(mediaState, startedAt)'));
         expect(apply).toContain('if (hcmDesynced)');
+        expect(apply).toContain('isDifferentEpisode(mediaState.mediaTitle, localMediaTitle)');
+        expect(apply).toContain("status: 'ignored_episode_mismatch'");
         const contentHandlerStart = contentSource.indexOf("message.type === 'APPLY_CANONICAL_MEDIA_STATE'");
         const serverCommandStart = contentSource.indexOf("message.type === 'SERVER_COMMAND'", contentHandlerStart);
         expect(contentSource.slice(contentHandlerStart, serverCommandStart))
