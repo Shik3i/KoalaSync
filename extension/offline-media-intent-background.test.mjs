@@ -9,6 +9,7 @@ const backgroundSource = fs.readFileSync(path.join(extensionDir, 'background.js'
 function functionBody(name, nextName) {
     const start = backgroundSource.indexOf(`function ${name}(`);
     const end = backgroundSource.indexOf(`function ${nextName}(`, start + 1);
+    expect(start).toBeGreaterThan(-1);
     return backgroundSource.slice(start, end === -1 ? backgroundSource.length : end);
 }
 

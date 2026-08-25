@@ -427,6 +427,67 @@ test('applies canonical recovery without echoing media commands or activity', as
     expect(historyAfter).toEqual(historyBefore);
 });
 
+test('local media input cancels an in-flight canonical recovery', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId: selectedTabId },
+            world: 'ISOLATED',
+            func: () => {
+                const video = document.querySelector('#player');
+                if (!video) throw new Error('canonical local-supersession fixture video missing');
+                video.pause();
+                video.currentTime = 0;
+                const nativePlay = video.play.bind(video);
+                video.dataset.koalaDelayedPlayAttempts = '0';
+                Object.defineProperty(video, 'play', {
+                    configurable: true,
+                    value: () => {
+                        const attempts = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
+                        video.dataset.koalaDelayedPlayAttempts = String(attempts);
+                        return nativePlay().then(() => new Promise(resolve => setTimeout(resolve, 400)));
+                    }
+                });
+            }
+        });
+    }, tabId));
+
+    let applyResponse = null;
+    const applyPromise = applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 20,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    }).then(response => {
+        applyResponse = response;
+        return response;
+    });
+    await expect.poll(async () => ({
+        attempts: await page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaDelayedPlayAttempts || '0')),
+        response: applyResponse
+    })).toMatchObject({ attempts: 1, response: null });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(false);
+
+    await page.locator('#player').evaluate(video => {
+        video.pause();
+        video.currentTime = 10;
+    });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime))
+        .toBeGreaterThan(9);
+
+    await expect(applyPromise).resolves.toMatchObject({ status: 'superseded' });
+    await page.waitForTimeout(700);
+    expect(await page.locator('#player').evaluate(video => video.paused)).toBe(true);
+    expect(await page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(9);
+});
+
 test('recovers relay ROOM_DATA through background retries into the packed player', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(45_000);
     const relay = await import('../../server/index.js');

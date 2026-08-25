@@ -1889,6 +1889,13 @@ function supersedeCanonicalMediaRecovery(reason) {
     if (!pending || !markCanonicalMediaStateHandled(roomId, pending.mediaState.revision)) {
         return false;
     }
+    // Tracking cancellation alone is insufficient: content.js may still be
+    // awaiting an asynchronous player action. Invalidate that operation before
+    // a newer local or remote control is allowed to win.
+    sendMessageToCurrentContent({
+        type: 'CANCEL_CANONICAL_MEDIA_STATE',
+        reason
+    }).catch(() => {});
     addLog(`Canonical media state r${pending.mediaState.revision} superseded by ${reason}`, 'info');
     return true;
 }

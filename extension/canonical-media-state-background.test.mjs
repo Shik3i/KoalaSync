@@ -51,7 +51,8 @@ describe('canonical ROOM_DATA recovery contract', () => {
         const contentHandlerStart = contentSource.indexOf("message.type === 'APPLY_CANONICAL_MEDIA_STATE'");
         const serverCommandStart = contentSource.indexOf("message.type === 'SERVER_COMMAND'", contentHandlerStart);
         const internalHandler = contentSource.slice(contentHandlerStart, serverCommandStart);
-        expect(internalHandler).toContain('applyCanonicalMediaState(message.mediaState)');
+        expect(internalHandler).toContain('const applyGeneration = beginCanonicalMediaApply()');
+        expect(internalHandler).toContain('applyCanonicalMediaState(message.mediaState, applyGeneration)');
         expect(internalHandler).not.toContain('CMD_ACK');
         expect(internalHandler).not.toContain('CONTENT_EVENT');
     });
@@ -89,6 +90,7 @@ describe('canonical ROOM_DATA recovery contract', () => {
         const supersede = functionBody(backgroundSource, 'supersedeCanonicalMediaRecovery', 'performPendingCanonicalMediaStateApply');
         expect(supersede).toContain('canonicalMediaStateTracker.getPending(roomId)');
         expect(supersede).toContain('markCanonicalMediaStateHandled(roomId, pending.mediaState.revision)');
+        expect(supersede).toContain("type: 'CANCEL_CANONICAL_MEDIA_STATE'");
         expect(backgroundSource).toContain('function isCanonicalSupersedingControl(event, data)');
         expect(backgroundSource).toContain('supersedeCanonicalMediaRecovery(`newer ${event}`)');
         expect(backgroundSource).toContain('supersedeCanonicalMediaRecovery(`local ${message.action}`)');
@@ -103,15 +105,19 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(apply).toContain('await tryMediaAction(EVENTS.SEEK');
         expect(apply).toContain('await tryMediaAction(EVENTS.PAUSE)');
         expect(apply).toContain('await tryMediaAction(EVENTS.PLAY)');
-        expect(apply).toContain('await pollCanonicalMediaState(mediaState, startedAt)');
+        expect(apply).toContain('await pollCanonicalMediaState(mediaState, startedAt, applyGeneration)');
         expect(apply.indexOf("status: 'applied'"))
-            .toBeGreaterThan(apply.indexOf('await pollCanonicalMediaState(mediaState, startedAt)'));
+            .toBeGreaterThan(apply.indexOf('await pollCanonicalMediaState(mediaState, startedAt, applyGeneration)'));
+        expect(apply).toContain('isCanonicalMediaApplyCurrent(applyGeneration)');
+        expect(apply).toContain('restoreSupersedingLocalState(video)');
         expect(apply).toContain('if (hcmDesynced)');
         expect(apply).toContain('isDifferentEpisode(mediaState.mediaTitle, localMediaTitle)');
         expect(apply).toContain("status: 'ignored_episode_mismatch'");
         const contentHandlerStart = contentSource.indexOf("message.type === 'APPLY_CANONICAL_MEDIA_STATE'");
         const serverCommandStart = contentSource.indexOf("message.type === 'SERVER_COMMAND'", contentHandlerStart);
         expect(contentSource.slice(contentHandlerStart, serverCommandStart))
-            .toContain('applyCanonicalMediaState(message.mediaState).then(sendResponse)');
+            .toContain('applyCanonicalMediaState(message.mediaState, applyGeneration).then(sendResponse)');
+        expect(contentSource).toContain("message.type === 'CANCEL_CANONICAL_MEDIA_STATE'");
+        expect(contentSource).toContain('cancelCanonicalMediaApply(EVENTS.SEEK, video)');
     });
 });

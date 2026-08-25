@@ -91,6 +91,8 @@
     // While a timer exists, matching native events are consumed and not relayed.
     // Timers self-clean after 300ms if the native event never fires.
     let _suppressTimers = {};
+    let canonicalMediaApplyGeneration = 0;
+    let canonicalSupersedingLocalState = null;
 
     function _setSuppress(state) {
         if (_suppressTimers[state]) clearTimeout(_suppressTimers[state]);
@@ -1229,12 +1231,61 @@
         }
     }
 
-    function pollCanonicalMediaState(mediaState, startedAt, timeoutMs = 2500) {
+    function beginCanonicalMediaApply() {
+        canonicalMediaApplyGeneration++;
+        canonicalSupersedingLocalState = null;
+        return canonicalMediaApplyGeneration;
+    }
+
+    function cancelCanonicalMediaApply(action = null, video = null) {
+        canonicalMediaApplyGeneration++;
+        if ((action === EVENTS.PLAY || action === EVENTS.PAUSE || action === EVENTS.SEEK) && video) {
+            canonicalSupersedingLocalState = {
+                playbackState: action === EVENTS.PLAY
+                    ? 'playing'
+                    : (action === EVENTS.PAUSE ? 'paused' : (video.paused ? 'paused' : 'playing')),
+                currentTime: action === EVENTS.SEEK ? getSyncCurrentTime(video) : null
+            };
+        }
+        return canonicalMediaApplyGeneration;
+    }
+
+    function isCanonicalMediaApplyCurrent(generation) {
+        return !destroyed && generation === canonicalMediaApplyGeneration;
+    }
+
+    async function restoreSupersedingLocalState(video) {
+        const state = canonicalSupersedingLocalState;
+        if (!state || !video) return;
+
+        if (state.playbackState === 'paused' && !video.paused) {
+            _setSuppress('paused');
+            video.pause();
+        }
+        if (Number.isFinite(state.currentTime)) {
+            const currentTime = getSyncCurrentTime(video);
+            if (currentTime === null || Math.abs(currentTime - state.currentTime) >= MIN_SEEK_DELTA) {
+                _setSuppress('seek');
+                seekVideo(video, state.currentTime);
+            }
+        }
+        if (state.playbackState === 'playing' && video.paused) {
+            _setSuppress('playing');
+            try {
+                await video.play();
+            } catch (error) {
+                _clearSuppress('playing');
+                reportLog(`Could not restore locally superseding playback: ${error.message}`, 'warn');
+            }
+        }
+    }
+
+    function pollCanonicalMediaState(mediaState, startedAt, applyGeneration, timeoutMs = 2500) {
         return new Promise((resolve) => {
             const interval = 100;
             const finishAt = Date.now() + timeoutMs;
             const timer = setInterval(() => {
-                if (destroyed) {
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) {
                     clearInterval(timer);
                     seekPollTimers.delete(timer);
                     resolve(null);
@@ -1263,7 +1314,7 @@
         });
     }
 
-    async function applyCanonicalMediaState(mediaState) {
+    async function applyCanonicalMediaState(mediaState, applyGeneration) {
         if (!mediaState || typeof mediaState !== 'object'
             || !Number.isSafeInteger(mediaState.revision) || mediaState.revision < 1
             || (mediaState.playbackState !== 'playing' && mediaState.playbackState !== 'paused')
@@ -1276,6 +1327,7 @@
                 && typeof mediaState.mediaTitle !== 'string')) {
             return { status: 'invalid' };
         }
+        if (!isCanonicalMediaApplyCurrent(applyGeneration)) return { status: 'superseded' };
         if (hcmDesynced) return { status: 'ignored_desynced' };
         const localMediaTitle = getMediaTitle();
         if (_autoSyncEnabled && isDifferentEpisode(mediaState.mediaTitle, localMediaTitle)) {
@@ -1290,6 +1342,10 @@
         const drift = currentTime === null ? null : mediaState.currentTime - currentTime;
         const shouldSeek = drift === null || Math.abs(drift) >= MIN_SEEK_DELTA;
         const startedAt = Date.now();
+        const superseded = async () => {
+            await restoreSupersedingLocalState(video);
+            return { status: 'superseded', revision: mediaState.revision };
+        };
 
         try {
             // Paused recovery pauses before seeking; playing recovery seeks before
@@ -1299,19 +1355,25 @@
                 if (!await tryMediaAction(EVENTS.PAUSE)) {
                     return { status: 'apply_failed', reason: 'pause_action_failed' };
                 }
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             }
+            if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             if (shouldSeek) {
                 _setSuppress('seek');
                 if (!await tryMediaAction(EVENTS.SEEK, { targetTime: mediaState.currentTime })) {
                     return { status: 'apply_failed', reason: 'seek_action_failed' };
                 }
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             }
+            if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             if (mediaState.playbackState === 'playing' && video.paused) {
                 if (!await tryMediaAction(EVENTS.PLAY)) {
                     return { status: 'apply_failed', reason: 'play_action_failed' };
                 }
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             }
-            const verified = await pollCanonicalMediaState(mediaState, startedAt);
+            const verified = await pollCanonicalMediaState(mediaState, startedAt, applyGeneration);
+            if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             if (!verified) {
                 reportLog(`Canonical media state r${mediaState.revision} could not be verified`, 'warn');
                 return { status: 'apply_failed', reason: 'verification_timeout' };
@@ -1429,8 +1491,15 @@
             return true;
         }
 
+        if (message.type === 'CANCEL_CANONICAL_MEDIA_STATE') {
+            cancelCanonicalMediaApply();
+            sendResponse({ status: 'cancelled' });
+            return true;
+        }
+
         if (message.type === 'APPLY_CANONICAL_MEDIA_STATE') {
-            applyCanonicalMediaState(message.mediaState).then(sendResponse).catch(error => {
+            const applyGeneration = beginCanonicalMediaApply();
+            applyCanonicalMediaState(message.mediaState, applyGeneration).then(sendResponse).catch(error => {
                 reportLog(`Canonical media state apply failed: ${error.message}`, 'warn');
                 sendResponse({ status: 'apply_failed', reason: 'unexpected_error' });
             });
@@ -1440,6 +1509,9 @@
         if (message.type === 'SERVER_COMMAND') {
             const { action, payload } = message;
             let actionCompleted = false;
+            if ([EVENTS.PLAY, EVENTS.PAUSE, EVENTS.SEEK, EVENTS.FORCE_SYNC_PREPARE, EVENTS.FORCE_SYNC_EXECUTE].includes(action)) {
+                cancelCanonicalMediaApply();
+            }
 
             // Host Control Mode: while watching on our own (desynced), don't apply
             // host commands. Only ACK FORCE_SYNC_PREPARE — that's the one the host's
@@ -1783,6 +1855,10 @@
             return;
         }
 
+        if (action === EVENTS.PLAY || action === EVENTS.PAUSE) {
+            cancelCanonicalMediaApply(action, video);
+        }
+
         // Suppress only SEEK during visibility grace period (tab re-focus ghost jump).
         // Play/Pause pass through — user may want to immediately pause after tabbing back.
         if (Date.now() < visibilityGraceUntil && action === EVENTS.SEEK) return;
@@ -1936,6 +2012,13 @@
             return;
         }
 
+        // `seeking` normally captured the local state synchronously. Keep this
+        // as a fallback for players that emit only `seeked`, without replacing
+        // the earlier paused/playing state after an async stale action resolves.
+        if (!canonicalSupersedingLocalState) {
+            cancelCanonicalMediaApply(EVENTS.SEEK, video);
+        }
+
         // Step 4: Debounce rapid consecutive seeks (e.g. scrubbing)
         // — wait 300ms for the user to settle before relaying
         if (seekDebounceTimer) clearTimeout(seekDebounceTimer);
@@ -1953,6 +2036,18 @@
         }, 300);
     };
 
+    const handleSeeking = event => {
+        if (!isCurrentVideoEvent(event)) return;
+        const video = event.currentTarget;
+        const current = getSyncCurrentTime(video);
+        if (current === null) return;
+        if (expectedSeekTime !== null && Math.abs(current - expectedSeekTime) < 1.0) return;
+        if (Date.now() < visibilityGraceUntil) return;
+        const delta = lastReportedSeekTime !== null ? Math.abs(current - lastReportedSeekTime) : null;
+        if (delta !== null && delta < MIN_SEEK_DELTA) return;
+        cancelCanonicalMediaApply(EVENTS.SEEK, video);
+    };
+
 
     let lastVideoSrc = undefined;
 
@@ -1967,6 +2062,7 @@
         if (handlers) {
             video.removeEventListener('play', handlers.play);
             video.removeEventListener('pause', handlers.pause);
+            if (handlers.seeking) video.removeEventListener('seeking', handlers.seeking);
             video.removeEventListener('seeked', handlers.seeked);
             video.removeEventListener('loadeddata', handlers.loadeddata);
             if (handlers.waiting) video.removeEventListener('waiting', handlers.waiting);
@@ -1999,9 +2095,17 @@
             const existing = video._koalaHandlers;
             if (existing) detachVideoListeners(video);
             activeVideo = video;
-            video._koalaHandlers = { play: handlePlay, pause: handlePause, seeked: handleSeeked, loadeddata: handleLoadedData, waiting: handleWaiting };
+            video._koalaHandlers = {
+                play: handlePlay,
+                pause: handlePause,
+                seeking: handleSeeking,
+                seeked: handleSeeked,
+                loadeddata: handleLoadedData,
+                waiting: handleWaiting
+            };
             video.addEventListener('play', handlePlay);
             video.addEventListener('pause', handlePause);
+            video.addEventListener('seeking', handleSeeking);
             video.addEventListener('seeked', handleSeeked);
             video.addEventListener('loadeddata', handleLoadedData);
             video.addEventListener('waiting', handleWaiting);
