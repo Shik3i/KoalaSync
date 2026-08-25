@@ -37,7 +37,7 @@ describe('canonical ROOM_DATA recovery contract', () => {
     });
 
     it('uses a dedicated internal apply message without action/history/ACK machinery', () => {
-        const apply = functionBody(backgroundSource, 'tryApplyPendingCanonicalMediaState', 'handleCanonicalRoomData');
+        const apply = functionBody(backgroundSource, 'performPendingCanonicalMediaStateApply', 'tryApplyPendingCanonicalMediaState');
         expect(apply).toContain("type: 'APPLY_CANONICAL_MEDIA_STATE'");
         expect(apply).not.toContain('routeToContent(');
         expect(apply).not.toContain('emit(');
@@ -55,17 +55,23 @@ describe('canonical ROOM_DATA recovery contract', () => {
     it('keeps pending recovery room-scoped and retries on target lifecycle signals', () => {
         expect(backgroundSource).toContain("'canonicalMediaRecovery'");
         expect(backgroundSource).toContain('canonicalMediaStateTracker.restore(');
-        expect(backgroundSource).toContain('tryApplyPendingCanonicalMediaState().catch(() => {})');
+        expect(backgroundSource).toContain('CANONICAL_RECOVERY_RETRY_DELAYS');
+        expect(backgroundSource).toContain('requestCanonicalMediaRecoveryAttempt()');
+        expect(backgroundSource).toMatch(/message\.type === 'HEARTBEAT'[\s\S]*requestCanonicalMediaRecoveryAttempt\(\)/);
+        expect(backgroundSource).toMatch(/message\.type === 'CONTENT_BOOT'[\s\S]*requestCanonicalMediaRecoveryAttempt\(\)/);
         expect(backgroundSource).toMatch(/currentTargetHasVideo\) \{\s*await tryApplyPendingCanonicalMediaState\(\)/);
         expect(backgroundSource.match(/clearCanonicalMediaRecovery\(\)/g)?.length).toBeGreaterThanOrEqual(4);
-        const apply = functionBody(backgroundSource, 'tryApplyPendingCanonicalMediaState', 'handleCanonicalRoomData');
+        const apply = functionBody(backgroundSource, 'performPendingCanonicalMediaStateApply', 'tryApplyPendingCanonicalMediaState');
         expect(apply).toContain('getPendingProjected(roomId)');
         expect(apply).toContain('targetActivationGeneration');
         expect(apply).toContain("return { status: 'stale_target' }");
+        const retry = functionBody(backgroundSource, 'scheduleCanonicalMediaRecoveryRetry', 'requestCanonicalMediaRecoveryAttempt');
+        expect(retry).toContain('canonicalRecoveryRetryAttempt >= CANONICAL_RECOVERY_RETRY_DELAYS.length');
+        expect(retry).toContain('latest?.mediaState.revision !== expectedRevision');
     });
 
     it('protects intentional desync, active Episode Lobby and queued reconnect intent', () => {
-        const apply = functionBody(backgroundSource, 'tryApplyPendingCanonicalMediaState', 'handleCanonicalRoomData');
+        const apply = functionBody(backgroundSource, 'performPendingCanonicalMediaStateApply', 'tryApplyPendingCanonicalMediaState');
         const roomData = functionBody(backgroundSource, 'handleCanonicalRoomData', 'handleServerEvent');
         expect(apply).toContain('if (hcmDesynced)');
         expect(apply).toContain('if (episodeLobby)');
@@ -75,13 +81,20 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(backgroundSource).toContain('await flushEventQueue(replaySettings)');
     });
 
-    it('reuses existing seek abstractions, suppression and drift tolerance', () => {
+    it('awaits media actions and verifies playback plus drift before acknowledging recovery', () => {
         const apply = functionBody(contentSource, 'applyCanonicalMediaState', 'pollSeekReady');
         expect(apply).toContain('Math.abs(drift) >= MIN_SEEK_DELTA');
         expect(apply).toContain("_setSuppress('seek')");
-        expect(apply).toContain('seekVideo(video, mediaState.currentTime)');
-        expect(apply).toContain('tryMediaAction(EVENTS.PAUSE)');
-        expect(apply).toContain('tryMediaAction(EVENTS.PLAY)');
+        expect(apply).toContain('await tryMediaAction(EVENTS.SEEK');
+        expect(apply).toContain('await tryMediaAction(EVENTS.PAUSE)');
+        expect(apply).toContain('await tryMediaAction(EVENTS.PLAY)');
+        expect(apply).toContain('await pollCanonicalMediaState(mediaState, startedAt)');
+        expect(apply.indexOf("status: 'applied'"))
+            .toBeGreaterThan(apply.indexOf('await pollCanonicalMediaState(mediaState, startedAt)'));
         expect(apply).toContain('if (hcmDesynced)');
+        const contentHandlerStart = contentSource.indexOf("message.type === 'APPLY_CANONICAL_MEDIA_STATE'");
+        const serverCommandStart = contentSource.indexOf("message.type === 'SERVER_COMMAND'", contentHandlerStart);
+        expect(contentSource.slice(contentHandlerStart, serverCommandStart))
+            .toContain('applyCanonicalMediaState(message.mediaState).then(sendResponse)');
     });
 });

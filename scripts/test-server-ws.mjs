@@ -10,7 +10,7 @@ import {
     materializeMediaIntent,
     reserveLatestMediaIntentSequence
 } from '../extension/offline-media-intent.js';
-import { FORCE_SYNC_TIMEOUT } from '../shared/constants.js';
+import { FORCE_SYNC_TARGET_TTL, FORCE_SYNC_TIMEOUT } from '../shared/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(__dirname, '..', 'server', 'package.json'));
@@ -404,10 +404,20 @@ try {
         'authorized EXECUTE commits the latest target visible to legacy peers');
     assert.equal(competingForceState.updatedBy, 'msa');
 
+    // The initiator's normal ACK timeout must still fit inside relay target
+    // retention. This is the exact fallback boundary used by background.js.
+    s(msa, 'force_sync_prepare', { targetTime: 925 });
+    await w(msb, 'force_sync_prepare');
+    mod.rooms.get(msrid).forceSyncTarget.preparedAt = Date.now() - FORCE_SYNC_TIMEOUT;
+    s(msa, 'force_sync_execute', {});
+    await w(msb, 'force_sync_execute');
+    assert.equal(mod.rooms.get(msrid).mediaState.currentTime, 925,
+        'relay grace accepts EXECUTE at the client ACK-timeout boundary');
+
     s(msa, 'force_sync_prepare', { targetTime: 950 });
     await w(msb, 'force_sync_prepare');
     const beforeExpiredExecute = { ...mod.rooms.get(msrid).mediaState };
-    mod.rooms.get(msrid).forceSyncTarget.preparedAt = Date.now() - FORCE_SYNC_TIMEOUT - 1;
+    mod.rooms.get(msrid).forceSyncTarget.preparedAt = Date.now() - FORCE_SYNC_TARGET_TTL - 1;
     msa._m.length = msb._m.length = 0;
     s(msa, 'force_sync_execute', {});
     let expiredExecuteDropped = false;
@@ -466,6 +476,37 @@ try {
     await delay(40);
     assert.equal(mod.rooms.get(msgateRid).mediaState.revision, gatedBaseline.revision + 1);
     assert.equal(mod.rooms.get(msgateRid).mediaState.currentTime, 800);
+
+    // Current receivers ignore duplicate/regressing seq. The relay must make the
+    // same decision before canonical mutation so late joiners see the same truth.
+    msgHost._m.length = msgGuest._m.length = 0;
+    s(msgHost, 'play', { currentTime: 820, seq: 10 });
+    await w(msgGuest, 'play');
+    const sequencedBaseline = { ...mod.rooms.get(msgateRid).mediaState };
+    const sequencedPeerBaseline = {
+        ...Array.from(mod.rooms.get(msgateRid).peerData.values())
+            .find(peer => peer.peerId === 'msg-host')
+    };
+    s(msgHost, 'pause', { currentTime: 1, playbackState: 'paused', seq: 10 });
+    let duplicateSequenceDropped = false;
+    try { await w(msgGuest, 'pause', 500); } catch { duplicateSequenceDropped = true; }
+    assert.ok(duplicateSequenceDropped, 'duplicate media seq is not relayed');
+    s(msgHost, 'seek', { targetTime: 5, seq: 9 });
+    let staleSequenceDropped = false;
+    try { await w(msgGuest, 'seek', 500); } catch { staleSequenceDropped = true; }
+    assert.ok(staleSequenceDropped, 'regressing media seq is not relayed');
+    assert.deepEqual(mod.rooms.get(msgateRid).mediaState, sequencedBaseline,
+        'regressing media seq cannot revise canonical state');
+    assert.deepEqual(
+        Array.from(mod.rooms.get(msgateRid).peerData.values())
+            .find(peer => peer.peerId === 'msg-host'),
+        sequencedPeerBaseline,
+        'duplicate/regressing media seq cannot alter peer state used by later canonical updates');
+    const msgLateJoiner = await c();
+    const msgLateRoom = await j(msgLateJoiner, msgateRid, 'msg-late');
+    assert.equal(msgLateRoom.mediaState.revision, sequencedBaseline.revision);
+    assert.equal(msgLateRoom.mediaState.currentTime, sequencedBaseline.currentTime,
+        'late joiner receives the same state accepted by live receivers');
 
     const validationBaseline = { ...mod.rooms.get(msgateRid).mediaState };
     for (const invalidPayload of [{ targetTime: null }, { targetTime: '50' }, { targetTime: {} }, {}]) {

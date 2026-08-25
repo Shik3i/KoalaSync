@@ -388,6 +388,75 @@ test('applies canonical recovery without echoing media commands or activity', as
     expect(historyAfter).toEqual(historyBefore);
 });
 
+test('recovers relay ROOM_DATA through background retries into the packed player', async ({ context, extensionId, baseURL }) => {
+    test.setTimeout(45_000);
+    const relay = await import('../../server/index.js');
+    let legacy = null;
+    try {
+        await relay.startServer(0, '127.0.0.1');
+        const port = relay.httpServer.address().port;
+        const roomId = `e2e-canonical-room-data-${Date.now()}`;
+        legacy = await connectLegacyRelayClient(port);
+        await joinLegacyRelayRoom(legacy, roomId, 'canonical-source');
+        sendLegacyRelayEvent(legacy, 'play', { currentTime: 6, seq: 1, actionTimestamp: 1 });
+        await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
+            .toMatchObject({ revision: 1, playbackState: 'playing', currentTime: 6 });
+
+        const url = `${baseURL}/pages/simple-player.html`;
+        const page = await context.newPage();
+        await page.goto(url);
+        await page.waitForFunction(() => window.__fixtureReady === true);
+        await selectTargetTab(context, extensionId, url);
+        await page.locator('#player').evaluate(video => {
+            const nativePlay = video.play.bind(video);
+            window.__koalaCanonicalPlayAttempts = 0;
+            Object.defineProperty(video, 'play', {
+                configurable: true,
+                value: () => {
+                    window.__koalaCanonicalPlayAttempts++;
+                    if (window.__koalaCanonicalPlayAttempts === 1) {
+                        return Promise.reject(new DOMException('audit autoplay rejection', 'NotAllowedError'));
+                    }
+                    return nativePlay();
+                }
+            });
+        });
+        legacy.messages.length = 0;
+
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
+            await chrome.storage.local.set(settings);
+            return chrome.runtime.sendMessage({ type: 'CONNECT' });
+        }, {
+            serverUrl: `ws://127.0.0.1:${port}`,
+            useCustomServer: true,
+            roomId,
+            password: '',
+            username: 'canonical-receiver'
+        }));
+
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+            .toMatchObject({ status: 'connected', roomId, queuedLogicalEvents: 0 });
+        await expect.poll(() => page.evaluate(() => window.__koalaCanonicalPlayAttempts))
+            .toBeGreaterThanOrEqual(2);
+        await expect.poll(() => page.locator('#player').evaluate(video => ({
+            paused: video.paused,
+            currentTime: video.currentTime
+        }))).toMatchObject({ paused: false });
+        await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime))
+            .toBeGreaterThan(5);
+
+        await page.waitForTimeout(700);
+        const recoveryEchoes = legacy.messages.filter(message => {
+            if (!message.startsWith('42')) return false;
+            try { return ['play', 'pause', 'seek'].includes(JSON.parse(message.substring(2))[0]); } catch { return false; }
+        });
+        expect(recoveryEchoes).toEqual([]);
+    } finally {
+        try { legacy?.close(); } catch { /* already closed */ }
+        await relay.stopServerForTests();
+    }
+});
+
 test('@race reinjects after the target tab navigates', async ({ context, extensionId, baseURL }) => {
     const first = `${baseURL}/pages/iframe-player.html`;
     const page = await context.newPage();

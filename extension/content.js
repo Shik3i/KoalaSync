@@ -1185,13 +1185,13 @@
     // --- Helper: site-specific player actions, then native HTML5 fallback ---
     function tryMediaAction(action, data) {
         const video = findVideo();
-        if (!video) return;
+        if (!video) return false;
 
         if (action === EVENTS.SEEK) {
             const target = data ? (data.targetTime !== undefined ? data.targetTime : data.currentTime) : undefined;
             if (!Number.isFinite(target)) {
                 reportLog(`Media Action Error: Invalid seek payload - ${JSON.stringify(data)}`, 'error');
-                return;
+                return false;
             }
             data = { ...data, targetTime: target };
         }
@@ -1199,28 +1199,71 @@
         try {
             const actionFix = getActivePlayerActionFix();
             if (tryPlayerActionFix(actionFix, action, video, data)) {
-                return;
+                return true;
             }
 
             // Fallback for native HTML5
             if (action === EVENTS.PLAY) {
                 _setSuppress('playing');
-                video.play().catch((e) => {
-                    reportLog(`Playback prevented: ${e.message}`, 'warn');
-                    _clearSuppress('playing');
-                });
+                const playResult = video.play();
+                if (playResult && typeof playResult.then === 'function') {
+                    return playResult.then(() => true).catch((e) => {
+                        reportLog(`Playback prevented: ${e.message}`, 'warn');
+                        _clearSuppress('playing');
+                        return false;
+                    });
+                }
+                return true;
             } else if (action === EVENTS.PAUSE) {
                 _setSuppress('paused');
                 video.pause();
+                return true;
             } else if (action === EVENTS.SEEK) {
                 seekVideo(video, data.targetTime, data.delta);
+                return true;
             }
-    } catch (e) {
+            return false;
+        } catch (e) {
             reportLog(`Media Action Error: ${e.message}`, 'error');
+            return false;
         }
     }
 
-    function applyCanonicalMediaState(mediaState) {
+    function pollCanonicalMediaState(mediaState, startedAt, timeoutMs = 2500) {
+        return new Promise((resolve) => {
+            const interval = 100;
+            const finishAt = Date.now() + timeoutMs;
+            const timer = setInterval(() => {
+                if (destroyed) {
+                    clearInterval(timer);
+                    seekPollTimers.delete(timer);
+                    resolve(null);
+                    return;
+                }
+                const video = findVideo();
+                const currentTime = video ? getSyncCurrentTime(video) : null;
+                const projectedTime = mediaState.currentTime
+                    + (mediaState.playbackState === 'playing'
+                        ? Math.max(0, Date.now() - startedAt) / 1000
+                        : 0);
+                const playbackMatches = video
+                    && (mediaState.playbackState === 'playing' ? !video.paused : video.paused);
+                const drift = currentTime === null ? null : projectedTime - currentTime;
+                if (playbackMatches && drift !== null && Math.abs(drift) < MIN_SEEK_DELTA) {
+                    clearInterval(timer);
+                    seekPollTimers.delete(timer);
+                    resolve({ currentTime, drift });
+                } else if (Date.now() >= finishAt) {
+                    clearInterval(timer);
+                    seekPollTimers.delete(timer);
+                    resolve(null);
+                }
+            }, interval);
+            seekPollTimers.add(timer);
+        });
+    }
+
+    async function applyCanonicalMediaState(mediaState) {
         if (!mediaState || typeof mediaState !== 'object'
             || !Number.isSafeInteger(mediaState.revision) || mediaState.revision < 1
             || (mediaState.playbackState !== 'playing' && mediaState.playbackState !== 'paused')
@@ -1238,23 +1281,40 @@
         const currentTime = getSyncCurrentTime(video);
         const drift = currentTime === null ? null : mediaState.currentTime - currentTime;
         const shouldSeek = drift === null || Math.abs(drift) >= MIN_SEEK_DELTA;
+        const startedAt = Date.now();
 
         try {
             // Paused recovery pauses before seeking; playing recovery seeks before
             // starting. Both paths reuse the same site/page-API abstractions and
             // native-event suppression as ordinary remote commands.
             if (mediaState.playbackState === 'paused' && !video.paused) {
-                tryMediaAction(EVENTS.PAUSE);
+                if (!await tryMediaAction(EVENTS.PAUSE)) {
+                    return { status: 'apply_failed', reason: 'pause_action_failed' };
+                }
             }
             if (shouldSeek) {
                 _setSuppress('seek');
-                seekVideo(video, mediaState.currentTime);
+                if (!await tryMediaAction(EVENTS.SEEK, { targetTime: mediaState.currentTime })) {
+                    return { status: 'apply_failed', reason: 'seek_action_failed' };
+                }
             }
             if (mediaState.playbackState === 'playing' && video.paused) {
-                tryMediaAction(EVENTS.PLAY);
+                if (!await tryMediaAction(EVENTS.PLAY)) {
+                    return { status: 'apply_failed', reason: 'play_action_failed' };
+                }
+            }
+            const verified = await pollCanonicalMediaState(mediaState, startedAt);
+            if (!verified) {
+                reportLog(`Canonical media state r${mediaState.revision} could not be verified`, 'warn');
+                return { status: 'apply_failed', reason: 'verification_timeout' };
             }
             scheduleProactiveHeartbeat();
-            return { status: 'applied', revision: mediaState.revision, drift, sought: shouldSeek };
+            return {
+                status: 'applied',
+                revision: mediaState.revision,
+                drift: verified.drift,
+                sought: shouldSeek
+            };
         } catch (error) {
             reportLog(`Canonical media state apply failed: ${error.message}`, 'warn');
             return { status: 'apply_failed' };
@@ -1362,7 +1422,10 @@
         }
 
         if (message.type === 'APPLY_CANONICAL_MEDIA_STATE') {
-            sendResponse(applyCanonicalMediaState(message.mediaState));
+            applyCanonicalMediaState(message.mediaState).then(sendResponse).catch(error => {
+                reportLog(`Canonical media state apply failed: ${error.message}`, 'warn');
+                sendResponse({ status: 'apply_failed', reason: 'unexpected_error' });
+            });
             return true;
         }
 

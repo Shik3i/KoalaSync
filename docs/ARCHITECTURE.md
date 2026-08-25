@@ -44,17 +44,23 @@ the optional `media-state-v1` capability. A joining/reconnecting client validate
 the room/revision, respects Host Control solo mode and Episode Lobby, then sends an
 internal `APPLY_CANONICAL_MEDIA_STATE` message to the existing content/video path.
 That path reuses frame election, Netflix/Disney page-API seeks, native play/pause,
-the 2-second drift tolerance, and programmatic-event suppression. The apply is
-one-shot recovery: a pending playing snapshot advances from its local receipt
-time while waiting for a target, and the apply creates no action history,
-notification, command ACK, or relay media event.
+the 2-second drift tolerance, and programmatic-event suppression. Recovery only
+completes after playback state and position verification. Transient failures
+retry after 250, 750, 1500, and 3000 ms, while target, heartbeat, and content-boot
+signals can retrigger a pending attempt within that bound. A pending playing
+snapshot advances from its local receipt time while waiting for a target, and
+the apply creates no action history, notification, command ACK, or relay media
+event.
 
 Force Sync remains a two-phase ACK protocol. A valid `PREPARE` is temporary
 room-wide choreography; the next authorized `EXECUTE` commits the latest target
-visible to peers to canonical state before the shared Force Sync timeout. The
+visible to peers to canonical state before the relay target TTL. That TTL is
+longer than the client ACK timeout so its scheduled fallback can still land. The
 offline queue replays an adjacent `PREPARE`/`EXECUTE` pair in one paced batch and
 retains both if delivery fails. Per-sender
-`seq`, peer heartbeats, and the reconnect queue remain separate mechanisms.
+`seq`, peer heartbeats, and the reconnect queue remain separate mechanisms. The
+relay rejects duplicate/regressing current-client media sequences before they
+can diverge canonical truth from live receivers.
 
 ## 3.2 Offline Media Intent
 

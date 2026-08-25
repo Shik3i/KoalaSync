@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TIMEOUT, MAX_MEDIA_TIME } from '../shared/constants.js';
+import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TARGET_TTL, MAX_MEDIA_TIME } from '../shared/constants.js';
 import { createChatEnvelope } from './chat.js';
 import {
     commitForceSyncMediaState,
@@ -174,6 +174,18 @@ const HOST_ONLY_GATED_EVENTS = new Set([
     EVENTS.FORCE_SYNC_EXECUTE,
     EVENTS.EPISODE_LOBBY,
     EVENTS.EPISODE_LOBBY_CANCEL
+]);
+
+// Current clients sequence room-moving media commands. The relay mirrors the
+// receiver-side stale guard so a frame ignored by live peers cannot become the
+// canonical snapshot shown to a later joiner. Legacy clients omit seq entirely
+// and retain their pre-feature behavior.
+const SEQUENCED_ROOM_EVENTS = new Set([
+    EVENTS.PLAY,
+    EVENTS.PAUSE,
+    EVENTS.SEEK,
+    EVENTS.FORCE_SYNC_PREPARE,
+    EVENTS.FORCE_SYNC_EXECUTE
 ]);
 
 // Features this relay supports, advertised to clients in ROOM_DATA so they can
@@ -615,6 +627,29 @@ io.on('connection', (socket) => {
                     const validState = (val) => (val === 'playing' || val === 'paused') ? val : undefined;
                     const validBool  = (val) => typeof val === 'boolean' ? val : undefined;
 
+                    const hasSequenceField = data.seq !== undefined;
+                    const sequence = Number.isSafeInteger(data.seq) && data.seq >= 0
+                        ? data.seq
+                        : undefined;
+                    if (SEQUENCED_ROOM_EVENTS.has(eventName)) {
+                        if (hasSequenceField && sequence === undefined) {
+                            log('ROOM', `Dropped ${eventName} with invalid seq from ${mapping.peerId}`);
+                            return;
+                        }
+                        if (sequence !== undefined) {
+                            if (socket.data.mediaSequencePeerId !== mapping.peerId) {
+                                socket.data.mediaSequencePeerId = mapping.peerId;
+                                socket.data.lastMediaSequence = null;
+                            }
+                            if (Number.isSafeInteger(socket.data.lastMediaSequence)
+                                && sequence <= socket.data.lastMediaSequence) {
+                                log('ROOM', `Dropped stale ${eventName} from ${mapping.peerId} (seq ${sequence} <= ${socket.data.lastMediaSequence})`);
+                                return;
+                            }
+                            socket.data.lastMediaSequence = sequence;
+                        }
+                    }
+
                     const existing = room.peerData.get(socket.id) || { peerId: mapping.peerId };
                     room.peerData.set(socket.id, { 
                         ...existing,
@@ -632,7 +667,7 @@ io.on('connection', (socket) => {
                     // --- S-3: Construct clean relay payload — never forward raw client data ---
                     const relayPayload = {
                         senderId:        mapping.peerId,
-                        seq:             clampNum(data.seq, 0, Number.MAX_SAFE_INTEGER),
+                        seq:             sequence,
                         currentTime:     data.currentTime === null ? null : clampNum(data.currentTime, 0, MAX_MEDIA_TIME),
                         targetTime:      clampNum(data.targetTime, 0, MAX_MEDIA_TIME),
                         playbackState:   validState(data.playbackState),
@@ -656,7 +691,7 @@ io.on('connection', (socket) => {
                         const forceSyncTarget = room.forceSyncTarget;
                         const targetExpired = forceSyncTarget
                             && (!Number.isFinite(forceSyncTarget.preparedAt)
-                                || mediaStateNow - forceSyncTarget.preparedAt > FORCE_SYNC_TIMEOUT);
+                                || mediaStateNow - forceSyncTarget.preparedAt > FORCE_SYNC_TARGET_TTL);
                         if (!forceSyncTarget || targetExpired) {
                             log('ROOM', `Dropped force_sync_execute ${targetExpired ? 'with an expired target' : 'without a prepared target'} from ${mapping.peerId}`);
                             room.forceSyncInitiator = null;

@@ -258,6 +258,18 @@ let lastActionState = { action: null, senderId: null, timestamp: 0, acks: [] };
 let localSeq = 0;                         // Monotonically increasing command sequence for this peer
 const lastSeqBySender = {};               // senderId → last received seq (stale command guard)
 const canonicalMediaStateTracker = createCanonicalMediaStateTracker();
+const CANONICAL_RECOVERY_RETRY_DELAYS = Object.freeze([250, 750, 1500, 3000]);
+const CANONICAL_RECOVERY_RETRYABLE = new Set([
+    'no_video',
+    'apply_failed',
+    'no_response',
+    'pending_unreachable',
+    'stale_target',
+    'superseded'
+]);
+let canonicalRecoveryRetryTimer = null;
+let canonicalRecoveryRetryAttempt = 0;
+let canonicalRecoveryApplyInProgress = null;
 
 // --- Host Control Mode ---
 let controlMode = CONTROL_MODES.EVERYONE;  // 'everyone' | 'host-only'
@@ -285,7 +297,52 @@ function persistCanonicalMediaRecovery() {
     }).catch(() => {});
 }
 
+function resetCanonicalMediaRecoveryRetries() {
+    if (canonicalRecoveryRetryTimer) {
+        clearTimeout(canonicalRecoveryRetryTimer);
+        canonicalRecoveryRetryTimer = null;
+    }
+    canonicalRecoveryRetryAttempt = 0;
+}
+
+function scheduleCanonicalMediaRecoveryRetry(reason) {
+    const roomId = currentRoom?.roomId;
+    const pending = canonicalMediaStateTracker.getPending(roomId);
+    if (!pending
+        || canonicalRecoveryRetryTimer
+        || canonicalRecoveryApplyInProgress
+        || canonicalRecoveryRetryAttempt >= CANONICAL_RECOVERY_RETRY_DELAYS.length) {
+        return false;
+    }
+    const expectedRevision = pending.mediaState.revision;
+    const delay = CANONICAL_RECOVERY_RETRY_DELAYS[canonicalRecoveryRetryAttempt++];
+    canonicalRecoveryRetryTimer = setTimeout(() => {
+        canonicalRecoveryRetryTimer = null;
+        const latest = canonicalMediaStateTracker.getPending(roomId);
+        if (currentRoom?.roomId !== roomId || latest?.mediaState.revision !== expectedRevision) return;
+        addLog(`Retrying canonical media state r${expectedRevision} after ${reason}`, 'info');
+        tryApplyPendingCanonicalMediaState().catch(error => {
+            addLog(`Canonical media state retry failed: ${error.message}`, 'warn');
+        });
+    }, delay);
+    return true;
+}
+
+function requestCanonicalMediaRecoveryAttempt() {
+    if (canonicalRecoveryRetryTimer
+        || canonicalRecoveryApplyInProgress
+        || canonicalRecoveryRetryAttempt >= CANONICAL_RECOVERY_RETRY_DELAYS.length
+        || !canonicalMediaStateTracker.getPending(currentRoom?.roomId)) {
+        return false;
+    }
+    tryApplyPendingCanonicalMediaState().catch(error => {
+        addLog(`Canonical media state retry failed: ${error.message}`, 'warn');
+    });
+    return true;
+}
+
 function clearCanonicalMediaRecovery() {
+    resetCanonicalMediaRecoveryRetries();
     canonicalMediaStateTracker.clear();
     persistCanonicalMediaRecovery();
 }
@@ -728,6 +785,7 @@ function resolveServerUrl(settings) {
 
 function forceDisconnect({ preserveEventQueue = false } = {}) {
     connectionGeneration++;
+    resetCanonicalMediaRecoveryRetries();
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -945,7 +1003,7 @@ function adoptReportingFrame(sender) {
         currentTargetHasVideo = true;
         stopMediaDiscoveryPoll();
         chrome.storage.session.set({ currentTargetHasVideo }).catch(() => {});
-        tryApplyPendingCanonicalMediaState().catch(() => {});
+        requestCanonicalMediaRecoveryAttempt();
         return true;
     }
 
@@ -960,7 +1018,7 @@ function adoptReportingFrame(sender) {
         currentTargetDocumentId,
         currentTargetHasVideo
     }).catch(() => {});
-    tryApplyPendingCanonicalMediaState().catch(() => {});
+    requestCanonicalMediaRecoveryAttempt();
     return true;
 }
 
@@ -1817,11 +1875,12 @@ function stopPing() {
 
 function markCanonicalMediaStateHandled(roomId, revision) {
     if (!canonicalMediaStateTracker.markHandled(roomId, revision)) return false;
+    resetCanonicalMediaRecoveryRetries();
     persistCanonicalMediaRecovery();
     return true;
 }
 
-async function tryApplyPendingCanonicalMediaState() {
+async function performPendingCanonicalMediaStateApply() {
     const roomId = currentRoom?.roomId;
     const pending = canonicalMediaStateTracker.getPendingProjected(roomId);
     if (!pending || !roomId) return { status: 'none' };
@@ -1876,6 +1935,22 @@ async function tryApplyPendingCanonicalMediaState() {
     }
 }
 
+async function tryApplyPendingCanonicalMediaState() {
+    if (canonicalRecoveryApplyInProgress) return canonicalRecoveryApplyInProgress;
+    const applyTask = performPendingCanonicalMediaStateApply();
+    canonicalRecoveryApplyInProgress = applyTask;
+    let result;
+    try {
+        result = await applyTask;
+    } finally {
+        if (canonicalRecoveryApplyInProgress === applyTask) canonicalRecoveryApplyInProgress = null;
+    }
+    if (CANONICAL_RECOVERY_RETRYABLE.has(result?.status)) {
+        scheduleCanonicalMediaRecoveryRetry(result.status);
+    }
+    return result;
+}
+
 async function handleCanonicalRoomData(data, hasPendingLocalIntent) {
     canonicalMediaStateTracker.adoptRoom(data?.roomId || null);
     const canonicalSnapshot = canonicalMediaStateFromRoomData(data);
@@ -1898,6 +1973,7 @@ async function handleCanonicalRoomData(data, hasPendingLocalIntent) {
     }
     if (received.status !== 'pending') return;
 
+    resetCanonicalMediaRecoveryRetries();
     persistCanonicalMediaRecovery();
     addLog(`Canonical media state received: r${mediaState.revision} ${mediaState.playbackState} @ ${mediaState.currentTime.toFixed(2)}s`, 'info');
 
@@ -4896,6 +4972,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             updateBadgeStatus();
         }
 
+        requestCanonicalMediaRecoveryAttempt();
         markRoomUseful();
         getSettings().then(settings => {
             const sharedTitles = getSharedTitleFields(settings, message.payload?.mediaTitle);
@@ -5222,6 +5299,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 return;
             }
         }
+        requestCanonicalMediaRecoveryAttempt();
         // Content script re-injected, check if there's an active lobby
         if (episodeLobby) {
             sendResponse({ lobbyActive: true, expectedTitle: episodeLobby.expectedTitle });

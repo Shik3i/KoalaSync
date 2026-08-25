@@ -121,21 +121,28 @@ Only accepted, sanitized room controls update canonical state:
   established playback state.
 - a valid `force_sync_prepare` records only temporary coordination state. The
   next authorized `force_sync_execute` commits the latest room-wide prepared
-  target as playing before `FORCE_SYNC_TIMEOUT` expires. Expired targets are
-  cleared and cannot alter canonical state. The latest valid prepare is also
-  the only post-demotion execute exemption in Host Control mode.
+  target as playing before `FORCE_SYNC_TARGET_TTL` expires. This relay TTL is
+  intentionally longer than the client's `FORCE_SYNC_TIMEOUT` ACK wait so the
+  normal timeout fallback remains deliverable. Expired targets are cleared and
+  cannot alter canonical state. The latest valid prepare is also the only
+  post-demotion execute exemption in Host Control mode.
 
 `peer_status` heartbeats are observations and never rewrite canonical intent.
-Per-sender `seq` still orders commands from one sender; canonical `revision`
-orders server-accepted room transitions. Neither replaces the other.
+For current clients, the relay drops invalid, duplicate, or regressing `seq`
+values on room-moving media commands before relay/canonical mutation. Legacy
+clients without `seq` retain their existing behavior. Canonical `revision`
+orders server-accepted room transitions; it does not replace per-sender order.
 
-On join/reconnect, a capable extension applies a valid snapshot once through an
-extension-internal recovery message. Existing seek/page-API and native-event
+On join/reconnect, a capable extension attempts to apply a valid snapshot
+through an extension-internal recovery message. Recovery is only marked handled
+after playback state and position verification. Transient failures use bounded
+retries after 250, 750, 1500, and 3000 ms and can also be retriggered by target,
+heartbeat, or content-boot signals. Existing seek/page-API and native-event
 suppression prevent `play`, `pause`, or `seek` echoes. Pending recovery is scoped
 to the room/revision in `chrome.storage.session`, waits for the selected media
 target lifecycle, and projects a still-playing snapshot from its local receipt
-time before a delayed apply. It is cleared on leave/switch. Intentional host-only guest
-desync and an active Episode Lobby take precedence over snapshot recovery.
+time before a delayed apply. It is cleared on leave/switch. Intentional host-only
+guest desync and an active Episode Lobby take precedence over snapshot recovery.
 
 Compatibility is additive: new clients use old behavior with a relay that omits
 the capability; old clients ignore the extra `room_data` field from a new relay.
@@ -341,7 +348,8 @@ the latest validated room target retained from `force_sync_prepare`. In
 `host-only` mode, only controllers may send it.
 The relay also allows that latest valid initiator's execute event after their
 controller state changed before execute. Invalid prepares are dropped and grant
-no exemption.
+no exemption. The retained target expires after `FORCE_SYNC_TARGET_TTL`, which
+includes a relay grace period beyond the client's ACK timeout.
 
 ## Episode Lobby
 
