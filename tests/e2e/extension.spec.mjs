@@ -406,21 +406,30 @@ test('recovers relay ROOM_DATA through background retries into the packed player
         const page = await context.newPage();
         await page.goto(url);
         await page.waitForFunction(() => window.__fixtureReady === true);
-        await selectTargetTab(context, extensionId, url);
-        await page.locator('#player').evaluate(video => {
-            const nativePlay = video.play.bind(video);
-            window.__koalaCanonicalPlayAttempts = 0;
-            Object.defineProperty(video, 'play', {
-                configurable: true,
-                value: () => {
-                    window.__koalaCanonicalPlayAttempts++;
-                    if (window.__koalaCanonicalPlayAttempts === 1) {
-                        return Promise.reject(new DOMException('audit autoplay rejection', 'NotAllowedError'));
-                    }
-                    return nativePlay();
+        const { tabId } = await selectTargetTab(context, extensionId, url);
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+            await chrome.scripting.executeScript({
+                target: { tabId: selectedTabId },
+                world: 'ISOLATED',
+                func: () => {
+                    const video = document.querySelector('#player');
+                    if (!video) throw new Error('canonical recovery fixture video missing');
+                    const nativePlay = video.play.bind(video);
+                    video.dataset.koalaCanonicalPlayAttempts = '0';
+                    Object.defineProperty(video, 'play', {
+                        configurable: true,
+                        value: () => {
+                            const attempts = Number(video.dataset.koalaCanonicalPlayAttempts || '0') + 1;
+                            video.dataset.koalaCanonicalPlayAttempts = String(attempts);
+                            if (attempts === 1) {
+                                return Promise.reject(new DOMException('audit autoplay rejection', 'NotAllowedError'));
+                            }
+                            return nativePlay();
+                        }
+                    });
                 }
             });
-        });
+        }, tabId));
         legacy.messages.length = 0;
 
         await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
@@ -436,7 +445,8 @@ test('recovers relay ROOM_DATA through background retries into the packed player
 
         await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
             .toMatchObject({ status: 'connected', roomId, queuedLogicalEvents: 0 });
-        await expect.poll(() => page.evaluate(() => window.__koalaCanonicalPlayAttempts))
+        await expect.poll(() => page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaCanonicalPlayAttempts || '0')))
             .toBeGreaterThanOrEqual(2);
         await expect.poll(() => page.locator('#player').evaluate(video => ({
             paused: video.paused,

@@ -521,6 +521,7 @@ try {
 
     s(msgHost, 'leave_room', {});
     s(msgGuest, 'leave_room', {});
+    s(msgLateJoiner, 'leave_room', {});
     await delay(80);
     assert.equal(mod.rooms.has(msgateRid), false, 'empty-room cleanup removes canonical state with the room');
     // --- Terminal room timeout: coded error + complete membership cleanup ---
