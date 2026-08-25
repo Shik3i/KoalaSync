@@ -17,14 +17,30 @@ describe('release preflight helpers', () => {
         expect(() => validateRequiredChecks(checks)).not.toThrow();
     });
 
+    it('ignores an unrelated in-progress release check while validating required checks', () => {
+        const checks = parseCheckRuns([
+            'verify\tsuccess\thttps://example.test/verify',
+            'node20\tsuccess\thttps://example.test/node20',
+            'e2e\tsuccess\thttps://example.test/e2e',
+            'preflight\t\thttps://example.test/preflight'
+        ].join('\n'));
+
+        expect(checks.at(-1)).toEqual({
+            name: 'preflight',
+            conclusion: '',
+            url: 'https://example.test/preflight'
+        });
+        expect(() => validateRequiredChecks(checks)).not.toThrow();
+    });
+
     it('rejects missing, pending, and failed release checks', () => {
         expect(() => validateRequiredChecks([{ name: 'verify', conclusion: 'success' }]))
             .toThrow('Required check is missing for the release commit: node20');
         expect(() => validateRequiredChecks([
             { name: 'verify', conclusion: 'success' },
             { name: 'node20', conclusion: 'success' },
-            { name: 'e2e', conclusion: 'in_progress' }
-        ])).toThrow('Required check e2e did not succeed: in_progress');
+            { name: 'e2e', conclusion: '' }
+        ])).toThrow('Required check e2e did not succeed: pending');
         expect(() => validateRequiredChecks([
             { name: 'verify', conclusion: 'failure' },
             { name: 'node20', conclusion: 'success' },

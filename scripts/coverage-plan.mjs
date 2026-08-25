@@ -42,6 +42,7 @@ export const EXTERNALLY_GATED_SOURCES = Object.freeze({
         'scripts/check-coverage-inventory.mjs',
         'scripts/coverage-plan.mjs',
         'scripts/prepare-release.mjs',
+        'scripts/release-local-gate.mjs',
         'scripts/release-preflight.mjs',
         'scripts/test-audio-settings.mjs',
         'scripts/test-chat-settings.mjs',

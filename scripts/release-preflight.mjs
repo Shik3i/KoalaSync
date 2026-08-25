@@ -10,8 +10,9 @@ export const REQUIRED_RELEASE_CHECKS = Object.freeze(['verify', 'node20', 'e2e']
 
 export function parseCheckRuns(text) {
     return String(text).split(/\r?\n/u).filter(Boolean).map(line => {
-        const [name, conclusion, url = ''] = line.split('\t');
-        if (!name || !conclusion) throw new Error(`Invalid check-run record: ${line}`);
+        const fields = line.split('\t');
+        if (fields.length < 2 || !fields[0]) throw new Error(`Invalid check-run record: ${line}`);
+        const [name, conclusion = '', url = ''] = fields;
         return { name, conclusion, url };
     });
 }
@@ -21,7 +22,7 @@ export function validateRequiredChecks(checkRuns, required = REQUIRED_RELEASE_CH
         const matches = checkRuns.filter(check => check.name === name);
         if (matches.length === 0) throw new Error(`Required check is missing for the release commit: ${name}`);
         if (matches.some(check => check.conclusion !== 'success')) {
-            const conclusions = matches.map(check => check.conclusion).join(', ');
+            const conclusions = matches.map(check => check.conclusion || 'pending').join(', ');
             throw new Error(`Required check ${name} did not succeed: ${conclusions}`);
         }
     }

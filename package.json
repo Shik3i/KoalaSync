@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare:release": "node scripts/prepare-release.mjs",
+    "release:gate": "node scripts/release-local-gate.mjs",
     "subset-flags": "node website/tools/subset-flag-font.mjs",
     "test": "npm run verify",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.mjs",

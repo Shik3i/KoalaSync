@@ -11,6 +11,7 @@ npm run lint
 npm run test:unit
 npm run test:coverage
 npm run prepare:release -- 3.1.5
+npm run release:gate -- 3.1.5 --candidate
 ```
 
 - `npm run build:extension` runs `scripts/build-extension.cjs`.
@@ -19,6 +20,7 @@ npm run prepare:release -- 3.1.5
 - `npm run test:unit` runs Vitest tests.
 - `npm run test:coverage` runs the same tests with the enforced coverage floor.
 - `npm run prepare:release -- MAJOR.MINOR.PATCH` updates every release-version source consistently before the release PR.
+- `npm run release:gate -- MAJOR.MINOR.PATCH --candidate` runs the complete release candidate in the lockfile-matched official Playwright Linux/AMD64 image, then builds and health-smokes the relay container. After merge, omit `--candidate`; final mode additionally requires clean current `main`, exact `origin/main`, and successful `verify`, `node20`, and `e2e` checks while simulating the release workflow's own pending preflight check.
 
 ## build-extension.cjs
 
