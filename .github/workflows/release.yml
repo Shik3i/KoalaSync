@@ -139,6 +139,8 @@ jobs:
   release-server:
     needs: [preflight, release-extension-draft]
     runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/shik3i/koalasync
     permissions:
       contents: read
       packages: write
@@ -162,7 +164,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest
             type=ref,event=tag
@@ -183,14 +185,13 @@ jobs:
       - name: Attest relay image
         uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/${{ github.repository }}
+          subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
       - name: Verify manifest, provenance, and running image
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: ghcr.io/${{ github.repository }}
           SOURCE_DIGEST: ${{ needs.preflight.outputs.tag-commit }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
