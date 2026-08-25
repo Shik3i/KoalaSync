@@ -1137,7 +1137,8 @@ export async function stopServerForTests() {
     peerJoinLocks.clear();
     clearRateLimitMaps();
     healthResponseCache.clear();
-    io.removeAllListeners();
+    // Keep the server's connection handler installed so an E2E process can
+    // stop and restart this singleton relay for a later isolated scenario.
     io.disconnectSockets(true);
     Object.assign(rateLimitDenied, { connections: 0, events: 0, health: 0, adminMetricsAuth: 0, roomList: 0, leaveRoom: 0 });
     if (!httpServer.listening) return;

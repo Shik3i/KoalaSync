@@ -422,7 +422,10 @@ test('recovers relay ROOM_DATA through background retries into the packed player
                             const attempts = Number(video.dataset.koalaCanonicalPlayAttempts || '0') + 1;
                             video.dataset.koalaCanonicalPlayAttempts = String(attempts);
                             if (attempts === 1) {
-                                return Promise.reject(new DOMException('audit autoplay rejection', 'NotAllowedError'));
+                                return Promise.reject(Object.assign(
+                                    new Error('audit autoplay rejection'),
+                                    { name: 'NotAllowedError' }
+                                ));
                             }
                             return nativePlay();
                         }
