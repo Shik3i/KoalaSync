@@ -58,6 +58,12 @@ export function linuxGateCommand() {
     ].join(' && ');
 }
 
+export function parseRemoteMain(text) {
+    const match = /^([a-f0-9]{40})\trefs\/heads\/main\s*$/u.exec(String(text));
+    if (!match) throw new Error(`could not resolve origin main from: ${String(text).trim() || '<empty>'}`);
+    return match[1];
+}
+
 function assertCleanTree() {
     const status = capture('git', ['status', '--porcelain=v1']);
     if (status) throw new Error(`release gate requires a clean working tree:\n${status}`);
@@ -67,7 +73,9 @@ function assertFinalMainChecks() {
     const branch = capture('git', ['branch', '--show-current']);
     if (branch !== 'main') throw new Error(`final release gate requires branch main, found ${branch || '<detached>'}`);
     const head = capture('git', ['rev-parse', 'HEAD']);
-    const remoteMain = capture('git', ['rev-parse', 'origin/main']);
+    const remoteMain = parseRemoteMain(capture('git', [
+        'ls-remote', '--exit-code', 'origin', 'refs/heads/main'
+    ]));
     if (head !== remoteMain) throw new Error(`HEAD ${head} does not match origin/main ${remoteMain}`);
 
     const checksText = capture('gh', [

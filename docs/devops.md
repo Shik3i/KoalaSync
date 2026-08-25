@@ -51,7 +51,7 @@ To release a new version (e.g., `v2.5.1`), follow these steps:
    git commit -m "release: prepare v2.5.1"
    npm run release:gate -- 2.5.1 --candidate
    ```
-2. Commit the release notes and prepared version changes, open a pull request,
+2. Push the already committed and candidate-gated changes, open a pull request,
    and wait for required `verify`, `node20`, and `e2e` checks.
 3. After the PR is merged, fast-forward local `main`, wait for `verify`,
    `node20`, and `e2e` on the merge commit, then run the final local gate. It
