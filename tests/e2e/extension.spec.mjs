@@ -595,12 +595,12 @@ test('keeps canonical media state current while the capable extension is solo', 
         await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
             .toMatchObject({ status: 'connected', roomId });
 
-        expect(await sendServerCommand(context, extensionId, tabId, 'seek', { targetTime: 8 }))
+        expect(await sendServerCommand(context, extensionId, tabId, 'pause', { currentTime: 8 }))
             .toMatchObject({ status: 'ok' });
-        expect(await sendServerCommand(context, extensionId, tabId, 'play', { currentTime: 8 }))
+        expect(await sendServerCommand(context, extensionId, tabId, 'seek', { targetTime: 9 }))
             .toMatchObject({ status: 'ok' });
         await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
-            .toMatchObject({ revision: 2, playbackState: 'playing', currentTime: 8 });
+            .toMatchObject({ revision: 2, playbackState: 'paused', currentTime: 9 });
     } finally {
         await relay.stopServerForTests();
     }
@@ -1345,6 +1345,7 @@ test('coalesces persisted offline media intent before canonical reconnect recove
     test.setTimeout(60_000);
     const relay = await import('../../server/index.js');
     let legacy = null;
+    let canonicalKeeper = null;
     let lateJoiner = null;
     try {
         await relay.startServer(0, '127.0.0.1');
@@ -1352,6 +1353,8 @@ test('coalesces persisted offline media intent before canonical reconnect recove
         const roomId = `e2e-coalesced-${Date.now()}`;
         legacy = await connectLegacyRelayClient(port);
         await joinLegacyRelayRoom(legacy, roomId, 'legacy-e2e');
+        canonicalKeeper = await connectLegacyRelayClient(port);
+        await joinLegacyRelayRoom(canonicalKeeper, roomId, 'legacy-keeper');
 
         const url = `${baseURL}/pages/simple-player.html`;
         const page = await context.newPage();
@@ -1458,6 +1461,7 @@ test('coalesces persisted offline media intent before canonical reconnect recove
     } finally {
         await context.setOffline(false).catch(() => {});
         try { legacy?.close(); } catch { /* already closed */ }
+        try { canonicalKeeper?.close(); } catch { /* already closed */ }
         try { lateJoiner?.close(); } catch { /* already closed */ }
         await relay.stopServerForTests();
     }
