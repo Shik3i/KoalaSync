@@ -51,6 +51,14 @@ export function validateVersionSnapshot(expectedVersion, snapshot) {
     }
 }
 
+function versionFromMarker(text, pattern, label) {
+    const matches = [...String(text).matchAll(pattern)];
+    if (matches.length !== 1) {
+        throw new Error(`${label} must contain exactly one release-version marker`);
+    }
+    return matches[0][1];
+}
+
 export function validateReleaseSourceVersion(expectedVersion, repoRoot = process.cwd()) {
     const readJson = relativePath => JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), 'utf8'));
     const packageJson = readJson('package.json');
@@ -58,21 +66,46 @@ export function validateReleaseSourceVersion(expectedVersion, repoRoot = process
     const manifest = readJson('extension/manifest.base.json');
     const websiteVersion = readJson('website/version.json');
     const constants = fs.readFileSync(path.join(repoRoot, 'shared/constants.js'), 'utf8');
-    const appVersion = /export const APP_VERSION = ["']([^"']+)["']/u.exec(constants)?.[1] || '';
+    const websiteTemplate = fs.readFileSync(path.join(repoRoot, 'website/template.html'), 'utf8');
+    const websiteLlms = fs.readFileSync(path.join(repoRoot, 'website/llms.txt'), 'utf8');
+    const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
     validateVersionSnapshot(expectedVersion, {
         'package.json': packageJson.version,
         'package-lock.json': packageLock.version,
         'package-lock root package': packageLock.packages?.['']?.version,
         'extension manifest': manifest.version,
-        'shared constants': appVersion,
-        'website/version.json': websiteVersion.version
+        'shared constants': versionFromMarker(
+            constants,
+            /export const APP_VERSION = ["']([^"']+)["'];/gu,
+            'shared/constants.js'
+        ),
+        'website/version.json': websiteVersion.version,
+        'website template': versionFromMarker(
+            websiteTemplate,
+            /"softwareVersion": "([^"]+)"/gu,
+            'website/template.html'
+        ),
+        'website llms': versionFromMarker(
+            websiteLlms,
+            /Current website release: (\d+\.\d+\.\d+)/gu,
+            'website/llms.txt'
+        ),
+        'README release badge': versionFromMarker(
+            readme,
+            /Release-v(\d+\.\d+\.\d+)-blue/gu,
+            'README.md release badge'
+        ),
+        'README release banner': versionFromMarker(
+            readme,
+            /New v(\d+\.\d+\.\d+) Release!/gu,
+            'README.md release banner'
+        )
     });
 }
 
 export function verifyReleaseRef({ tag, repo }) {
     const version = versionFromTag(tag);
     validateRepositoryName(repo);
-    validateReleaseSourceVersion(version);
     const tagRef = `refs/tags/${tag}`;
     if (run('git', ['cat-file', '-t', tagRef]) !== 'tag') {
         throw new Error(`${tag} must be an annotated tag`);
@@ -88,16 +121,30 @@ export function verifyReleaseRef({ tag, repo }) {
         '--jq', '.check_runs[] | [.name, .conclusion, .html_url] | @tsv'
     ]));
     validateRequiredChecks(checks);
-    return { version, tagCommit };
+    const releaseTimestamp = run('git', ['show', '-s', '--format=%cI', tagCommit]);
+    return { version, tagCommit, releaseTimestamp };
 }
 
 function main() {
+    if (process.argv[2] === '--sources') {
+        if (process.argv.length !== 4) {
+            throw new Error('Usage: release-preflight.mjs --sources MAJOR.MINOR.PATCH');
+        }
+        const version = versionFromTag(`v${process.argv[3]}`);
+        validateReleaseSourceVersion(version);
+        console.log(`Release sources match v${version}`);
+        return;
+    }
     const tag = process.env.GITHUB_REF_NAME || '';
     const repo = process.env.GITHUB_REPOSITORY || '';
     const outputPath = process.env.GITHUB_OUTPUT || '';
     const result = verifyReleaseRef({ tag, repo });
     if (!outputPath) throw new Error('GITHUB_OUTPUT is required');
-    fs.appendFileSync(outputPath, `version=${result.version}\ntag_commit=${result.tagCommit}\n`, 'utf8');
+    fs.appendFileSync(
+        outputPath,
+        `version=${result.version}\ntag_commit=${result.tagCommit}\nrelease_timestamp=${result.releaseTimestamp}\n`,
+        'utf8'
+    );
     console.log(`Release preflight accepted ${tag} at ${result.tagCommit}`);
 }
 

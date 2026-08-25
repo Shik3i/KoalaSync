@@ -62,7 +62,7 @@ describe('release preflight helpers', () => {
         expect(() => parseCheckRuns('verify')).toThrow('Invalid check-run record');
     });
 
-    it('requires every release source to already match the tag version', () => {
+    it('requires every prepared release source to match the tag version', () => {
         expect(() => validateVersionSnapshot('3.1.5', {
             package: '3.1.5',
             manifest: '3.1.5'

@@ -118,23 +118,28 @@ Before starting any task, committing, or pushing, you **MUST** run `git pull --r
 > [!CAUTION]
 > **AI AGENTS MUST FOLLOW THIS EXACT SEQUENCE WHEN RELEASING A NEW VERSION OR TAGGING.**
 > 
-> **🚫 NO INDEPENDENT VERSION EDITS**: Run `npm run prepare:release -- MAJOR.MINOR.PATCH` on a release-preparation branch. Never edit only one version source, and never expect the tag workflow to modify `main`.
+> **🚫 NO INDEPENDENT VERSION EDITS**: Never edit only one version source. The
+> annotated SemVer tag workflow extracts the version, updates every source,
+> validates them, and pushes its generated `[skip ci]` version commit directly
+> to `main`.
 > - **Website Versioning**: **NEVER** manually modify generated version strings in `website/www/`. The website build injects version data from `website/version.json` into generated output.
 1. **MANDATORY SYNTAX & LINT CHECKS**: Before staging, committing, or pushing any changes, you **MUST** run both checks on every modified JavaScript file:
    - **Syntax Validation**: Run `node -c` on every single modified JavaScript file (e.g., `node -c extension/background.js` and `node -c extension/content.js`). **NEVER** commit or push code that fails this check.
    - **ESLint Validation**: Run `npm run lint` (or `npx eslint .`). The output must show **zero errors and zero warnings**. ESLint is configured to catch undefined variables, unused vars, unreachable code, and other semantic issues. **NEVER** commit or push code that fails this check.
-2. Commit the prepared version and release-note changes on a branch, push it,
-   open a pull request, and wait for required `verify`, `node20`, and `e2e`
-   checks. Direct pushes to `main` are not part of the release process.
-3. After the PR is merged, update local `main` and create an annotated exact
-   SemVer tag (`git tag -a v1.4.0 -m "Release v1.4.0"`) on the same commit as
-   `origin/main`.
+2. Commit and push the verified product/release-note changes to `main`, then
+   wait for `verify`, `node20`, and `e2e` on the exact `origin/main` commit.
+   Markdown-only changes do not require browser or release gates.
+3. From a clean, fast-forwarded `main`, create an annotated exact SemVer tag
+   (`git tag -a v1.4.0 -m "Release v1.4.0"`) on that same commit and push it once.
    - **🚫 TAG IMMUTABILITY**: Once a tag is pushed to `origin`, it is **PERMANENT**. You MUST **NEVER** reuse, move, or force-push an existing tag — not even to "fix" a mistake. If a release is missing a fix, increment the version and create a **new** tag (e.g., `v1.7.0` → `v1.7.1`). Tags are immutable identifiers; moving them breaks CI pipelines, corrupts the release history, and causes unreproducible builds.
    - **🚫 WHEN NOT TO TAG**: Do NOT create a release tag for changes that do NOT affect the shipped extension or server artifacts. Website text changes, documentation updates (`.md` files), and landing page content do NOT require a version tag. Tags trigger the full CI pipeline (Docker build, extension packaging, GitHub Release) — running this for a typo fix wastes CI resources and creates meaningless releases. Only tag when extension code (`extension/`), server code (`server/`), or shared protocol constants (`shared/`) have changed.
-4. The release workflow validates the unchanged tagged source, creates a draft
-   release, publishes and verifies the relay image, and makes the release public
-   only after every gate succeeds.
-5. Verify GitHub assets, attestations, GHCR platforms/digest, and health smoke.
+4. The release workflow validates the tag, prepares and validates every version
+   source, pushes the generated version commit to `main`, and builds Chrome,
+   Firefox, website, and relay outputs from that exact prepared commit.
+5. It creates a draft release, verifies archives, AMO output, checksums,
+   attestations, relay platforms/digest, and health before making the GitHub
+   Release public.
+6. Verify GitHub assets, attestations, GHCR platforms/digest, and health smoke.
 
 ### 🚫 Force Push Policy
 > [!CAUTION]

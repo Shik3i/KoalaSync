@@ -96,9 +96,9 @@ KoalaSync uses a **single source of truth** for all protocol constants in `share
 ## Version Numbers
 
 > [!CAUTION]
-> **Never edit release versions independently.** Release maintainers run
-> `npm run prepare:release -- MAJOR.MINOR.PATCH` on a branch and merge the
-> resulting version changes through a CI-green pull request before tagging.
+> **Never edit release versions independently.** An annotated exact SemVer tag
+> triggers the release workflow, which updates every version source atomically,
+> validates the result, and pushes its generated version commit to `main`.
 
 ---
 

@@ -18,6 +18,7 @@ jobs:
     outputs:
       version: ${{ steps.release-ref.outputs.version }}
       tag-commit: ${{ steps.release-ref.outputs.tag_commit }}
+      release-timestamp: ${{ steps.release-ref.outputs.release_timestamp }}
     steps:
       - name: Checkout release tag
         uses: actions/checkout@v7
@@ -38,6 +39,71 @@ jobs:
         run: node scripts/release-preflight.mjs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  prepare-release:
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      prepared-commit: ${{ steps.version-commit.outputs.prepared_commit }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Prepare and validate every release-version source
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_TIMESTAMP: ${{ needs.preflight.outputs.release-timestamp }}
+        run: |
+          node scripts/prepare-release.mjs "$VERSION" "$RELEASE_TIMESTAMP"
+          node scripts/release-preflight.mjs --sources "$VERSION"
+
+      - name: Commit and push prepared release to main
+        id: version-commit
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add extension/manifest.base.json shared/constants.js package.json package-lock.json website/version.json website/template.html website/llms.txt README.md
+          if git diff --cached --quiet; then
+            echo "Release versions already match v$VERSION"
+          else
+            git commit -m "chore(release): update versions to v$VERSION [skip ci]"
+          fi
+          git push origin HEAD:main
+          echo "prepared_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  verify-prepared-release:
+    needs: [preflight, prepare-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout prepared release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.prepared-commit }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Validate every prepared version source
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/release-preflight.mjs --sources "$VERSION"
 
       - name: Install root dependencies
         run: npm ci
@@ -73,16 +139,17 @@ jobs:
           exit 1
 
   release-extension-draft:
-    needs: preflight
+    needs: [preflight, prepare-release, verify-prepared-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - name: Checkout release tag
+      - name: Checkout prepared release commit
         uses: actions/checkout@v7
         with:
+          ref: ${{ needs.prepare-release.outputs.prepared-commit }}
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -137,7 +204,7 @@ jobs:
           if-no-files-found: error
 
   release-server:
-    needs: [preflight, release-extension-draft]
+    needs: [preflight, prepare-release, verify-prepared-release, release-extension-draft]
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/shik3i/koalasync
@@ -147,8 +214,10 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - name: Checkout release tag
+      - name: Checkout prepared release commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.prepared-commit }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -212,7 +281,7 @@ jobs:
           exit 1
 
   finalize-release:
-    needs: [preflight, release-extension-draft, release-server]
+    needs: [prepare-release, verify-prepared-release, release-extension-draft, release-server]
     runs-on: ubuntu-latest
     permissions:
       contents: write

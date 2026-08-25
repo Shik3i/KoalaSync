@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
     linuxGateCommand,
@@ -33,7 +34,17 @@ describe('local release gate contract', () => {
         const valid = [
             'IMAGE: ghcr.io/shik3i/koalasync',
             'images: ${{ env.IMAGE }}',
-            'subject-name: ${{ env.IMAGE }}'
+            'subject-name: ${{ env.IMAGE }}',
+            'prepare-release:',
+            'node scripts/prepare-release.mjs "$VERSION" "$RELEASE_TIMESTAMP"',
+            'node scripts/release-preflight.mjs --sources "$VERSION"',
+            'git commit -m "chore(release): update versions to v$VERSION [skip ci]"',
+            'git push origin HEAD:main',
+            'ref: ${{ needs.prepare-release.outputs.prepared-commit }}',
+            'ref: ${{ needs.prepare-release.outputs.prepared-commit }}',
+            'ref: ${{ needs.prepare-release.outputs.prepared-commit }}',
+            'needs: [prepare-release, verify-prepared-release, release-extension-draft, release-server]',
+            'gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag'
         ].join('\n');
         expect(validateReleaseWorkflowContract(valid)).toBe('ghcr.io/shik3i/koalasync');
         expect(() => validateReleaseWorkflowContract(valid.replace(
@@ -44,10 +55,25 @@ describe('local release gate contract', () => {
             .toThrow('case-preserving github.repository');
     });
 
+    it('enforces the automatic version commit, direct push, prepared source, and final publication contract', () => {
+        const workflow = fs.readFileSync('.github/workflows/release.yml', 'utf8');
+        expect(validateReleaseWorkflowContract(workflow)).toBe('ghcr.io/shik3i/koalasync');
+        expect(() => validateReleaseWorkflowContract(workflow.replace(
+            'git push origin HEAD:main',
+            'git push origin HEAD:release'
+        ))).toThrow('automatic tag versioning');
+        expect(() => validateReleaseWorkflowContract(workflow.replace(
+            'git push origin HEAD:main',
+            'git push origin HEAD:main || true'
+        ))).toThrow('stop when the automatic main push fails');
+    });
+
     it('runs the complete CI-equivalent dependency, verify, and browser sequence', () => {
         expect(linuxGateCommand()).toBe([
             'git clone --no-local /src /work',
             'cd /work',
+            'node scripts/prepare-release.mjs "$RELEASE_VERSION" "2030-01-01T00:00:00Z"',
+            'node scripts/release-preflight.mjs --sources "$RELEASE_VERSION"',
             'npm ci',
             'npm ci --prefix server',
             'npm run verify',

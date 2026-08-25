@@ -7,7 +7,6 @@ import path from 'node:path';
 import { versionFromTag } from './release-artifact-checks.mjs';
 import {
     parseCheckRuns,
-    validateReleaseSourceVersion,
     validateRequiredChecks
 } from './release-preflight.mjs';
 
@@ -51,6 +50,8 @@ export function linuxGateCommand() {
     return [
         'git clone --no-local /src /work',
         'cd /work',
+        'node scripts/prepare-release.mjs "$RELEASE_VERSION" "2030-01-01T00:00:00Z"',
+        'node scripts/release-preflight.mjs --sources "$RELEASE_VERSION"',
         'npm ci',
         'npm ci --prefix server',
         'npm run verify',
@@ -75,6 +76,26 @@ export function validateReleaseWorkflowContract(text) {
     }
     if (/ghcr\.io\/\$\{\{\s*github\.repository\s*\}\}/u.test(workflow)) {
         throw new Error('release workflow must not derive a Docker image from case-preserving github.repository');
+    }
+    for (const marker of [
+        'prepare-release:',
+        'node scripts/prepare-release.mjs "$VERSION" "$RELEASE_TIMESTAMP"',
+        'node scripts/release-preflight.mjs --sources "$VERSION"',
+        'git commit -m "chore(release): update versions to v$VERSION [skip ci]"',
+        'git push origin HEAD:main',
+        'needs: [prepare-release, verify-prepared-release, release-extension-draft, release-server]',
+        'gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag'
+    ]) {
+        if (!workflow.includes(marker)) {
+            throw new Error(`release workflow must preserve automatic tag versioning: ${marker}`);
+        }
+    }
+    const preparedCheckout = 'ref: ${{ needs.prepare-release.outputs.prepared-commit }}';
+    if ((workflow.match(new RegExp(preparedCheckout.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'gu')) || []).length < 3) {
+        throw new Error('release workflow must use the prepared commit for verification and all release builds');
+    }
+    if (/git push origin HEAD:main\s*(?:\|\||;\s*true)/u.test(workflow)) {
+        throw new Error('release workflow must stop when the automatic main push fails');
     }
     return image;
 }
@@ -134,7 +155,6 @@ async function smokeRelayImage(image) {
 
 export async function runReleaseGate({ version, candidate }) {
     assertCleanTree();
-    validateReleaseSourceVersion(version, repoRoot);
     validateReleaseWorkflowContract(fs.readFileSync(
         path.join(repoRoot, '.github/workflows/release.yml'), 'utf8'
     ));
@@ -145,6 +165,7 @@ export async function runReleaseGate({ version, candidate }) {
     run('docker', ['pull', '--platform', 'linux/amd64', playwrightImage]);
     run('docker', [
         'run', '--rm', '--platform', 'linux/amd64', '--ipc=host', '--env', 'CI=1',
+        '--env', `RELEASE_VERSION=${version}`,
         '--volume', `${repoRoot}:/src:ro`, playwrightImage,
         'bash', '-lc', linuxGateCommand()
     ]);

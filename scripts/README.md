@@ -10,8 +10,7 @@ npm run verify
 npm run lint
 npm run test:unit
 npm run test:coverage
-npm run prepare:release -- 3.1.5
-npm run release:gate -- 3.1.5 --candidate
+npm run release:gate -- 3.1.6 --candidate
 ```
 
 - `npm run build:extension` runs `scripts/build-extension.cjs`.
@@ -19,8 +18,14 @@ npm run release:gate -- 3.1.5 --candidate
 - `npm run lint` runs ESLint across the repository.
 - `npm run test:unit` runs Vitest tests.
 - `npm run test:coverage` runs the same tests with the enforced coverage floor.
-- `npm run prepare:release -- MAJOR.MINOR.PATCH` updates every release-version source consistently before the release PR.
-- `npm run release:gate -- MAJOR.MINOR.PATCH --candidate` runs the complete release candidate in the lockfile-matched official Playwright Linux/AMD64 image, then builds and health-smokes the relay container. After merge, omit `--candidate`; final mode additionally requires clean current `main`, exact `origin/main`, and successful `verify`, `node20`, and `e2e` checks while simulating the release workflow's own pending preflight check.
+- `scripts/prepare-release.mjs` is an internal tag-workflow helper. It updates
+  every release-version source from the validated tag and accepts the tagged
+  commit timestamp for deterministic retries. Maintainers do not run it before
+  tagging.
+- `npm run release:gate -- MAJOR.MINOR.PATCH --candidate` is an optional
+  Linux/AMD64 parity diagnostic for release-code changes. It prepares the target
+  version only inside its isolated clone, then runs verification, browser E2E,
+  relay build, and health smoke. It is not required for Markdown-only changes.
 
 ## build-extension.cjs
 
@@ -100,10 +105,11 @@ integration gate. New unclassified files fail `npm run verify`.
 ## Published Release Verification
 
 Before publication, the release workflow validates the exact annotated SemVer
-tag, requires it to point at current `origin/main`, requires successful
-`verify`, `node20`, and `e2e` checks, and runs the complete gates again. It then
-creates a draft release, publishes and smoke-tests the relay image, and only
-afterwards makes the GitHub Release public. The published-asset gate runs:
+tag and required checks, prepares and validates every version source, pushes
+the generated version commit directly to `main`, and checks out that exact
+commit for all verification and builds. It then creates a draft release,
+publishes and smoke-tests the relay image, and only afterwards makes the GitHub
+Release public. The published-asset gate runs:
 
 ```bash
 node scripts/verify-published-release.mjs vMAJOR.MINOR.PATCH --repo Shik3i/KoalaSync
