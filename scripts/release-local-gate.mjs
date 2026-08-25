@@ -64,7 +64,7 @@ export function parseRemoteMain(text) {
 }
 
 export function validateReleaseWorkflowContract(text) {
-    const workflow = String(text);
+    const workflow = String(text).replace(/\r\n/gu, '\n');
     const image = 'ghcr.io/shik3i/koalasync';
     if (!workflow.includes(`IMAGE: ${image}`)) {
         throw new Error(`release workflow must define the lowercase canonical image ${image}`);
@@ -94,6 +94,16 @@ export function validateReleaseWorkflowContract(text) {
     }
     if (/git push origin HEAD:main\s*(?:\|\||;\s*true)/u.test(workflow)) {
         throw new Error('release workflow must stop when the automatic main push fails');
+    }
+    const verificationPermissions = [
+        '  verify-prepared-release:',
+        '    needs: [preflight, prepare-release]',
+        '    runs-on: ubuntu-latest',
+        '    permissions:',
+        '      contents: read'
+    ].join('\n');
+    if (!workflow.includes(verificationPermissions)) {
+        throw new Error('prepared release verification must explicitly limit GITHUB_TOKEN to contents: read');
     }
     return image;
 }
