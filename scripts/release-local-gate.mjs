@@ -64,6 +64,21 @@ export function parseRemoteMain(text) {
     return match[1];
 }
 
+export function validateReleaseWorkflowContract(text) {
+    const workflow = String(text);
+    const image = 'ghcr.io/shik3i/koalasync';
+    if (!workflow.includes(`IMAGE: ${image}`)) {
+        throw new Error(`release workflow must define the lowercase canonical image ${image}`);
+    }
+    for (const reference of ['images: ${{ env.IMAGE }}', 'subject-name: ${{ env.IMAGE }}']) {
+        if (!workflow.includes(reference)) throw new Error(`release workflow must use ${reference}`);
+    }
+    if (/ghcr\.io\/\$\{\{\s*github\.repository\s*\}\}/u.test(workflow)) {
+        throw new Error('release workflow must not derive a Docker image from case-preserving github.repository');
+    }
+    return image;
+}
+
 function assertCleanTree() {
     const status = capture('git', ['status', '--porcelain=v1']);
     if (status) throw new Error(`release gate requires a clean working tree:\n${status}`);
@@ -120,6 +135,9 @@ async function smokeRelayImage(image) {
 export async function runReleaseGate({ version, candidate }) {
     assertCleanTree();
     validateReleaseSourceVersion(version, repoRoot);
+    validateReleaseWorkflowContract(fs.readFileSync(
+        path.join(repoRoot, '.github/workflows/release.yml'), 'utf8'
+    ));
     if (!candidate) assertFinalMainChecks();
 
     const lock = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));

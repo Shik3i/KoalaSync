@@ -17,6 +17,9 @@ These rules are mandatory for every automated agent working in this repository.
   `linux/amd64`, Ubuntu Noble, and `CI=1`; it must run clean installs, full
   verification, all browser E2E tests, the relay image build, and health smoke.
 - A failed, interrupted, ARM64, skipped, or partial run is not a passing gate.
+- All OCI image references must use the canonical lowercase
+  `ghcr.io/shik3i/koalasync`; never construct Docker references from the
+  case-preserving `${{ github.repository }}` value. The local gate enforces this.
 - Do not say "release-ready" until the candidate gate and PR required checks
   are green for the exact commit.
 

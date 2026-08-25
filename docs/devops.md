@@ -81,3 +81,8 @@ the public GitHub assets and GHCR digest before calling the release complete.
 `release:gate`. The gate pins the official Playwright image to the exact
 lockfile version and forces `linux/amd64`, matching GitHub's Ubuntu runner even
 when the developer host is macOS or ARM64.
+
+The relay registry reference is always the canonical lowercase
+`ghcr.io/shik3i/koalasync`. Docker repository names reject uppercase characters;
+`release:gate` rejects workflows that derive this reference from the
+case-preserving `${{ github.repository }}` value.

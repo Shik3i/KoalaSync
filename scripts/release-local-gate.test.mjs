@@ -3,7 +3,8 @@ import {
     linuxGateCommand,
     parseGateArgs,
     parseRemoteMain,
-    playwrightImageFromLock
+    playwrightImageFromLock,
+    validateReleaseWorkflowContract
 } from './release-local-gate.mjs';
 
 describe('local release gate contract', () => {
@@ -26,6 +27,21 @@ describe('local release gate contract', () => {
         expect(parseRemoteMain(`${sha}\trefs/heads/main\n`)).toBe(sha);
         expect(() => parseRemoteMain('')).toThrow('could not resolve origin main');
         expect(() => parseRemoteMain(`${sha}\trefs/heads/not-main`)).toThrow('could not resolve origin main');
+    });
+
+    it('requires one lowercase registry image throughout the release workflow', () => {
+        const valid = [
+            'IMAGE: ghcr.io/shik3i/koalasync',
+            'images: ${{ env.IMAGE }}',
+            'subject-name: ${{ env.IMAGE }}'
+        ].join('\n');
+        expect(validateReleaseWorkflowContract(valid)).toBe('ghcr.io/shik3i/koalasync');
+        expect(() => validateReleaseWorkflowContract(valid.replace(
+            'IMAGE: ghcr.io/shik3i/koalasync',
+            'IMAGE: ghcr.io/${{ github.repository }}'
+        ))).toThrow('lowercase canonical image');
+        expect(() => validateReleaseWorkflowContract(`${valid}\n${'ghcr.io/${{ github.repository }}'}`))
+            .toThrow('case-preserving github.repository');
     });
 
     it('runs the complete CI-equivalent dependency, verify, and browser sequence', () => {
