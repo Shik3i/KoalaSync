@@ -67,8 +67,7 @@ Useful focused checks from the repository root:
 node -c extension/background.js
 node -c extension/content.js
 node -c extension/popup.js
-node scripts/test-episode-utils.mjs
-node scripts/test-title-privacy.mjs
+npx vitest run extension/episode-utils.test.mjs extension/title-privacy.test.mjs
 node scripts/test-audio-settings.mjs
 node scripts/test-locales.cjs
 ```

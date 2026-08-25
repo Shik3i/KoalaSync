@@ -121,8 +121,9 @@ Only accepted, sanitized room controls update canonical state:
   established playback state.
 - a valid `force_sync_prepare` records only temporary coordination state. The
   next authorized `force_sync_execute` commits the latest room-wide prepared
-  target as playing. The latest valid prepare is also the only post-demotion
-  execute exemption in Host Control mode.
+  target as playing before `FORCE_SYNC_TIMEOUT` expires. Expired targets are
+  cleared and cannot alter canonical state. The latest valid prepare is also
+  the only post-demotion execute exemption in Host Control mode.
 
 `peer_status` heartbeats are observations and never rewrite canonical intent.
 Per-sender `seq` still orders commands from one sender; canonical `revision`
@@ -167,6 +168,10 @@ cannot suppress server recovery.
 This requires no event, capability, ACK, protocol-version, or minimum-version
 change. Old relays receive ordinary `play`/`pause`/`seek`; old peers see only the
 same existing relayed events.
+
+Queued adjacent `force_sync_prepare` and `force_sync_execute` entries replay in
+one paced batch. If either send fails, the full pair remains queued so a later
+retry refreshes the prepared target before executing it.
 
 ## Ephemeral encrypted chat
 

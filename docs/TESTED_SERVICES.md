@@ -20,7 +20,7 @@ This document tracks which streaming platforms and media servers are supported b
 | **Disney+** | ✅ Full | ⚠️ Partial | ❌ | — | — | — | Series title only (e.g. "The Simpsons"), no episode info. |
 | **Prime Video** | ✅ Full  | ✅ Full  | ❌ | — | — | — | — |
 | **HBO Max / Max** | Not tested | Not tested | Not tested | — | — | — | — |
-| **Crunchyroll** | Not tested | Not tested | Not tested | — | — | — | — |
+| **Crunchyroll** (`crunchyroll.com`) | ✅ Full | ⚠️ Partial | ❌ | 2026-08-21 | Shik3i | v3.1.4 | Manual testing on the live service confirmed playback synchronization with its top-level Bitmovin HTML5 player. The Media Session exposes the episode as `E1 - Prologue` and the series as artist metadata, but the current episode parser does not recognize the abbreviated `E1` form for episode auto-sync. |
 | **Vimeo** | Not tested | Not tested | Not tested | — | — | — | — |
 | **Dailymotion** | Not tested | Not tested | Not tested | — | — | — | — |
 | **ARD / ZDF Mediathek** | Not tested | Not tested | Not tested | — | — | — | — |
@@ -81,3 +81,8 @@ The currently verified cross-origin service topologies are:
 - **YummyAnime:** `yummyanime.tv` top page → same-origin wrapper → `thealloha.club` player.
 
 These embedded origins are implementation details of the services and may change independently. If the browser withholds access to a newly used player origin, KoalaSync asks for that origin through its normal site-access flow.
+
+Crunchyroll currently exposes its Bitmovin `<video>` directly in the top-level
+document. Its application layout uses a `display: contents` wrapper, which has
+no box of its own even while the descendant player is visible; v3.1.4 handles
+that standards-compliant layout without a Crunchyroll-specific host rule.

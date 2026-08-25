@@ -5,23 +5,219 @@ on:
     tags:
       - 'v*'
 
-# A release run must never be interrupted (it commits back to main and publishes
-# artifacts). Only dedupe accidental re-pushes of the same tag.
 concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  release-server:
+  preflight:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      version: ${{ steps.release-ref.outputs.version }}
+      tag-commit: ${{ steps.release-ref.outputs.tag_commit }}
+      release-timestamp: ${{ steps.release-ref.outputs.release_timestamp }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Validate annotated tag, main commit, and required checks
+        id: release-ref
+        run: node scripts/release-preflight.mjs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  prepare-release:
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      prepared-commit: ${{ steps.version-commit.outputs.prepared_commit }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Prepare and validate every release-version source
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_TIMESTAMP: ${{ needs.preflight.outputs.release-timestamp }}
+        run: |
+          node scripts/prepare-release.mjs "$VERSION" "$RELEASE_TIMESTAMP"
+          node scripts/release-preflight.mjs --sources "$VERSION"
+
+      - name: Commit and push prepared release to main
+        id: version-commit
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add extension/manifest.base.json shared/constants.js package.json package-lock.json website/version.json website/template.html website/llms.txt README.md
+          if git diff --cached --quiet; then
+            echo "Release versions already match v$VERSION"
+          else
+            git commit -m "chore(release): update versions to v$VERSION [skip ci]"
+          fi
+          git push origin HEAD:main
+          echo "prepared_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  verify-prepared-release:
+    needs: [preflight, prepare-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout prepared release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.prepared-commit }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Validate every prepared version source
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/release-preflight.mjs --sources "$VERSION"
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Run complete release verification
+        run: npm run verify
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium chromium-headless-shell firefox webkit
+
+      - name: Run browser E2E suite
+        run: npm run test:e2e
+
+      - name: Build relay container without publishing
+        run: docker build --file server/Dockerfile --tag koalasync-release-preflight .
+
+      - name: Smoke-test relay container
+        run: |
+          CONTAINER_ID=$(docker run --detach --publish 127.0.0.1::3000 --env SERVER_SALT=release-preflight-salt-with-more-than-thirty-two-chars koalasync-release-preflight)
+          trap 'docker rm --force "$CONTAINER_ID" >/dev/null 2>&1 || true' EXIT
+          HOST_PORT=$(docker port "$CONTAINER_ID" 3000/tcp | sed 's/.*://')
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent "http://127.0.0.1:$HOST_PORT/health" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$CONTAINER_ID"
+          exit 1
+
+  release-extension-draft:
+    needs: [preflight, prepare-release, verify-prepared-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout prepared release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.prepared-commit }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies and build release artifacts
+        run: |
+          npm ci
+          npm run build:extension
+          node website/build.cjs
+
+      - name: Validate Firefox package
+        run: npx addons-linter --warnings-as-errors dist/koalasync-firefox.zip
+
+      - name: Generate extension checksums
+        working-directory: dist
+        run: sha256sum koalasync-chrome.zip koalasync-firefox.zip > SHA256SUMS
+
+      - name: Validate release assets before publication
+        run: node scripts/verify-published-release.mjs "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --asset-dir dist --skip-attestation
+
+      - name: Attest extension archives
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/koalasync-*.zip
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/koalasync-chrome.zip
+            dist/koalasync-firefox.zip
+            dist/SHA256SUMS
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: true
+          prerelease: false
+
+      - name: Verify draft extension release
+        run: node scripts/verify-published-release.mjs "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload website artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: website-www
+          path: website/www/
+          if-no-files-found: error
+
+  release-server:
+    needs: [preflight, prepare-release, verify-prepared-release, release-extension-draft]
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/shik3i/koalasync
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
     steps:
-      - name: Checkout code
+      - name: Checkout prepared release commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.prepared-commit }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -37,7 +233,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest
             type=ref,event=tag
@@ -52,126 +248,45 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Reuse layers across releases to speed up the multi-arch build.
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Generate artifact attestation
+      - name: Attest relay image
         uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/${{ github.repository }}
+          subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-  release-extension:
+      - name: Verify manifest, provenance, and running image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_DIGEST: ${{ needs.preflight.outputs.tag-commit }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --raw > /tmp/koalasync-manifest.json
+          node -e 'const m=require("/tmp/koalasync-manifest.json"); const p=new Set(m.manifests.map(x=>`${x.platform.os}/${x.platform.architecture}`)); for (const x of ["linux/amd64","linux/arm64"]) if(!p.has(x)) throw new Error(`missing platform ${x}`)'
+          gh attestation verify "oci://$IMAGE@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref "$GITHUB_REF" --source-digest "$SOURCE_DIGEST" --deny-self-hosted-runners
+          docker pull --platform linux/amd64 "$IMAGE@$DIGEST"
+          CONTAINER_ID=$(docker run --detach --publish 127.0.0.1::3000 --env SERVER_SALT=release-smoke-salt-with-more-than-thirty-two-chars "$IMAGE@$DIGEST")
+          trap 'docker rm --force "$CONTAINER_ID" >/dev/null 2>&1 || true' EXIT
+          HOST_PORT=$(docker port "$CONTAINER_ID" 3000/tcp | sed 's/.*://')
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent "http://127.0.0.1:$HOST_PORT/health" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$CONTAINER_ID"
+          exit 1
+
+  finalize-release:
+    needs: [prepare-release, verify-prepared-release, release-extension-draft, release-server]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
-      attestations: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Inject version into source files
-        run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "Injecting version $VERSION from tag $GITHUB_REF_NAME..."
-
-          # 1. extension/manifest.base.json
-          jq --arg v "$VERSION" '.version = $v' extension/manifest.base.json > tmp.json && mv tmp.json extension/manifest.base.json
-          echo "  ✓ manifest.base.json -> $VERSION"
-
-          # 2. shared/constants.js — APP_VERSION
-          sed -i "s/export const APP_VERSION = [\"'].*[\"']/export const APP_VERSION = \"$VERSION\"/" shared/constants.js
-          echo "  ✓ shared/constants.js -> $VERSION"
-
-          # 3. package.json
-          jq --arg v "$VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
-          echo "  ✓ package.json -> $VERSION"
-
-          # 4. package-lock.json root package metadata
-          jq --arg v "$VERSION" '.version = $v | .packages[""].version = $v' package-lock.json > tmp.json && mv tmp.json package-lock.json
-          echo "  ✓ package-lock.json -> $VERSION"
-
-          # 5. website/version.json
-          jq -n --arg v "$VERSION" --arg d "$DATE" '{version: $v, date: $d}' > website/version.json
-          echo "  ✓ website/version.json -> version $VERSION, date $DATE"
-
-          # 6. website/template.html — SoftwareApplication schema
-          sed -i "s/\"softwareVersion\": \".*\"/\"softwareVersion\": \"$VERSION\"/" website/template.html
-          echo "  ✓ website/template.html -> softwareVersion $VERSION"
-
-          # 7. website/llms.txt — machine-readable release metadata
-          sed -i "s/Current website release: .*/Current website release: $VERSION/" website/llms.txt
-          echo "  ✓ website/llms.txt -> $VERSION"
-
-          # 8. README.md — version badge & banner
-          sed -i "s|Release-v[0-9]\+\.[0-9]\+\.[0-9]\+-blue|Release-v$VERSION-blue|g" README.md
-          sed -i "s/New v[0-9]\+\.[0-9]\+\.[0-9]\+ Release/New v$VERSION Release/g" README.md
-          echo "  ✓ README.md -> v$VERSION"
-
-          echo "Version injection complete."
-
-      - name: Commit and push version updates back to main
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add extension/manifest.base.json shared/constants.js package.json package-lock.json website/version.json website/template.html website/llms.txt README.md
-          git commit -m "chore(release): update versions to $GITHUB_REF_NAME [skip ci]" || echo "No changes to commit"
-          git push origin HEAD:main
+      - name: Publish verified GitHub release
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --verify-tag
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Extensions
-        run: |
-          npm ci
-          npm run build:extension
-
-      - name: Generate extension checksums
-        run: |
-          cd dist
-          sha256sum koalasync-chrome.zip koalasync-firefox.zip > SHA256SUMS
-          cat SHA256SUMS
-
-      - name: Generate artifact attestation for extensions
-        uses: actions/attest@v4
-        with:
-          subject-path: dist/koalasync-*.zip
-
-      - name: Build Website
-        run: node website/build.cjs
-
-      - name: Upload Website Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: website-www
-          path: website/www/
-          if-no-files-found: error
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            dist/koalasync-chrome.zip
-            dist/koalasync-firefox.zip
-            dist/SHA256SUMS
-          name: Release ${{ github.ref_name }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

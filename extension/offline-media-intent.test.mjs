@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EVENTS, MAX_MEDIA_TIME } from './shared/constants.js';
+import { EVENTS, MAX_MEDIA_TIME } from '../shared/constants.js';
 import { canonicalMediaStateFromRoomData } from './canonical-media-state.js';
 import {
     discardQueuedMediaIntents,
@@ -157,6 +157,26 @@ describe('offline media intent coalescing', () => {
         expect(restored[1].event).toBe(EVENTS.EPISODE_LOBBY);
         expect(restored[2].intent).toMatchObject({ playbackState: 'playing', currentTime: 30 });
         expect(maxQueuedSequence(restored)).toBe(4);
+    });
+
+    it('enforces the cap while restoring consecutive persisted media intents', () => {
+        const persisted = [10, 20, 30].map((currentTime, index) => ({
+            kind: 'media-intent',
+            roomId,
+            intent: {
+                playbackState: 'paused',
+                currentTime,
+                latestEvent: EVENTS.PAUSE,
+                previousSeq: null,
+                latestSeq: index + 1,
+                actionTimestamp: index + 1,
+                mediaTitle: null,
+                sourceEventCount: 1
+            }
+        }));
+        const restored = normalizePersistedEventQueue(persisted, roomId, 2);
+        expect(restored).toHaveLength(2);
+        expect(restored.map(entry => entry.intent.currentTime)).toEqual([20, 30]);
     });
 
     it('drops room-scoped barriers from another room and unknown persisted events', () => {
@@ -334,6 +354,39 @@ describe('offline media intent drain', () => {
         expect(queue).toHaveLength(49);
         expect(queue.some(entry => entry.event === EVENTS.FORCE_SYNC_PREPARE)).toBe(false);
         expect(queue.some(entry => entry.event === EVENTS.FORCE_SYNC_EXECUTE)).toBe(false);
+    });
+
+    it('keeps adjacent Force Sync PREPARE and EXECUTE in the same replay batch', async () => {
+        let queue = [];
+        for (let index = 0; index < 9; index++) {
+            queue = enqueueQueuedEvent(queue, EVENTS.EPISODE_READY, { seq: index + 1 }, { roomId }).queue;
+        }
+        queue = enqueueQueuedEvent(queue, EVENTS.FORCE_SYNC_PREPARE, { targetTime: 100, seq: 10 }, { roomId }).queue;
+        queue = enqueueQueuedEvent(queue, EVENTS.FORCE_SYNC_EXECUTE, { seq: 11 }, { roomId }).queue;
+        const sent = [];
+        const result = await drainQueuedBatch(queue, {
+            roomId,
+            maxWireEvents: 10,
+            sendFrame: async frame => { sent.push(frame.event); return true; }
+        });
+        expect(sent).toEqual(Array(9).fill(EVENTS.EPISODE_READY));
+        expect(result.queue.map(entry => entry.event)).toEqual([
+            EVENTS.FORCE_SYNC_PREPARE,
+            EVENTS.FORCE_SYNC_EXECUTE
+        ]);
+    });
+
+    it('retains the full Force Sync transaction if EXECUTE replay fails', async () => {
+        let queue = enqueueQueuedEvent([], EVENTS.FORCE_SYNC_PREPARE, { targetTime: 100, seq: 1 }, { roomId }).queue;
+        queue = enqueueQueuedEvent(queue, EVENTS.FORCE_SYNC_EXECUTE, { seq: 2 }, { roomId }).queue;
+        const result = await drainQueuedBatch(queue, {
+            roomId,
+            maxWireEvents: 10,
+            sendFrame: async frame => frame.event !== EVENTS.FORCE_SYNC_EXECUTE
+        });
+        expect(result.status).toBe('send_failed');
+        expect(result.sentWireEvents).toBe(1);
+        expect(result.queue).toEqual(queue);
     });
 
     it('reports logical and actual-wire queue sizes separately', () => {

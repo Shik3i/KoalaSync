@@ -1,4 +1,4 @@
-import { EVENTS, MAX_MEDIA_TIME } from './shared/constants.js';
+import { EVENTS, MAX_MEDIA_TIME } from '../shared/constants.js';
 
 export const MEDIA_INTENT_KIND = 'media-intent';
 export const MAX_LOGICAL_QUEUE_SIZE = 50;
@@ -245,6 +245,7 @@ export function normalizePersistedEventQueue(value, roomId, maxEntries = MAX_LOG
             if (intentEntry) {
                 intentEntry = repairIntentSequences(intentEntry, maximumSequence);
                 normalized.push(intentEntry);
+                normalized = trimQueue(normalized, maxEntries).queue;
                 maximumSequence = Math.max(maximumSequence, maxQueuedSequence([intentEntry]));
             }
             continue;
@@ -464,11 +465,18 @@ export async function drainQueuedBatch(queue, {
             droppedStaleIntents++;
             continue;
         }
-        const frames = isQueuedMediaIntent(entry)
-            ? materializeMediaIntent(entry)
-            : [{ event: entry.event, data: entry.data }];
+        const deliveryEntries = entry?.event === EVENTS.FORCE_SYNC_PREPARE
+            && remaining[1]?.event === EVENTS.FORCE_SYNC_EXECUTE
+            ? remaining.slice(0, 2)
+            : [entry];
+        const frames = deliveryEntries.flatMap(deliveryEntry => {
+            const deliveryFrames = isQueuedMediaIntent(deliveryEntry)
+                ? materializeMediaIntent(deliveryEntry)
+                : [{ event: deliveryEntry.event, data: deliveryEntry.data }];
+            return deliveryFrames.map(frame => ({ frame, entry: deliveryEntry }));
+        });
         if (frames.length === 0) {
-            remaining.shift();
+            remaining.splice(0, deliveryEntries.length);
             continue;
         }
         if (sentWireEvents > 0 && sentWireEvents + frames.length > maxWireEvents) {
@@ -479,8 +487,8 @@ export async function drainQueuedBatch(queue, {
         }
 
         let sentEntryFrames = 0;
-        for (const frame of frames) {
-            if (!await sendFrame(frame, entry)) {
+        for (const { frame, entry: deliveryEntry } of frames) {
+            if (!await sendFrame(frame, deliveryEntry)) {
                 return {
                     queue: remaining,
                     sentWireEvents: sentWireEvents + sentEntryFrames,
@@ -491,7 +499,7 @@ export async function drainQueuedBatch(queue, {
             sentEntryFrames++;
         }
         sentWireEvents += sentEntryFrames;
-        remaining.shift();
+        remaining.splice(0, deliveryEntries.length);
         if (sentWireEvents >= maxWireEvents) {
             return { queue: remaining, sentWireEvents, droppedStaleIntents, status: 'batch_full' };
         }

@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Display contents player</title>
+<h1>Visible player inside a boxless wrapper</h1>
+<div id="app-contents" style="display: contents">
+    <div class="video-player-wrapper">
+        <video id="player" data-expected width="854" height="480" src="../media/player-480p-12s.mp4"></video>
+    </div>
+</div>
+<script>
+    const wrapper = document.getElementById('app-contents');
+    if (wrapper.checkVisibility() !== false || wrapper.getBoundingClientRect().width !== 0) {
+        throw new Error('display: contents fixture must expose a boxless wrapper');
+    }
+</script>
+<script src="ready.js"></script>

@@ -8,8 +8,9 @@ const backgroundSource = fs.readFileSync(path.join(extensionDir, 'background.js'
 const contentSource = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
 
 function functionBody(source, name, nextName) {
-    const start = source.indexOf(`function ${name}`);
-    const end = source.indexOf(`function ${nextName}`, start + 1);
+    const start = source.indexOf(`function ${name}(`);
+    const end = source.indexOf(`function ${nextName}(`, start + 1);
+    expect(start).toBeGreaterThan(-1);
     return source.slice(start, end === -1 ? source.length : end);
 }
 

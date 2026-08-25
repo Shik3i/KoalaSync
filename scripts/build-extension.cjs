@@ -189,6 +189,14 @@ function copyExtensionFiles(targetDir, browserName) {
 
         fs.writeFileSync(destPath, content);
         console.log(`✓ Injected uninstall URL constants for ${browserName} into background.js`);
+      } else if (item === 'canonical-media-state.js' || item === 'offline-media-intent.js') {
+        let content = fs.readFileSync(srcPath, 'utf8');
+        const sourceImport = "from '../shared/constants.js'";
+        if (!content.includes(sourceImport)) {
+          throw new Error(`CRITICAL: Source shared constants import missing in ${item}. Aborting build.`);
+        }
+        content = content.replace(sourceImport, "from './shared/constants.js'");
+        fs.writeFileSync(destPath, content);
       } else if (item === 'popup.html') {
         let content = fs.readFileSync(srcPath, 'utf8');
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';

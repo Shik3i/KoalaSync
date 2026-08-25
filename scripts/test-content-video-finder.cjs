@@ -184,6 +184,37 @@ assert.strictEqual(
   'a hidden playing preload must not outrank the visible paused player'
 );
 
+// Crunchyroll wraps its Bitmovin player in `display: contents`. Such a wrapper
+// has no box of its own and checkVisibility() returns false for the wrapper,
+// even though the descendant video is fully visible.
+const displayContentsPlayer = makeVideo('display-contents-player', 1920, 1080, {
+  controls: false,
+  paused: true,
+  duration: 1420
+});
+const displayContentsWrapper = {
+  _style: { display: 'contents', visibility: 'visible', opacity: '1' },
+  checkVisibility() { return false; },
+  parentElement: null
+};
+displayContentsPlayer.parentElement = displayContentsWrapper;
+displayContentsPlayer.checkVisibility = () => true;
+const displayContentsDocument = {
+  querySelectorAll(selector) {
+    if (selector === 'video') return [displayContentsPlayer];
+    return [];
+  }
+};
+attachRenderEnvironment(
+  displayContentsDocument,
+  [displayContentsPlayer, displayContentsWrapper]
+);
+assert.strictEqual(
+  findVideo(displayContentsDocument),
+  displayContentsPlayer,
+  'a visible player inside a display: contents wrapper must remain selectable'
+);
+
 const belowFoldPlayer = makeVideo('below-fold-player', 800, 450, {
   controls: true,
   duration: 1200

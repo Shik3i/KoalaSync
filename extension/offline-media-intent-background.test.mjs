@@ -35,10 +35,14 @@ describe('offline media intent background integration', () => {
         const roomDataStart = backgroundSource.indexOf('case EVENTS.ROOM_DATA:');
         const roomDataEnd = backgroundSource.indexOf('case EVENTS.CONTROL_MODE:', roomDataStart);
         const roomData = backgroundSource.slice(roomDataStart, roomDataEnd);
-        expect(roomData.indexOf('applyQueuedRoomPolicy(data.roomId'))
-            .toBeLessThan(roomData.indexOf('handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)'));
-        expect(roomData.indexOf('handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)'))
-            .toBeLessThan(roomData.indexOf('flushEventQueue(replaySettings)'));
+        const policyIndex = roomData.indexOf('applyQueuedRoomPolicy(data.roomId');
+        const canonicalIndex = roomData.indexOf('handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)');
+        const flushIndex = roomData.indexOf('flushEventQueue(replaySettings)');
+        expect(policyIndex).toBeGreaterThan(-1);
+        expect(canonicalIndex).toBeGreaterThan(-1);
+        expect(flushIndex).toBeGreaterThan(-1);
+        expect(policyIndex).toBeLessThan(canonicalIndex);
+        expect(canonicalIndex).toBeLessThan(flushIndex);
         expect(roomData).toContain('activeLobby: !!episodeLobby');
         expect(roomData).toContain('desynced: hcmDesynced');
         expect(roomData).toContain('if (!data?.activeLobby && episodeLobby && !hasQueuedLocalLobby)');
@@ -53,7 +57,8 @@ describe('offline media intent background integration', () => {
             backgroundSource.indexOf("message.type === 'LEAVE_ROOM'"),
             backgroundSource.indexOf("message.type === 'CLEAR_LOGS'")
         );
-        expect(leaveHandler).toContain('forceDisconnect()');
+        expect(leaveHandler).toContain("endRoomSession({ notifyServer: true, reason: 'Left Room' })");
+        expect(functionBody('endRoomSession', 'leaveRoomAfterIdleGrace')).toContain('forceDisconnect()');
         const retryHandler = backgroundSource.slice(
             backgroundSource.indexOf("message.type === 'RETRY_CONNECT'"),
             backgroundSource.indexOf("message.type === 'GET_STATUS'")

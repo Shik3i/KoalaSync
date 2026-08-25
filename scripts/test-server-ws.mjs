@@ -10,6 +10,7 @@ import {
     materializeMediaIntent,
     reserveLatestMediaIntentSequence
 } from '../extension/offline-media-intent.js';
+import { FORCE_SYNC_TIMEOUT } from '../shared/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(__dirname, '..', 'server', 'package.json'));
@@ -137,6 +138,22 @@ try {
     assert.equal(coalescedLateRoom.mediaState.playbackState, 'paused');
     assert.equal(coalescedLateRoom.mediaState.currentTime, 605);
     assert.equal(coalescedLateRoom.mediaState.updatedBy, 'coalesce-sender');
+    // --- Stale peer reaper: terminal timeout + clean rejoin ---
+    const staleClient = await c();
+    const staleRoomId = 'stale-'+Date.now();
+    await j(staleClient, staleRoomId, 'stale-peer');
+    staleClient._m.length = 0;
+    const staleRoom = mod.rooms.get(staleRoomId);
+    staleRoom.peerData.values().next().value.lastSeen = 1;
+    mod.cleanupInactiveRooms(Date.now());
+    const [staleEvent, staleData] = await a(staleClient);
+    assert.equal(staleEvent, 'error');
+    assert.equal(staleData.code, 'peer_timed_out');
+    assert.equal(staleData.message, 'Removed from room after inactivity');
+    assert.equal(mod.rooms.has(staleRoomId), false, 'stale peer room is deleted');
+    staleClient._m.length = 0;
+    await j(staleClient, staleRoomId, 'stale-peer');
+    assert.equal(mod.rooms.has(staleRoomId), true, 'stale peer can rejoin cleanly');
     close();
     resetConnectionRate();
 
@@ -387,6 +404,18 @@ try {
         'authorized EXECUTE commits the latest target visible to legacy peers');
     assert.equal(competingForceState.updatedBy, 'msa');
 
+    s(msa, 'force_sync_prepare', { targetTime: 950 });
+    await w(msb, 'force_sync_prepare');
+    const beforeExpiredExecute = { ...mod.rooms.get(msrid).mediaState };
+    mod.rooms.get(msrid).forceSyncTarget.preparedAt = Date.now() - FORCE_SYNC_TIMEOUT - 1;
+    msa._m.length = msb._m.length = 0;
+    s(msa, 'force_sync_execute', {});
+    let expiredExecuteDropped = false;
+    try { await w(msb, 'force_sync_execute', 500); } catch { expiredExecuteDropped = true; }
+    assert.ok(expiredExecuteDropped, 'an expired Force Sync target rejects delayed EXECUTE');
+    assert.deepEqual(mod.rooms.get(msrid).mediaState, beforeExpiredExecute);
+    assert.equal(mod.rooms.get(msrid).forceSyncTarget, null);
+
     msa._m.length = msb._m.length = 0;
     s(msa, 'force_sync_prepare', { targetTime: 1_000 });
     await w(msb, 'force_sync_prepare');
@@ -451,6 +480,24 @@ try {
     s(msgGuest, 'leave_room', {});
     await delay(80);
     assert.equal(mod.rooms.has(msgateRid), false, 'empty-room cleanup removes canonical state with the room');
+    // --- Terminal room timeout: coded error + complete membership cleanup ---
+    const timeoutClient = await c();
+    const timeoutRoomId = 'timeout-'+Date.now();
+    await j(timeoutClient, timeoutRoomId, 'timeout-peer');
+    timeoutClient._m.length = 0;
+    mod.rooms.get(timeoutRoomId).lastActivity = 0;
+    mod.cleanupInactiveRooms(Date.now());
+    const [timeoutEvent, timeoutData] = await a(timeoutClient);
+    assert.equal(timeoutEvent, 'error');
+    assert.equal(timeoutData.code, 'room_closed');
+    assert.equal(timeoutData.message, 'Room closed');
+    assert.equal(mod.rooms.has(timeoutRoomId), false, 'inactive room is deleted');
+    timeoutClient._m.length = 0;
+
+    // The same connected socket must be able to join that room again. This
+    // proves timeout cleanup removed its stale socketToRoom membership.
+    await j(timeoutClient, timeoutRoomId, 'timeout-peer');
+    assert.equal(mod.rooms.has(timeoutRoomId), true, 'timed-out peer can rejoin cleanly');
     close();
     resetConnectionRate();
 

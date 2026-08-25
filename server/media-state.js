@@ -72,9 +72,7 @@ export function updateMediaStateFromControl(room, eventName, payload, senderPeer
 
     if (eventName === EVENTS.SEEK) {
         const targetTime = clampMediaTime(payload.targetTime) ?? clampMediaTime(payload.currentTime);
-        const playbackState = payload.playbackState === 'playing' || payload.playbackState === 'paused'
-            ? payload.playbackState
-            : (room.mediaState?.playbackState || senderPlaybackState);
+        const playbackState = room.mediaState?.playbackState || senderPlaybackState;
         if (targetTime === null) return false;
         return commitMediaState(room, playbackState, targetTime, senderPeerId, now);
     }

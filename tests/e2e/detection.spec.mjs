@@ -13,6 +13,7 @@ const SCENARIOS = [
     { page: 'nested-frame.html', expected: 'framed-player', what: 'a player two frame levels down' },
     { page: 'shadow-player.html', expected: 'shadow-player', what: 'a player inside a shadow root over a light-DOM teaser' },
     { page: 'muted-player.html', expected: 'player', what: 'the only player even when muted' },
+    { page: 'display-contents-player.html', expected: 'player', what: 'a visible player inside a boxless display-contents wrapper' },
     { page: 'hidden-preload.html', expected: 'player', what: 'the visible player over a hidden higher-resolution preload' },
     { page: 'ad-frame.html', expected: 'player', what: 'the real player over a muted ad in a first-party frame' },
     { page: 'background-loop.html', expected: 'player', what: 'the real player over a large looping background video' },

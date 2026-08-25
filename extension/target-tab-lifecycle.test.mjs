@@ -9,6 +9,8 @@ const contentSource = fs.readFileSync(path.join(extensionDir, 'content.js'), 'ut
 const overlaySource = fs.readFileSync(path.join(extensionDir, 'chat-overlay.js'), 'utf8');
 const monitorSource = fs.readFileSync(path.join(extensionDir, 'media-frame-monitor.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.base.json'), 'utf8'));
+const sharedConstantsSource = fs.readFileSync(path.join(extensionDir, '..', 'shared', 'constants.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(extensionDir, '..', 'server', 'index.js'), 'utf8');
 
 describe('target tab lifecycle', () => {
     it('injects playback and chat scripts only into the explicitly selected tab', () => {
@@ -96,6 +98,37 @@ describe('target tab lifecycle', () => {
         expect(overlaySource).toContain("message?.type === 'TARGET_DEACTIVATE'");
     });
 
+    it('routes every terminal room exit through the full target unhook', () => {
+        const teardownStart = backgroundSource.indexOf('async function endRoomSession');
+        const teardownEnd = backgroundSource.indexOf('async function leaveRoomAfterIdleGrace', teardownStart);
+        const teardownSource = backgroundSource.slice(teardownStart, teardownEnd);
+        expect(teardownSource).toContain('await deactivateTargetTab(currentTabId, currentContentTarget())');
+        expect(teardownSource.indexOf('await deactivateTargetTab(currentTabId, currentContentTarget())'))
+            .toBeLessThan(teardownSource.indexOf('currentTabId = null'));
+        expect(teardownSource).toContain('await clearPendingTarget()');
+        expect(teardownSource).toContain('forceDisconnect()');
+
+        expect(backgroundSource).toContain('await endRoomSession({ notifyServer: true, reason });');
+        expect(backgroundSource).toContain("await endRoomSession({ notifyServer: true, reason: 'Left Room' });");
+        expect(backgroundSource).toContain('data.code === ERROR_CODES.ROOM_CLOSED');
+        expect(backgroundSource).toContain('data.code === ERROR_CODES.PEER_TIMED_OUT');
+        expect(backgroundSource).toContain("data.message === 'Room closed'");
+        expect(backgroundSource).toContain("data.message === 'Removed from room after inactivity'");
+        expect(backgroundSource).toContain('await endRoomSession({ reason: `Room session ended: ${data.message}` });');
+
+        expect(sharedConstantsSource).toContain("ROOM_CLOSED: 'room_closed'");
+        expect(sharedConstantsSource).toContain("PEER_TIMED_OUT: 'peer_timed_out'");
+        expect(serverSource).toContain('code: ERROR_CODES.ROOM_CLOSED');
+        expect(serverSource).toContain('code: ERROR_CODES.PEER_TIMED_OUT');
+        expect(serverSource).toContain("removePeerFromRoom(sid, roomId, 'room-timeout')");
+    });
+
+    it('does not promote a nested media target without confirmed parent visibility', () => {
+        expect(backgroundSource).toContain(
+            'normalizeFrameId(resolved.frameId) !== 0 && resolved.visibilityConfirmed !== true'
+        );
+    });
+
     it('removes monitors injected by a superseded cross-tab activation', () => {
         expect(backgroundSource).toContain('function isTargetActivationSuperseded(tabId, activationGeneration)');
         expect(backgroundSource).toMatch(/navigationRetries: navigationRetries - 1,\s*activationGeneration\s*\}\)/);
@@ -105,6 +138,9 @@ describe('target tab lifecycle', () => {
 
     it('uses all-frame probing for cross-origin targets without navigation permissions', () => {
         expect(backgroundSource).toContain("files: ['media-frame-monitor.js']");
+        expect(backgroundSource).toContain('async function announcePotentialMediaFrame()');
+        expect(backgroundSource).toContain("{ type: 'MEDIA_FRAME_DISCOVERED' }");
+        expect(backgroundSource).toContain('func: announcePotentialMediaFrame');
         // Monitors must reach the frames we know about, not only whatever the
         // all-frames sweep happens to accept — both on the way in and out.
         expect(backgroundSource.match(/\.\.\.listMediaFrameScriptTargets\(tabId\),/g)?.length).toBe(2);

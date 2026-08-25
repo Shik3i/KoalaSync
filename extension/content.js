@@ -660,7 +660,14 @@
                     || Number(style.opacity) === 0)) {
                     return false;
                 }
-                if (typeof current.checkVisibility === 'function'
+                // `display: contents` deliberately gives the wrapper no box, so
+                // Chromium reports the wrapper itself as not visible even while
+                // its children are fully rendered. Crunchyroll's player layout
+                // uses exactly that shape. The explicit CSS checks above still
+                // reject genuinely hidden ancestors; skip only this boxless
+                // wrapper case when walking up from the video.
+                if (style?.display !== 'contents'
+                    && typeof current.checkVisibility === 'function'
                     && !current.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
                     return false;
                 }

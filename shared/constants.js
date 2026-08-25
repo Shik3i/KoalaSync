@@ -7,7 +7,7 @@
  */
 
 export const PROTOCOL_VERSION = "1.0.0";
-export const APP_VERSION = "3.1.3";
+export const APP_VERSION = "3.1.5";
 
 export const OFFICIAL_SERVER_URL = 'wss://syncserver.koalastuff.net';
 export const OFFICIAL_LANDING_PAGE_URL = 'https://sync.koalastuff.net';
@@ -63,6 +63,14 @@ export const EVENTS = {
     // Ping / Latency
     PING: "ping",  // { t: timestamp, target?: peerId } — empty target = server echo
     PONG: "pong"   // server responds with same { t } for client RTT calculation
+};
+
+// Stable server error identifiers. Clients must branch on these codes instead
+// of localized or user-facing message text whenever the error changes session
+// state.
+export const ERROR_CODES = {
+    ROOM_CLOSED: 'room_closed',
+    PEER_TIMED_OUT: 'peer_timed_out'
 };
 
 // Room control modes (Host Control Mode feature).

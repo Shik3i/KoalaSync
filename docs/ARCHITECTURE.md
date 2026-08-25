@@ -51,7 +51,9 @@ notification, command ACK, or relay media event.
 
 Force Sync remains a two-phase ACK protocol. A valid `PREPARE` is temporary
 room-wide choreography; the next authorized `EXECUTE` commits the latest target
-visible to peers to canonical state. Per-sender
+visible to peers to canonical state before the shared Force Sync timeout. The
+offline queue replays an adjacent `PREPARE`/`EXECUTE` pair in one paced batch and
+retains both if delivery fails. Per-sender
 `seq`, peer heartbeats, and the reconnect queue remain separate mechanisms.
 
 ## 3.2 Offline Media Intent

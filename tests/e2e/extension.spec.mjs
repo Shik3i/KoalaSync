@@ -78,11 +78,24 @@ async function connectLegacyRelayClient(port) {
     socket.messages = [];
     socket.on('message', value => socket.messages.push(value.toString()));
     await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('legacy relay connection timed out')), 5000);
-        socket.once('open', () => {
+        let timeout;
+        const onError = error => {
             clearTimeout(timeout);
+            socket.off('open', onOpen);
+            reject(new Error(`legacy relay connection failed: ${error.message}`));
+        };
+        const onOpen = () => {
+            clearTimeout(timeout);
+            socket.off('error', onError);
             resolve();
-        });
+        };
+        timeout = setTimeout(() => {
+            socket.off('open', onOpen);
+            socket.off('error', onError);
+            reject(new Error('legacy relay connection timed out'));
+        }, 5000);
+        socket.once('error', onError);
+        socket.once('open', onOpen);
     });
     socket.send('40');
     await expect.poll(() => socket.messages.filter(message => message.startsWith('0') || message.startsWith('40')).length).toBeGreaterThanOrEqual(2);
@@ -375,7 +388,7 @@ test('applies canonical recovery without echoing media commands or activity', as
     expect(historyAfter).toEqual(historyBefore);
 });
 
-test('reinjects after the target tab navigates', async ({ context, extensionId, baseURL }) => {
+test('@race reinjects after the target tab navigates', async ({ context, extensionId, baseURL }) => {
     const first = `${baseURL}/pages/iframe-player.html`;
     const page = await context.newPage();
     await page.goto(first);
@@ -398,7 +411,7 @@ test('reinjects after the target tab navigates', async ({ context, extensionId, 
     ).toBe('true');
 });
 
-test('re-attaches after the player frame swaps its document', async ({ context, extensionId, baseURL }) => {
+test('@race re-attaches after the player frame swaps its document', async ({ context, extensionId, baseURL }) => {
     const url = `${baseURL}/pages/reloading-frame.html`;
     const page = await context.newPage();
     await page.goto(url);
@@ -425,7 +438,7 @@ test('re-attaches after the player frame swaps its document', async ({ context, 
     ).toBe('true');
 });
 
-test('re-attaches when a nested player frame swaps its document', async ({ context, extensionId, baseURL }) => {
+test('@race re-attaches when a nested player frame swaps its document', async ({ context, extensionId, baseURL }) => {
     const url = `${baseURL}/pages/nested-frame.html`;
     const page = await context.newPage();
     await page.goto(url);
@@ -454,7 +467,7 @@ test('re-attaches when a nested player frame swaps its document', async ({ conte
     ).toBe('true');
 });
 
-test('moves local event listeners after a CSS-only player switch', async ({ context, extensionId, baseURL }) => {
+test('@race moves local event listeners after a CSS-only player switch', async ({ context, extensionId, baseURL }) => {
     const url = `${baseURL}/pages/player-css-switch.html`;
     const page = await context.newPage();
     await page.goto(url);
@@ -563,7 +576,7 @@ test('targets a visible nested cross-origin player and keeps top-page debug cont
     });
 });
 
-test('re-elects the visible cross-origin player after an iframe switch', async ({ context, extensionId, baseURL }) => {
+test('@race re-elects the visible cross-origin player after an iframe switch', async ({ context, extensionId, baseURL }) => {
     const url = `${baseURL}/pages/cross-origin-switching.html`;
     const page = await context.newPage();
     await page.goto(url);
@@ -588,7 +601,7 @@ test('re-elects the visible cross-origin player after an iframe switch', async (
     expect(await first.locator('video').evaluate(video => video.paused)).toBe(true);
 });
 
-test('immediately adopts and syncs when switching mirrors while first mirror was active and playing', async ({ context, extensionId, baseURL }) => {
+test('@race immediately adopts and syncs when switching mirrors while first mirror was active and playing', async ({ context, extensionId, baseURL }) => {
     const url = `${baseURL}/pages/cross-origin-switching.html`;
     const page = await context.newPage();
     await page.goto(url);
@@ -642,7 +655,7 @@ test('keeps commands flowing during continuous player-frame geometry changes', a
     }
 });
 
-test('deactivates media monitors in child frames after a target-tab switch', async ({ context, extensionId, baseURL }) => {
+test('@race deactivates media monitors in child frames after a target-tab switch', async ({ context, extensionId, baseURL }) => {
     const firstUrl = `${baseURL}/pages/cross-origin-nested.html`;
     const secondUrl = `${baseURL}/pages/simple-player.html`;
     const firstPage = await context.newPage();
@@ -692,7 +705,7 @@ test('re-attaches after a selected cross-origin frame navigates', async ({ conte
     expect(state).toMatchObject({ found: true, inIframe: true });
 });
 
-test('discovers a video inserted late inside a cross-origin frame', async ({ context, extensionId, baseURL }) => {
+test('@race discovers a video inserted late inside a cross-origin frame', async ({ context, extensionId, baseURL }) => {
     const url = `${baseURL}/pages/cross-origin-late.html`;
     const page = await context.newPage();
     await page.goto(url);
@@ -780,7 +793,7 @@ test('selects the visible anime player nested behind a same-origin wrapper', asy
     });
 });
 
-test('selects an anime tab before playback and promotes the player once it appears', async ({ context, extensionId, baseURL }) => {
+test('@race selects an anime tab before playback and promotes the player once it appears', async ({ context, extensionId, baseURL }) => {
     // The live case: at selection time the page has no video anywhere, because
     // the host only builds the player when the viewer presses play.
     const url = `${baseURL}/pages/yummy-deferred-player.html`;
@@ -849,7 +862,7 @@ test('polling video state on a page with no video does not restart the target', 
         .toBe('true');
 });
 
-test('stays ready on a page whose ad frames keep mutating', async ({ context, extensionId, baseURL }) => {
+test('@race stays ready on a page whose ad frames keep mutating', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(90000);
     // Live ad churn wakes the media-frame monitor several times a second. Each
     // wake used to schedule a trailing refresh that rebuilt the target
@@ -916,7 +929,7 @@ test('controls and adopts a nested player even while the top frame is elected', 
     expect(status).toMatchObject({ targetTabId: tabId, targetHasVideo: true });
 });
 
-test('recovers when the adopted player frame is torn down and rebuilt', async ({ context, extensionId, baseURL }) => {
+test('@race recovers when the adopted player frame is torn down and rebuilt', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(90000);
     // Kodik rebuilds its player frame on quality and part changes, which kills
     // the documentId the election is pinned to. The election has to be given up,
@@ -1182,16 +1195,16 @@ test('coalesces persisted offline media intent before canonical reconnect recove
         expect(restoredQueue.queuedLogicalEvents).toBeGreaterThanOrEqual(1);
         expect(restoredQueue.queuedWireEvents).toBeGreaterThanOrEqual(2);
 
+        await page.locator('#player').evaluate(video => {
+            window.__koalaReconnectSeeks = [];
+            video.addEventListener('seeked', () => window.__koalaReconnectSeeks.push(video.currentTime));
+        });
+
         const retryResult = await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async serverUrl => {
             await chrome.storage.local.set({ serverUrl });
             return chrome.runtime.sendMessage({ type: 'RETRY_CONNECT' });
         }, `ws://127.0.0.1:${port}`));
         expect(retryResult).toMatchObject({ status: 'ok' });
-
-        await page.locator('#player').evaluate(video => {
-            window.__koalaReconnectSeeks = [];
-            video.addEventListener('seeked', () => window.__koalaReconnectSeeks.push(video.currentTime));
-        });
         const replaySeek = await waitForLegacyRelayEvent(legacy, 'seek', 20_000);
         const replayPause = await waitForLegacyRelayEvent(legacy, 'pause', 20_000);
         expect(replaySeek).toMatchObject({ currentTime: 6, targetTime: 6 });

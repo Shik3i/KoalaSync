@@ -35,7 +35,9 @@ The build script performs the following actions:
 The system enforces a strict `protocolVersion` check during the `JOIN_ROOM` handshake. 
 - The version is defined in `shared/constants.js`.
 - If the extension and server versions mismatch, the server will reject the connection with an `Incompatible protocol version` error.
-- **Never manually bump version numbers**. The CI pipeline automatically injects the version from the git tag into `manifest.base.json`, `shared/constants.js`, and `package.json` during release builds. Run the build script to synchronize other constant updates.
+- Never edit release versions independently. The annotated SemVer tag workflow
+  updates and validates every version source, then pushes its generated version
+  commit directly to `main` before building the release.
 
 > [!CAUTION]
 > **NEVER** edit the files inside `extension/shared/` directly. They will be overwritten the next time the build script is run. Always edit the files in the root `shared/` directory and then run the build script.

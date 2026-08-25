@@ -1,4 +1,4 @@
-import { EVENTS, CONTROL_MODES, CAPABILITIES, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, EPISODE_LOBBY_TIMEOUT, FORCE_SYNC_TIMEOUT, HEARTBEAT_INTERVAL } from './shared/constants.js';
+import { EVENTS, ERROR_CODES, CONTROL_MODES, CAPABILITIES, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, EPISODE_LOBBY_TIMEOUT, FORCE_SYNC_TIMEOUT, HEARTBEAT_INTERVAL } from './shared/constants.js';
 import { generateUsername } from './shared/names.js';
 import { loadLocale, getMessage, getSystemLanguage } from './i18n.js';
 import { sameEpisode, extractEpisodeId } from './episode-utils.js';
@@ -1052,15 +1052,19 @@ function clearTargetTabForIdle(expectedTabId = null, expectedGeneration = null) 
     return true;
 }
 
-async function leaveRoomAfterIdleGrace(reason) {
-    if (!currentRoom) return;
+async function endRoomSession({ notifyServer = false, reason = 'Left Room' } = {}) {
+    webJoinCoordinator.invalidate();
     connectIntent = false;
     reconnectFailed = false;
     reconnectAttempts = 0;
-    chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null });
+    reconnectStartTime = null;
     completeForceSyncBeforeTargetChange(null);
-    emit(EVENTS.LEAVE_ROOM, { peerId });
-    forceDisconnect();
+    if (notifyServer) emit(EVENTS.LEAVE_ROOM, { peerId });
+
+    // Stop room-specific polling before the content script itself is removed.
+    // Every terminal room exit must pass through the exact target identity while
+    // it is still available, regardless of who initiated the exit.
+    clearEpisodeLobbyState();
     currentRoom = null;
     clearCanonicalMediaRecovery();
     clearChatActivity();
@@ -1072,15 +1076,22 @@ async function leaveRoomAfterIdleGrace(reason) {
     // Notify content.js/popup BEFORE currentTabId is cleared so they can reset
     // any stale guest-side HCM state (dialog/badge/desync) — H-2.
     broadcastControlMode();
-    if (currentTabId) await deactivateTargetTab(currentTabId);
+    if (currentTabId) await deactivateTargetTab(currentTabId, currentContentTarget());
     invalidateTargetActivations();
     currentTabId = null;
     currentTabTitle = null;
     clearCurrentContentTarget();
     roomIdleSince = null;
     lastContentHeartbeatAt = null;
-    clearEpisodeLobbyState();
     await clearPendingTarget();
+
+    isForceSyncInitiator = false;
+    forceSyncAcks.clear();
+    expectedAcksCount = 0;
+    if (forceSyncTimeout) {
+        clearTimeout(forceSyncTimeout);
+        forceSyncTimeout = null;
+    }
     await chrome.storage.session.set({
         currentRoom: null,
         chatActivityTimeline: [],
@@ -1091,15 +1102,28 @@ async function leaveRoomAfterIdleGrace(reason) {
         currentTargetHasVideo: false,
         roomIdleSince: null,
         lastContentHeartbeatAt: null,
+        isForceSyncInitiator: false,
+        forceSyncAcks: [],
+        forceSyncDeadline: null,
+        expectedAcksCount: 0,
         episodeLobby: null,
-        hcmDesynced: false
+        hcmDesynced: false,
+        reconnectFailed: false,
+        reconnectAttempts: 0,
+        reconnectStartTime: null
     }).catch(() => {});
     chatSecretGuard = '';
     invalidateChatSession();
     await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
-    addLog(reason, 'info');
     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
+    forceDisconnect();
+    addLog(reason, 'info');
     updateBadgeStatus();
+}
+
+async function leaveRoomAfterIdleGrace(reason) {
+    if (!currentRoom) return;
+    await endRoomSession({ notifyServer: true, reason });
 }
 
 async function connect() {
@@ -1107,6 +1131,7 @@ async function connect() {
     isConnecting = true;
     const startingGeneration = connectionGeneration;
     let attemptGeneration = startingGeneration;
+    let handedOffToSocket = false;
 
     let finalUrl = '';
     try {
@@ -1234,7 +1259,7 @@ async function connect() {
                     } else {
                         awaitingRoomData = false;
                         pendingRoomDataRoomId = null;
-                        flushEventQueue();
+                        flushEventQueue().catch(error => addLog(`Queue replay failed: ${error.message}`, 'warn'));
                     }
                 } else if (msg.startsWith('42')) {
                     try {
@@ -1295,6 +1320,7 @@ async function connect() {
                 const logType = reconnectAttempts > 1 ? 'error' : 'warn';
                 addLog('WebSocket Error: Connection failed', logType);
             };
+            handedOffToSocket = true;
         } catch (e) {
             throw new Error(`[Connection Error] ${e.message}`);
         }
@@ -1309,6 +1335,8 @@ async function connect() {
         if (currentRoom || connectIntent) {
             scheduleReconnect();
         }
+    } finally {
+        if (!handedOffToSocket) isConnecting = false;
     }
 }
 
@@ -2092,6 +2120,13 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
         }
         case EVENTS.ERROR:
             isConnecting = false;
+            const terminalRoomError = data.code === ERROR_CODES.ROOM_CLOSED
+                || data.code === ERROR_CODES.PEER_TIMED_OUT
+                || data.message === 'Room closed'
+                || data.message === 'Removed from room after inactivity';
+            if (currentRoom && terminalRoomError) {
+                await endRoomSession({ reason: `Room session ended: ${data.message}` });
+            }
             // If we get a server error before successfully joining a room,
             // clear persisted credentials as well, otherwise service-worker
             // restart would immediately retry the rejected room.
@@ -2999,10 +3034,46 @@ function executeScriptWithTimeout(options, timeoutMs = SCRIPT_INJECTION_TIMEOUT_
     });
 }
 
+/**
+ * Runs as a tiny all-frame beacon before the heavier monitor injection.
+ * Chromium can reject an allFrames result wholesale when one unrelated ad
+ * frame disappears mid-sweep, even though stable frames already executed the
+ * function. Those stable frames announce their ids through the sender metadata,
+ * letting the next step address them individually without webNavigation.
+ */
+async function announcePotentialMediaFrame() {
+    let relevant = false;
+    try {
+        const identity = `${window.location.href} ${window.name || ''}`;
+        relevant = !!document.querySelector('video, iframe, frame')
+            || /player|video|stream|watch|embed|media|xfp/i.test(identity);
+    } catch { /* inaccessible or already-detached document */ }
+    if (!relevant) return false;
+    try {
+        await chrome.runtime.sendMessage({ type: 'MEDIA_FRAME_DISCOVERED' });
+    } catch { /* extension context or document disappeared */ }
+    return true;
+}
+
 async function injectMediaFrameMonitors(tabId, contentTarget) {
     // The sweep is best effort; the known frames are addressed individually so a
     // rejected sweep cannot leave the deep player frame without a monitor — and
     // therefore without any way to report itself later.
+    try {
+        const discoveries = await executeScriptWithTimeout({
+            target: { tabId, allFrames: true },
+            func: announcePotentialMediaFrame
+        }, 750);
+        for (const entry of discoveries || []) {
+            if (entry?.result === true) rememberFrameId(tabId, entry.frameId);
+        }
+    } catch {
+        // Stable frames still announce themselves if a disappearing ad frame
+        // makes Chromium reject the aggregate allFrames result.
+    }
+    // Give those sender messages one task boundary to update the registry before
+    // taking the snapshot used for individual monitor injections below.
+    await new Promise(resolve => setTimeout(resolve, 0));
     const targets = [
         ...listMediaFrameScriptTargets(tabId),
         ...listKnownFrameIds(tabId)
@@ -3684,6 +3755,14 @@ async function selectedMediaTargetMoved(tabId) {
         }
         return false;
     }
+    // A disappearing ad frame can make the parent-visibility handshake
+    // inconclusive while still leaving one hidden mirror as the only video
+    // candidate. Never rebuild toward an unconfirmed nested frame: its monitor
+    // or a later clean probe will announce it again if it is genuinely visible.
+    if (normalizeFrameId(resolved.frameId) !== 0 && resolved.visibilityConfirmed !== true) {
+        refreshMediaFrameMonitors(tabId).catch(() => {});
+        return false;
+    }
     if (currentTargetHasVideo !== true) return true;
     return normalizeFrameId(resolved.frameId) !== normalizeFrameId(currentTargetFrameId)
         || (typeof resolved.documentId === 'string'
@@ -4137,6 +4216,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
 
     const senderTabId = normalizeTabId(sender?.tab?.id);
     if (senderTabId !== null) rememberFrameId(senderTabId, sender?.frameId);
+    if (message.type === 'MEDIA_FRAME_DISCOVERED') {
+        sendResponse({ status: 'ok' });
+        return;
+    }
     const mediaLifecycleMessage = message.type === 'MEDIA_FRAME_CANDIDATE_CHANGED'
         || message.type === 'MEDIA_FRAME_VISIBILITY'
         || message.type === 'MEDIA_TARGET_REFRESH';
@@ -4470,66 +4553,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'LEAVE_ROOM') {
-        webJoinCoordinator.invalidate();
-        completeForceSyncBeforeTargetChange(null);
-        connectIntent = false;
-        reconnectFailed = false;
-        reconnectAttempts = 0;
-        chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null });
-        emit(EVENTS.LEAVE_ROOM, { peerId });
-        currentRoom = null;
-        clearCanonicalMediaRecovery();
-        clearChatActivity();
-        controlMode = CONTROL_MODES.EVERYONE;
-        hostPeerId = null;
-        controllers = [];
-        serverCapabilities = [];
-        hcmDesynced = false;
-        // Notify content.js/popup BEFORE currentTabId is cleared so they drop any
-        // stale guest-side HCM state (dialog/badge/desync) — H-2/H-3.
-        broadcastControlMode();
-        if (currentTabId) await deactivateTargetTab(currentTabId, currentContentTarget());
-        invalidateTargetActivations();
-        currentTabId = null;
-        currentTabTitle = null;
-        clearCurrentContentTarget();
-        roomIdleSince = null;
-        lastContentHeartbeatAt = null;
-
-        updateBadgeStatus();
-        
-        isForceSyncInitiator = false;
-        forceSyncAcks.clear();
-        expectedAcksCount = 0;
-        if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
-
-        // Cancel any active episode lobby
-        clearEpisodeLobbyState();
-        await clearPendingTarget();
-
-        chrome.storage.session.set({ 
-            currentRoom: null,
-            chatActivityTimeline: [],
-            currentTabId: null,
-            currentTabTitle: null,
-            currentTargetFrameId: 0,
-            currentTargetDocumentId: null,
-            currentTargetHasVideo: false,
-            roomIdleSince: null,
-            lastContentHeartbeatAt: null,
-            isForceSyncInitiator: false,
-            forceSyncAcks: [],
-            forceSyncDeadline: null,
-            episodeLobby: null,
-            expectedAcksCount: 0,
-            hcmDesynced: false
-        });
-        chatSecretGuard = '';
-        invalidateChatSession();
-        chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
-        addLog('Left Room', 'info');
-        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
-        forceDisconnect();
+        await endRoomSession({ notifyServer: true, reason: 'Left Room' });
         sendResponse({ status: 'ok' });
     } else if (message.type === 'CLEAR_LOGS') {
         logs = [];

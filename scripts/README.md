@@ -9,12 +9,23 @@ npm run build:extension
 npm run verify
 npm run lint
 npm run test:unit
+npm run test:coverage
+npm run release:gate -- 3.1.6 --candidate
 ```
 
 - `npm run build:extension` runs `scripts/build-extension.cjs`.
 - `npm run verify` runs the full release-safety suite in `scripts/verify-release.mjs`.
 - `npm run lint` runs ESLint across the repository.
 - `npm run test:unit` runs Vitest tests.
+- `npm run test:coverage` runs the same tests with the enforced coverage floor.
+- `scripts/prepare-release.mjs` is an internal tag-workflow helper. It updates
+  every release-version source from the validated tag and accepts the tagged
+  commit timestamp for deterministic retries. Maintainers do not run it before
+  tagging.
+- `npm run release:gate -- MAJOR.MINOR.PATCH --candidate` is an optional
+  Linux/AMD64 parity diagnostic for release-code changes. It prepares the target
+  version only inside its isolated clone, then runs verification, browser E2E,
+  relay build, and health smoke. It is not required for Markdown-only changes.
 
 ## build-extension.cjs
 
@@ -59,9 +70,9 @@ npm run verify
 
 It currently runs:
 
-- Vitest unit tests.
-- Server ops, route, WebSocket, and rate-limiter checks.
-- Episode parser, title privacy, audio settings, popup cooldown, names, and content-video-finder checks.
+- Vitest unit tests with coverage thresholds for importable source modules.
+- Server route and WebSocket integration checks.
+- Episode parser, title privacy, host access, blacklist, names, rate limiting, audio settings, popup cooldown, and content-video-finder checks.
 - JavaScript syntax checks for server and extension entry points.
 - Extension and website locale coverage checks.
 - ESLint.
@@ -72,18 +83,43 @@ It currently runs:
 
 | Script | Purpose |
 |:---|:---|
-| `test-server-ops.mjs` | Health payload and admin metrics helpers |
 | `test-server-routes.mjs` | HTTP health routes, caching, and admin metrics access |
 | `test-server-ws.mjs` | Socket.IO relay integration, including host-control behavior |
-| `test-rate-limiter.mjs` | Rate-limiter map and cooldown behavior |
-| `test-episode-utils.mjs` | Episode-title extraction and comparison |
-| `test-title-privacy.mjs` | Tab/media title privacy sanitization |
 | `test-audio-settings.mjs` | Audio settings defaults and normalization |
 | `test-popup-refresh-cooldown.mjs` | Popup refresh throttling behavior |
-| `test-names.mjs` | Generated username format and coverage |
 | `test-content-video-finder.cjs` | Content-script video selection helpers |
 | `test-locales.cjs` | Extension runtime and browser-store locale coverage |
 | `test-website-locales.mjs` | Website locale coverage |
+
+## Coverage Boundary
+
+`vitest.config.mjs` covers importable modules executed by Vitest and enforces
+both global and risk-specific per-module floors. Browser entry points
+(`background.js`, `content.js`, and `popup.js`) and server process startup are
+deliberately measured by extension E2E and integration tests instead of being
+reported as zero-coverage unit code.
+`scripts/check-coverage-inventory.mjs` additionally requires every JavaScript
+source file to be classified as V8-covered or assigned to a named external
+integration gate. New unclassified files fail `npm run verify`.
+
+## Published Release Verification
+
+Before publication, the release workflow validates the exact annotated SemVer
+tag and required checks, prepares and validates every version source, pushes
+the generated version commit directly to `main`, and checks out that exact
+commit for all verification and builds. It then creates a draft release,
+publishes and smoke-tests the relay image, and only afterwards makes the GitHub
+Release public. The published-asset gate runs:
+
+```bash
+node scripts/verify-published-release.mjs vMAJOR.MINOR.PATCH --repo Shik3i/KoalaSync
+```
+
+The verifier requires the exact three release assets, validates SHA-256 hashes,
+annotated-tag ancestry, Chrome/Firefox manifest versions and runtime injection,
+archive parity, unsafe/development-only paths, and GitHub attestations. For a
+local archive-only diagnosis, pass `--asset-dir PATH`; this deliberately skips
+GitHub inventory and attestation checks.
 
 ## Do Not Break
 

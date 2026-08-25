@@ -1,4 +1,4 @@
-import { CAPABILITIES, MAX_MEDIA_TIME } from './shared/constants.js';
+import { CAPABILITIES, MAX_MEDIA_TIME } from '../shared/constants.js';
 
 export function validateCanonicalMediaState(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;

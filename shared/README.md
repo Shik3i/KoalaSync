@@ -65,7 +65,7 @@ For the complete event list, read the `EVENTS` object in [`constants.js`](consta
 - `HEARTBEAT_INTERVAL`: content heartbeat interval in milliseconds.
 - `FORCE_SYNC_TIMEOUT`: max wait for force-sync ACKs.
 - `EPISODE_LOBBY_TIMEOUT`: max wait for episode-lobby readiness.
-- `MAX_MEDIA_TIME`: shared relay/extension upper bound for synchronized media positions.
+- `MAX_MEDIA_TIME`: shared relay/extension upper bound, in seconds, for synchronized media positions.
 
 ## Do Not Break
 

@@ -67,6 +67,18 @@ describe('canonical media state', () => {
         expect(target.mediaState).toMatchObject({ revision: 5, currentTime: 200, updatedBy: 'b' });
     });
 
+    it('ignores client-supplied playback state while seeking', () => {
+        const target = room({ revision: 3, playbackState: 'paused', currentTime: 10, updatedAt: 1000, updatedBy: 'a' });
+        expect(updateMediaStateFromControl(
+            target,
+            EVENTS.SEEK,
+            { targetTime: 100, playbackState: 'playing' },
+            'b',
+            { now: 2000, senderPlaybackState: 'playing' }
+        )).toBe(true);
+        expect(target.mediaState).toMatchObject({ revision: 4, playbackState: 'paused', currentTime: 100 });
+    });
+
     it('uses an observed sender state only to establish an otherwise ambiguous first SEEK', () => {
         const target = room();
         expect(updateMediaStateFromControl(target, EVENTS.SEEK, { targetTime: 50 }, 'a', { now: 1000 })).toBe(false);
