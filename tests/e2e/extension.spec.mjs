@@ -18,7 +18,9 @@ const NodeWebSocket = require('ws');
 /** Runs code in an extension page, where the privileged chrome.* APIs exist. */
 async function withExtensionPage(context, extensionId, fn) {
     const page = await context.newPage();
-    await page.goto(`chrome-extension://${extensionId}/popup.html`);
+    // popup.html performs normal connection/settings initialization. Using it as
+    // a test transport can race and overwrite a just-seeded custom relay URL.
+    await page.goto(`chrome-extension://${extensionId}/audio-options.html`);
     const result = await fn(page);
     await page.close();
     return result;
@@ -60,6 +62,20 @@ async function getExtensionState(context, extensionId, message) {
         request => chrome.runtime.sendMessage(request),
         message
     ));
+}
+
+async function expectConnectedRoom(context, extensionId, roomId, expected = {}) {
+    try {
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+            .toMatchObject({ status: 'connected', roomId, ...expected });
+    } catch (error) {
+        const [status, logs] = await Promise.all([
+            getExtensionState(context, extensionId, { type: 'GET_STATUS' }).catch(() => null),
+            getExtensionState(context, extensionId, { type: 'GET_LOGS' }).catch(() => [])
+        ]);
+        console.error(`Extension connection diagnostics: ${JSON.stringify({ status, logs: logs?.slice?.(0, 20) || logs })}`);
+        throw error;
+    }
 }
 
 async function applyCanonicalMediaState(context, extensionId, tabId, mediaState) {
@@ -469,8 +485,7 @@ test('recovers relay ROOM_DATA through background retries into the packed player
             username: 'canonical-receiver'
         }));
 
-        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
-            .toMatchObject({ status: 'connected', roomId, queuedLogicalEvents: 0 });
+        await expectConnectedRoom(context, extensionId, roomId, { queuedLogicalEvents: 0 });
         await expect.poll(() => page.locator('#player').evaluate(video =>
             Number(video.dataset.koalaCanonicalPlayAttempts || '0')))
             .toBeGreaterThanOrEqual(2);
@@ -544,6 +559,7 @@ test('newer mixed-version playback supersedes an in-flight canonical recovery', 
             password: '',
             username: 'current-superseded'
         }));
+        await expectConnectedRoom(context, extensionId, roomId, { queuedLogicalEvents: 0 });
         await expect.poll(() => page.locator('#player').evaluate(video =>
             Number(video.dataset.koalaCanonicalPlayAttempts || '0')))
             .toBe(1);
@@ -592,8 +608,7 @@ test('keeps canonical media state current while the capable extension is solo', 
             password: '',
             username: 'current-solo'
         }));
-        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
-            .toMatchObject({ status: 'connected', roomId });
+        await expectConnectedRoom(context, extensionId, roomId);
 
         expect(await sendServerCommand(context, extensionId, tabId, 'pause', { currentTime: 8 }))
             .toMatchObject({ status: 'ok' });
