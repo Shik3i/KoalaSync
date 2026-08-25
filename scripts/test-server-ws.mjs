@@ -505,8 +505,10 @@ try {
     const msgLateJoiner = await c();
     const msgLateRoom = await j(msgLateJoiner, msgateRid, 'msg-late');
     assert.equal(msgLateRoom.mediaState.revision, sequencedBaseline.revision);
-    assert.equal(msgLateRoom.mediaState.currentTime, sequencedBaseline.currentTime,
-        'late joiner receives the same state accepted by live receivers');
+    assert.equal(msgLateRoom.mediaState.playbackState, sequencedBaseline.playbackState);
+    assert.ok(msgLateRoom.mediaState.currentTime >= sequencedBaseline.currentTime
+        && msgLateRoom.mediaState.currentTime < sequencedBaseline.currentTime + 5,
+        'late joiner receives the accepted playing state with normal snapshot projection');
 
     const validationBaseline = { ...mod.rooms.get(msgateRid).mediaState };
     for (const invalidPayload of [{ targetTime: null }, { targetTime: '50' }, { targetTime: {} }, {}]) {
