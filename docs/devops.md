@@ -9,7 +9,10 @@ KoalaSync uses a gated release pipeline triggered by immutable Git tags.
 > [!IMPORTANT]
 > **DO NOT** edit individual version files or tag an unmerged branch. Run
 > `npm run prepare:release -- MAJOR.MINOR.PATCH` on a branch, review all generated
-> source changes, and merge them through a pull request with successful CI.
+> source changes, then run the exact Linux/AMD64 candidate gate before opening
+> or updating the pull request:
+> `npm run release:gate -- MAJOR.MINOR.PATCH --candidate`.
+> Merge only through a pull request with successful CI.
 
 ### How it Works
 
@@ -44,18 +47,28 @@ To release a new version (e.g., `v2.5.1`), follow these steps:
    git pull origin main
    git checkout -b release/v2.5.1
    npm run prepare:release -- 2.5.1
-   npm run verify
+   git add <reviewed-release-paths>
+   git commit -m "release: prepare v2.5.1"
+   npm run release:gate -- 2.5.1 --candidate
    ```
 2. Commit the release notes and prepared version changes, open a pull request,
    and wait for required `verify`, `node20`, and `e2e` checks.
-3. After the PR is merged, fast-forward local `main` and create an **annotated**
-   tag on that exact commit:
+3. After the PR is merged, fast-forward local `main`, wait for `verify`,
+   `node20`, and `e2e` on the merge commit, then run the final local gate. It
+   refuses a dirty tree, a non-`main` branch, a commit different from
+   `origin/main`, missing/failed required checks, version drift, non-AMD64
+   Linux browser execution, or an unhealthy relay container:
    ```bash
    git checkout main
    git pull --ff-only origin main
+   npm run release:gate -- 2.5.1
+   ```
+4. Only after that command succeeds, create an **annotated** tag on the exact
+   checked commit:
+   ```bash
    git tag -a v2.5.1 -m "Release v2.5.1"
    ```
-4. Verify the tag target, then push it once:
+5. Verify the tag target, then push it once:
    ```bash
    test "$(git rev-parse v2.5.1^{commit})" = "$(git rev-parse origin/main)"
    git push origin v2.5.1
@@ -63,3 +76,8 @@ To release a new version (e.g., `v2.5.1`), follow these steps:
 
 Never reuse or move a published tag. Monitor every release job and verify both
 the public GitHub assets and GHCR digest before calling the release complete.
+
+`npm run verify` or a host-only Playwright run is not a substitute for
+`release:gate`. The gate pins the official Playwright image to the exact
+lockfile version and forces `linux/amd64`, matching GitHub's Ubuntu runner even
+when the developer host is macOS or ARM64.
