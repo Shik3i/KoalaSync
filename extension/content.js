@@ -91,6 +91,7 @@
     // While a timer exists, matching native events are consumed and not relayed.
     // Timers self-clean after 300ms if the native event never fires.
     let _suppressTimers = {};
+    const canonicalRestorePlaySuppressions = new Set();
     let canonicalMediaApplyGeneration = 0;
     let canonicalSupersedingLocalState = null;
 
@@ -106,6 +107,25 @@
             clearTimeout(_suppressTimers[state]);
             delete _suppressTimers[state];
         }
+    }
+
+    function holdCanonicalRestorePlaySuppression() {
+        const hold = { timeout: null };
+        hold.timeout = setTimeout(() => canonicalRestorePlaySuppressions.delete(hold), 5000);
+        canonicalRestorePlaySuppressions.add(hold);
+        return hold;
+    }
+
+    function releaseCanonicalRestorePlaySuppression(hold) {
+        if (!canonicalRestorePlaySuppressions.delete(hold)) return;
+        clearTimeout(hold.timeout);
+    }
+
+    function consumeCanonicalRestorePlaySuppression() {
+        const hold = canonicalRestorePlaySuppressions.values().next().value;
+        if (!hold) return false;
+        releaseCanonicalRestorePlaySuppression(hold);
+        return true;
     }
 
     // --- Seek Relay Filtering ---
@@ -1237,14 +1257,25 @@
         return canonicalMediaApplyGeneration;
     }
 
-    function cancelCanonicalMediaApply(action = null, video = null, preserveLocalState = false) {
+    function cancelCanonicalMediaApply(action = null, video = null, preserveLocalState = false, data = null) {
         canonicalMediaApplyGeneration++;
-        if ((action === EVENTS.PLAY || action === EVENTS.PAUSE || action === EVENTS.SEEK) && video) {
+        const storesPlaybackIntent = action === EVENTS.PLAY
+            || action === EVENTS.PAUSE
+            || action === EVENTS.SEEK
+            || action === EVENTS.FORCE_SYNC_PREPARE
+            || action === EVENTS.FORCE_SYNC_EXECUTE;
+        if (storesPlaybackIntent) {
+            const payloadTime = Number.isFinite(data?.targetTime)
+                ? data.targetTime
+                : (Number.isFinite(data?.currentTime) ? data.currentTime : null);
+            const videoTime = video ? getSyncCurrentTime(video) : null;
             canonicalSupersedingLocalState = {
-                playbackState: action === EVENTS.PLAY
+                playbackState: action === EVENTS.PLAY || action === EVENTS.FORCE_SYNC_EXECUTE
                     ? 'playing'
-                    : (action === EVENTS.PAUSE ? 'paused' : (video.paused ? 'paused' : 'playing')),
-                currentTime: action === EVENTS.SEEK ? getSyncCurrentTime(video) : null
+                    : (action === EVENTS.PAUSE || action === EVENTS.FORCE_SYNC_PREPARE
+                        ? 'paused'
+                        : (video ? (video.paused ? 'paused' : 'playing') : canonicalSupersedingLocalState?.playbackState)),
+                currentTime: payloadTime ?? videoTime
             };
         } else if (!preserveLocalState) {
             canonicalSupersedingLocalState = null;
@@ -1257,8 +1288,9 @@
     }
 
     async function restoreSupersedingLocalState(video) {
+        const restorationGeneration = canonicalMediaApplyGeneration;
         const state = canonicalSupersedingLocalState;
-        if (!state || !video) return;
+        if (!state || !video || destroyed || video.isConnected === false) return;
 
         if (state.playbackState === 'paused' && !video.paused) {
             _setSuppress('paused');
@@ -1273,12 +1305,20 @@
         }
         if (state.playbackState === 'playing' && video.paused) {
             _setSuppress('playing');
+            const playSuppression = holdCanonicalRestorePlaySuppression();
             try {
                 await video.play();
             } catch (error) {
                 _clearSuppress('playing');
                 reportLog(`Could not restore locally superseding playback: ${error.message}`, 'warn');
+            } finally {
+                releaseCanonicalRestorePlaySuppression(playSuppression);
             }
+        }
+        // A delayed play() can settle after an even newer command already ran.
+        // Re-assert that newest intent so the old promise cannot win last.
+        if (!destroyed && restorationGeneration !== canonicalMediaApplyGeneration) {
+            await restoreSupersedingLocalState(video);
         }
     }
 
@@ -1500,7 +1540,12 @@
             const preserveLocalState = message.reason === `local ${EVENTS.PLAY}`
                 || message.reason === `local ${EVENTS.PAUSE}`
                 || message.reason === `local ${EVENTS.SEEK}`;
-            cancelCanonicalMediaApply(null, null, preserveLocalState);
+            cancelCanonicalMediaApply(
+                message.action,
+                findVideo(),
+                preserveLocalState,
+                message.payload
+            );
             sendResponse({ status: 'cancelled' });
             return true;
         }
@@ -1552,7 +1597,7 @@
             }
 
             if (syncActions.includes(action)) {
-                cancelCanonicalMediaApply();
+                cancelCanonicalMediaApply(action, findVideo(), false, payload);
             }
             
             if (action === EVENTS.PLAY) {
@@ -1863,6 +1908,7 @@
             _clearSuppress(eventState);
             return;
         }
+        if (action === EVENTS.PLAY && consumeCanonicalRestorePlaySuppression()) return;
 
         if (action === EVENTS.PLAY || action === EVENTS.PAUSE) {
             cancelCanonicalMediaApply(action, video);
@@ -2327,6 +2373,8 @@
 
         for (const timer of Object.values(_suppressTimers)) clearTimeout(timer);
         _suppressTimers = {};
+        for (const hold of canonicalRestorePlaySuppressions) clearTimeout(hold.timeout);
+        canonicalRestorePlaySuppressions.clear();
         for (const timer of lifecycleTimeouts) clearTimeout(timer);
         lifecycleTimeouts.clear();
         for (const timer of seekPollTimers) clearInterval(timer);

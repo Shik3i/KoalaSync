@@ -49,10 +49,11 @@ try {
 
     // --- Pool: 2 peers in 1 room, test everything ---
     const rid = 't-'+Date.now();
-    const p1 = await c(), p2 = await c();
+    const p1 = await c(), p2 = await c(), p3 = await c();
 
     // Room + join
-    await j(p1, rid, 'a'); await j(p2, rid, 'b'); p1._m.length = p2._m.length = 0;
+    await j(p1, rid, 'a'); await j(p2, rid, 'b'); await j(p3, rid, 'c');
+    p1._m.length = p2._m.length = p3._m.length = 0;
 
     // Relay
     s(p1,'play',{currentTime:10}); await w(p2,'play');
@@ -68,7 +69,33 @@ try {
     s(p2,'event_ack',{targetId:'a',actionTimestamp:Date.now()}); await w(p1,'event_ack');
 
     // Lobby
-    s(p1,'episode_lobby',{expectedTitle:'S01E01'}); await w(p2,'episode_lobby');
+    s(p1,'episode_lobby',{expectedTitle:'S01E01'});
+    await w(p2,'episode_lobby'); await w(p3,'episode_lobby');
+    s(p3,'episode_lobby',{expectedTitle:'S01E02'});
+    const authoritativeLobby = await w(p3, 'episode_lobby');
+    assert.equal(authoritativeLobby.authoritative, true,
+        'competing initiator receives an authoritative lobby correction');
+    assert.equal(authoritativeLobby.expectedTitle, 'S01E01');
+    assert.deepEqual(authoritativeLobby.readyPeers, ['a']);
+    let competingLobbyDropped = false;
+    try { await w(p2, 'episode_lobby', 500); } catch { competingLobbyDropped = true; }
+    assert.ok(competingLobbyDropped, 'relay drops a competing lobby while one is active');
+    assert.equal(mod.rooms.get(rid).activeLobby.expectedTitle, 'S01E01');
+
+    s(p3,'episode_ready',{expectedTitle:'S01E02',title:'S01E02'});
+    let staleReadyDropped = false;
+    try { await w(p2, 'episode_ready', 500); } catch { staleReadyDropped = true; }
+    assert.ok(staleReadyDropped, 'relay drops ready frames for an obsolete lobby');
+    assert.deepEqual(mod.rooms.get(rid).activeLobby.readyPeers, ['a']);
+
+    // Missing expectedTitle remains accepted for old-extension compatibility.
+    s(p2,'episode_ready',{title:'S01E01'}); await w(p1,'episode_ready');
+    assert.deepEqual(mod.rooms.get(rid).activeLobby.readyPeers, ['a', 'b']);
+
+    s(p3,'leave_room',{}); await w(p1,'peer_status');
+    assert.equal(mod.rooms.get(rid).activeLobby.expectedTitle, 'S01E01',
+        'an unrelated departure does not dissolve a lobby with two peers left');
+    p1._m.length = p2._m.length = 0;
 
     // Leave
     s(p1,'leave_room',{}); const [ev,d]=await a(p2); assert.equal(ev,'peer_status');assert.equal(d.status,'left');

@@ -164,4 +164,19 @@ describe('canonical media state tracker', () => {
         expect(otherRoom.restore(stored, 'room-b')).toBe(false);
         expect(otherRoom.getPending('room-b')).toBeNull();
     });
+
+    it('does not resurrect a pending snapshot that was already applied', () => {
+        const tracker = createCanonicalMediaStateTracker();
+        expect(tracker.restore({
+            roomId: 'room-a',
+            knownRevision: 7,
+            appliedRevision: 7,
+            pending: {
+                roomId: 'room-a',
+                mediaState: state(7),
+                receivedAt: 1_000
+            }
+        }, 'room-a')).toBe(true);
+        expect(tracker.getPending('room-a')).toBeNull();
+    });
 });

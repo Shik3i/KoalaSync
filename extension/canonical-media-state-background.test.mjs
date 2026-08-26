@@ -73,6 +73,8 @@ describe('canonical ROOM_DATA recovery contract', () => {
         const retry = functionBody(backgroundSource, 'scheduleCanonicalMediaRecoveryRetry', 'requestCanonicalMediaRecoveryAttempt');
         expect(retry).toContain('canonicalRecoveryRetryAttempt >= CANONICAL_RECOVERY_RETRY_DELAYS.length');
         expect(retry).toContain('latest?.mediaState.revision !== expectedRevision');
+        const clear = functionBody(backgroundSource, 'clearCanonicalMediaRecovery', 'invalidateChatSession');
+        expect(clear).toContain('canonicalRecoveryApplyInProgress = null');
     });
 
     it('protects intentional desync, active Episode Lobby and queued reconnect intent', () => {
@@ -91,6 +93,8 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(supersede).toContain('canonicalMediaStateTracker.getPending(roomId)');
         expect(supersede).toContain('markCanonicalMediaStateHandled(roomId, pending.mediaState.revision)');
         expect(supersede).toContain("type: 'CANCEL_CANONICAL_MEDIA_STATE'");
+        expect(supersede).toContain('action,');
+        expect(supersede).toContain('payload');
         expect(backgroundSource).toContain('function isCanonicalSupersedingControl(event, data)');
         expect(backgroundSource).toContain('supersedeCanonicalMediaRecovery(`newer ${event}`)');
         expect(backgroundSource).toContain('supersedeCanonicalMediaRecovery(`local ${message.action}`)');
@@ -118,6 +122,10 @@ describe('canonical ROOM_DATA recovery contract', () => {
         expect(contentSource.slice(contentHandlerStart, serverCommandStart))
             .toContain('applyCanonicalMediaState(message.mediaState, applyGeneration).then(sendResponse)');
         expect(contentSource).toContain("message.type === 'CANCEL_CANONICAL_MEDIA_STATE'");
+        expect(contentSource).toContain('cancelCanonicalMediaApply(action, findVideo(), false, payload)');
+        expect(contentSource).toContain('restorationGeneration !== canonicalMediaApplyGeneration');
+        expect(contentSource).toContain('holdCanonicalRestorePlaySuppression()');
+        expect(contentSource).toContain('consumeCanonicalRestorePlaySuppression()');
         expect(contentSource).toContain('cancelCanonicalMediaApply(EVENTS.SEEK, video)');
     });
 });

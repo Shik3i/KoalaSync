@@ -30,10 +30,11 @@ describe('episode lobby completion races', () => {
     it('revalidates the lobby after awaiting settings for a local ready', () => {
         const handler = sourceBetween("message.type === 'EPISODE_READY_LOCAL'", "message.type === 'TITLE_PRIVACY_CHANGED'");
         const awaitIndex = handler.indexOf('const settings = await getSettings()');
-        const guardIndex = handler.indexOf('if (episodeLobby !== lobby)');
+        const guardIndex = handler.indexOf('if (!isCurrentLobbyContext() || settings.roomId !== lobbyRoomId)');
         const mutationIndex = handler.indexOf('lobby.readyPeers.push(peerId)');
 
         expect(handler).toContain('const lobby = episodeLobby');
+        expect(handler).toContain('const isCurrentLobbyContext = () => episodeLobby === lobby');
         expect(awaitIndex).toBeGreaterThan(-1);
         expect(guardIndex).toBeGreaterThan(awaitIndex);
         expect(mutationIndex).toBeGreaterThan(guardIndex);
@@ -47,5 +48,40 @@ describe('episode lobby completion races', () => {
         expect(roomClearIndex).toBeGreaterThan(-1);
         expect(lobbyClearIndex).toBeGreaterThan(roomClearIndex);
         expect(execute).toContain('chrome.storage.session.set({ currentRoom })');
+    });
+
+    it('validates restored and authoritative lobby state before using readyPeers', () => {
+        expect(backgroundSource).toContain('function normalizeEpisodeLobby(value, fallbackCreatedAt = Date.now(), allowedPeerIds = null)');
+        expect(backgroundSource).toContain('data.currentRoom.activeLobby,');
+        expect(backgroundSource).toContain('const authoritativeLobby = normalizeEpisodeLobby(');
+        expect(backgroundSource).toContain('new Set(currentRoom.peers.map(candidate => candidate.peerId))');
+    });
+
+    it('rejects stale or unknown ready senders and correlates new ready frames to the lobby', () => {
+        const remoteReady = sourceBetween('case EVENTS.EPISODE_READY:', 'case EVENTS.EPISODE_LOBBY_CANCEL:');
+        expect(remoteReady).toContain('const senderPresent = currentRoom?.peers?.some');
+        expect(remoteReady).toContain('!sameEpisode(data.expectedTitle, lobby.expectedTitle)');
+
+        const localReady = sourceBetween("message.type === 'EPISODE_READY_LOCAL'", "message.type === 'TITLE_PRIVACY_CHANGED'");
+        expect(localReady).toContain('expectedTitle: lobby.expectedTitle');
+    });
+
+    it('adopts authoritative correction data after the relay rejects a competing lobby', () => {
+        const remoteLobby = sourceBetween('case EVENTS.EPISODE_LOBBY:', 'case EVENTS.EPISODE_READY:');
+        expect(remoteLobby).toContain('data.authoritative === true && Array.isArray(data.readyPeers)');
+        expect(remoteLobby).toContain('currentRoom.activeLobby = incomingLobby');
+    });
+
+    it('counts only ready peers who still participate in lobby completion', () => {
+        const completion = sourceBetween('function checkEpisodeLobbyCompletion()', 'function checkEpisodeLobbyPeerDeparture()');
+        expect(completion).toContain('const participatingPeerIds = new Set(peers');
+        expect(completion).toContain('participatingPeerIds.has(candidate)');
+        expect(completion).toContain('readyParticipatingCount >= participatingPeerIds.size');
+    });
+
+    it('re-evaluates or cancels a lobby when the local peer enters solo mode', () => {
+        const desync = sourceBetween("message.type === 'HCM_DESYNC_STATE'", "message.type === 'LEAVE_ROOM'");
+        expect(desync).toContain("cancelEpisodeLobby('Initiator entered solo mode')");
+        expect(desync).toContain('checkEpisodeLobbyCompletion()');
     });
 });

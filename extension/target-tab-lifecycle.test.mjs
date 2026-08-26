@@ -99,8 +99,8 @@ describe('target tab lifecycle', () => {
     });
 
     it('routes every terminal room exit through the full target unhook', () => {
-        const teardownStart = backgroundSource.indexOf('async function endRoomSession');
-        const teardownEnd = backgroundSource.indexOf('async function leaveRoomAfterIdleGrace', teardownStart);
+        const teardownStart = backgroundSource.indexOf('async function performRoomSessionTeardown');
+        const teardownEnd = backgroundSource.indexOf('async function endRoomSession', teardownStart);
         const teardownSource = backgroundSource.slice(teardownStart, teardownEnd);
         expect(teardownSource).toContain('await deactivateTargetTab(currentTabId, currentContentTarget())');
         expect(teardownSource.indexOf('await deactivateTargetTab(currentTabId, currentContentTarget())'))

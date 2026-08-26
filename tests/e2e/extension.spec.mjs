@@ -570,6 +570,74 @@ test('newer server command clears local recovery state before a delayed apply re
     expect(await page.locator('#player').evaluate(video => video.paused)).toBe(false);
 });
 
+test('newer remote pause wins after a stale restoration play settles late', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId: selectedTabId },
+            world: 'ISOLATED',
+            func: () => {
+                const video = document.querySelector('#player');
+                if (!video) throw new Error('late restoration fixture video missing');
+                video.pause();
+                video.currentTime = 0;
+                const nativePlay = video.play.bind(video);
+                video.dataset.koalaDelayedPlayAttempts = '0';
+                Object.defineProperty(video, 'play', {
+                    configurable: true,
+                    value: () => {
+                        const attempt = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
+                        video.dataset.koalaDelayedPlayAttempts = String(attempt);
+                        if (attempt === 1) {
+                            return nativePlay().then(() => new Promise(resolve => setTimeout(resolve, 200)));
+                        }
+                        return new Promise((resolve, reject) => setTimeout(() => {
+                            nativePlay().then(resolve, reject);
+                        }, 400));
+                    }
+                });
+            }
+        });
+    }, tabId));
+
+    const applyPromise = applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 22,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    });
+    await expect.poll(() => page.locator('#player').evaluate(video =>
+        Number(video.dataset.koalaDelayedPlayAttempts || '0'))).toBe(1);
+
+    // Capture a superseding play intent while leaving the fixture paused, so
+    // stale recovery has to enter its delayed restoration play path.
+    await page.locator('#player').evaluate(video => {
+        video.pause();
+    });
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(
+        selectedTabId => chrome.tabs.sendMessage(selectedTabId, {
+            type: 'CANCEL_CANONICAL_MEDIA_STATE',
+            reason: 'local play',
+            action: 'play',
+            payload: { currentTime: 0 }
+        }),
+        tabId
+    ));
+    await expect.poll(() => page.locator('#player').evaluate(video =>
+        Number(video.dataset.koalaDelayedPlayAttempts || '0'))).toBe(2);
+
+    await sendContentServerCommand(context, extensionId, tabId, 'pause');
+    await expect(applyPromise).resolves.toMatchObject({ status: 'superseded' });
+    await page.waitForTimeout(500);
+    expect(await page.locator('#player').evaluate(video => video.paused)).toBe(true);
+});
+
 test('recovers relay ROOM_DATA through background retries into the packed player', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(45_000);
     const relay = await import('../../server/index.js');

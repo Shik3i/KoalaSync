@@ -157,7 +157,7 @@ export function createCanonicalMediaStateTracker() {
             const restoredPending = validateCanonicalMediaState(value.pending?.mediaState);
             if (value.pending?.roomId === roomId
                 && restoredPending
-                && restoredPending.revision >= appliedRevision
+                && restoredPending.revision > appliedRevision
                 && restoredPending.revision >= knownRevision) {
                 pending = {
                     roomId,

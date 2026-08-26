@@ -284,7 +284,7 @@ function removePeerFromRoom(socketId, roomId, reason, { notifyRemainingPeers = t
     // 3.5. Clean up active lobby if a peer leaves
     if (room.activeLobby) {
         room.activeLobby.readyPeers = room.activeLobby.readyPeers.filter(id => id !== peerId);
-        if (room.activeLobby.readyPeers.length <= 1 || room.activeLobby.initiatorPeerId === peerId) {
+        if (room.peers.size <= 1 || room.activeLobby.initiatorPeerId === peerId) {
             room.activeLobby = null; // Dissolve lobby
         }
     }
@@ -415,6 +415,7 @@ io.on('connection', (socket) => {
         const clientCapabilities = normalizeClientCapabilities(payload.clientCapabilities);
 
         if (!roomId || !peerId) return; // Guard: empty or invalid after sanitization
+        if (!socket.connected) return;
 
         try {
             // Protocol check
@@ -450,6 +451,7 @@ io.on('connection', (socket) => {
                 let lockPromise = roomCreationLocks.get(roomId);
                 if (lockPromise) {
                     await lockPromise;
+                    if (!socket.connected) return;
                     room = rooms.get(roomId);
                 }
                 if (!room) {
@@ -511,6 +513,7 @@ io.on('connection', (socket) => {
             let peerLockPromise = peerJoinLocks.get(peerId);
             if (peerLockPromise) {
                 await peerLockPromise;
+                if (!socket.connected) return;
                 room = rooms.get(roomId);
                 if (!room) {
                     socket.emit(EVENTS.ERROR, { message: "Room no longer exists" });
@@ -521,6 +524,7 @@ io.on('connection', (socket) => {
             peerLockPromise = new Promise(resolve => { resolvePeerLock = resolve; });
             peerJoinLocks.set(peerId, peerLockPromise);
             try {
+                if (!socket.connected) return;
                 if (!createdByMe) {
                 if (room.passwordHash) {
                     if (!password || hashPassword(password) !== room.passwordHash) {
@@ -710,6 +714,36 @@ io.on('connection', (socket) => {
                     // Strip undefined keys for clean wire format
                     Object.keys(relayPayload).forEach(k => relayPayload[k] === undefined && delete relayPayload[k]);
 
+                    // The first live lobby owns the room until completion or
+                    // cancellation. Drop concurrent lobby starts and stale ready
+                    // frames instead of letting clients build divergent lobbies.
+                    if (eventName === EVENTS.EPISODE_LOBBY && room.activeLobby) {
+                        log('ROOM', `Dropped competing episode lobby from ${mapping.peerId}`);
+                        socket.emit(EVENTS.EPISODE_LOBBY, {
+                            senderId: room.activeLobby.initiatorPeerId,
+                            peerId: room.activeLobby.initiatorPeerId,
+                            expectedTitle: room.activeLobby.expectedTitle,
+                            readyPeers: [...room.activeLobby.readyPeers],
+                            authoritative: true
+                        });
+                        return;
+                    }
+                    if (eventName === EVENTS.EPISODE_LOBBY && !relayPayload.expectedTitle) {
+                        log('ROOM', `Dropped malformed episode lobby from ${mapping.peerId}`);
+                        return;
+                    }
+                    if (eventName === EVENTS.EPISODE_READY) {
+                        if (!room.activeLobby) {
+                            log('ROOM', `Dropped stale episode ready from ${mapping.peerId}`);
+                            return;
+                        }
+                        if (relayPayload.expectedTitle
+                            && relayPayload.expectedTitle !== room.activeLobby.expectedTitle) {
+                            log('ROOM', `Dropped episode ready for an obsolete lobby from ${mapping.peerId}`);
+                            return;
+                        }
+                    }
+
                     const mediaStateNow = Date.now();
 
                     // Canonical Media State v1: mutate only after rate limiting,
@@ -792,7 +826,7 @@ io.on('connection', (socket) => {
                     socket.to(mapping.roomId).emit(eventName, relayPayload);
 
                     // --- Side-effects: Server-side Episode Lobby Tracking ---
-                    if (eventName === EVENTS.EPISODE_LOBBY && relayPayload.expectedTitle && !room.activeLobby) {
+                    if (eventName === EVENTS.EPISODE_LOBBY && relayPayload.expectedTitle) {
                         room.activeLobby = {
                             expectedTitle: relayPayload.expectedTitle,
                             initiatorPeerId: mapping.peerId,

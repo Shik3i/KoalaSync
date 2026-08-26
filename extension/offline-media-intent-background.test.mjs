@@ -46,8 +46,8 @@ describe('offline media intent background integration', () => {
         expect(canonicalIndex).toBeLessThan(flushIndex);
         expect(roomData).toContain('activeLobby: !!episodeLobby');
         expect(roomData).toContain('desynced: hcmDesynced');
-        expect(roomData).toContain('if (!data?.activeLobby && episodeLobby && !hasQueuedLocalLobby)');
-        expect(roomData).toContain('authoritativeLobby: !!data.activeLobby');
+        expect(roomData).toContain('if (!authoritativeLobby && episodeLobby && !hasQueuedLocalLobby)');
+        expect(roomData).toContain('authoritativeLobby: !!authoritativeLobby');
     });
 
     it('clears queued room intent on failed join, leave and room switch paths', () => {
@@ -59,7 +59,7 @@ describe('offline media intent background integration', () => {
             backgroundSource.indexOf("message.type === 'CLEAR_LOGS'")
         );
         expect(leaveHandler).toContain("endRoomSession({ notifyServer: true, reason: 'Left Room' })");
-        expect(functionBody('endRoomSession', 'leaveRoomAfterIdleGrace')).toContain('forceDisconnect()');
+        expect(functionBody('performRoomSessionTeardown', 'endRoomSession')).toContain('forceDisconnect()');
         const retryHandler = backgroundSource.slice(
             backgroundSource.indexOf("message.type === 'RETRY_CONNECT'"),
             backgroundSource.indexOf("message.type === 'GET_STATUS'")
