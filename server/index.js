@@ -250,8 +250,10 @@ function log(type, message, details = '') {
  * @param {string}  socketId   - The socket.id being removed.
  * @param {string}  roomId     - The room it belongs to.
  * @param {string}  reason     - Log label ('disconnect', 'leave', 'reaper', 'dedupe', 'room-switch').
+ * @param {object}  options
+ * @param {boolean} options.notifyRemainingPeers - Whether to emit room-state updates after removal.
  */
-function removePeerFromRoom(socketId, roomId, reason) {
+function removePeerFromRoom(socketId, roomId, reason, { notifyRemainingPeers = true } = {}) {
     const room = rooms.get(roomId);
     if (!room) return;
 
@@ -275,7 +277,7 @@ function removePeerFromRoom(socketId, roomId, reason) {
     // 3. Notify remaining peers (use io.to so the removed socket itself
     //    doesn't receive it — it has already left or is disconnecting)
     const isPeerStillConnected = Array.from(room.peerData.values()).some(data => data.peerId === peerId);
-    if (!isPeerStillConnected) {
+    if (notifyRemainingPeers && !isPeerStillConnected) {
         io.to(roomId).emit(EVENTS.PEER_STATUS, { peerId, status: 'left' });
     }
 
@@ -325,11 +327,11 @@ function removePeerFromRoom(socketId, roomId, reason) {
             room.hostPeerId = nextPeerData ? nextPeerData.peerId : null;
             room.controlMode = CONTROL_MODES.EVERYONE;
             room.controllers = new Set(room.hostPeerId ? [room.hostPeerId] : []);
-            io.to(roomId).emit(EVENTS.CONTROL_MODE, controlModePayload(room));
+            if (notifyRemainingPeers) io.to(roomId).emit(EVENTS.CONTROL_MODE, controlModePayload(room));
             log('ROOM', `Owner left room ${roomId.substring(0, 3)}*** — fell back to 'everyone', new owner: ${room.hostPeerId}`);
         } else if (wasController) {
             // A co-host left → keep the mode, just broadcast the updated controller list.
-            io.to(roomId).emit(EVENTS.CONTROL_MODE, controlModePayload(room));
+            if (notifyRemainingPeers) io.to(roomId).emit(EVENTS.CONTROL_MODE, controlModePayload(room));
             log('ROOM', `Controller ${peerId} left room ${roomId.substring(0, 3)}***`);
         }
     }
@@ -1111,7 +1113,7 @@ export function cleanupInactiveRooms(now = Date.now()) {
             for (const sid of Array.from(currentRoom.peers)) {
                 const memberSocket = io.sockets?.sockets?.get(sid);
                 if (memberSocket) memberSocket.leave(roomId);
-                removePeerFromRoom(sid, roomId, 'room-timeout');
+                removePeerFromRoom(sid, roomId, 'room-timeout', { notifyRemainingPeers: false });
             }
             rooms.delete(roomId);
             log('CLEANUP', `Deleted room ${roomId.substring(0, 3)}*** (Empty/Inactive)`);

@@ -13,67 +13,81 @@ export function replaceExactly(text, pattern, replacement, label) {
     return text.replace(pattern, replacement);
 }
 
-function writeJson(root, relativePath, update) {
+function stageJson(stagedUpdates, root, relativePath, update) {
     const absolutePath = path.join(root, relativePath);
-    const value = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+    const current = stagedUpdates.has(absolutePath)
+        ? stagedUpdates.get(absolutePath)
+        : fs.readFileSync(absolutePath, 'utf8');
+    const value = JSON.parse(current);
     update(value);
-    fs.writeFileSync(absolutePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    stagedUpdates.set(absolutePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function updateText(root, relativePath, pattern, replacement, label) {
+function stageText(stagedUpdates, root, relativePath, pattern, replacement, label) {
     const absolutePath = path.join(root, relativePath);
-    const current = fs.readFileSync(absolutePath, 'utf8');
-    fs.writeFileSync(absolutePath, replaceExactly(current, pattern, replacement, label), 'utf8');
+    const current = stagedUpdates.has(absolutePath)
+        ? stagedUpdates.get(absolutePath)
+        : fs.readFileSync(absolutePath, 'utf8');
+    stagedUpdates.set(absolutePath, replaceExactly(current, pattern, replacement, label));
 }
 
 export function prepareRelease(version, date = new Date(), root = repoRoot) {
     versionFromTag(`v${version}`);
     const timestamp = date.toISOString().replace(/\.\d{3}Z$/u, 'Z');
-    writeJson(root, 'package.json', value => { value.version = version; });
-    writeJson(root, 'package-lock.json', value => {
+    const stagedUpdates = new Map();
+    stageJson(stagedUpdates, root, 'package.json', value => { value.version = version; });
+    stageJson(stagedUpdates, root, 'package-lock.json', value => {
         value.version = version;
         value.packages[''].version = version;
     });
-    writeJson(root, 'extension/manifest.base.json', value => { value.version = version; });
-    writeJson(root, 'website/version.json', value => {
+    stageJson(stagedUpdates, root, 'extension/manifest.base.json', value => { value.version = version; });
+    stageJson(stagedUpdates, root, 'website/version.json', value => {
         value.version = version;
         value.date = timestamp;
     });
-    updateText(
+    stageText(
+        stagedUpdates,
         root,
         'shared/constants.js',
         /export const APP_VERSION = ["'][^"']+["'];/gu,
         `export const APP_VERSION = "${version}";`,
         'shared/constants.js'
     );
-    updateText(
+    stageText(
+        stagedUpdates,
         root,
         'website/template.html',
         /"softwareVersion": "[^"]+"/gu,
         `"softwareVersion": "${version}"`,
         'website/template.html'
     );
-    updateText(
+    stageText(
+        stagedUpdates,
         root,
         'website/llms.txt',
         /Current website release: .+/gu,
         `Current website release: ${version}`,
         'website/llms.txt'
     );
-    updateText(
+    stageText(
+        stagedUpdates,
         root,
         'README.md',
         /Release-v\d+\.\d+\.\d+-blue/gu,
         `Release-v${version}-blue`,
         'README.md release badge'
     );
-    updateText(
+    stageText(
+        stagedUpdates,
         root,
         'README.md',
         /New v\d+\.\d+\.\d+ Release!/gu,
         `New v${version} Release!`,
         'README.md release banner'
     );
+    for (const [absolutePath, content] of stagedUpdates) {
+        fs.writeFileSync(absolutePath, content, 'utf8');
+    }
     console.log(`Prepared release v${version} at ${timestamp}`);
 }
 

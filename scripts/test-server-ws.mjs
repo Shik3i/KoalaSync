@@ -575,17 +575,22 @@ try {
     assert.equal(mod.rooms.has(msgateRid), false, 'empty-room cleanup removes canonical state with the room');
     // --- Terminal room timeout: coded error + complete membership cleanup ---
     const timeoutClient = await c();
+    const timeoutPeer = await c();
     const timeoutRoomId = 'timeout-'+Date.now();
     await j(timeoutClient, timeoutRoomId, 'timeout-peer');
-    timeoutClient._m.length = 0;
+    await j(timeoutPeer, timeoutRoomId, 'timeout-peer-2');
+    timeoutClient._m.length = timeoutPeer._m.length = 0;
     mod.rooms.get(timeoutRoomId).lastActivity = 0;
     mod.cleanupInactiveRooms(Date.now());
-    const [timeoutEvent, timeoutData] = await a(timeoutClient);
-    assert.equal(timeoutEvent, 'error');
+    const timeoutData = await w(timeoutClient, 'error');
+    const timeoutPeerData = await w(timeoutPeer, 'error');
     assert.equal(timeoutData.code, 'room_closed');
     assert.equal(timeoutData.message, 'Room closed');
+    assert.equal(timeoutPeerData.code, 'room_closed');
+    await delay(80);
+    assert.deepEqual(timeoutClient._m, [], 'terminal room cleanup emits nothing after room_closed');
+    assert.deepEqual(timeoutPeer._m, [], 'terminal room cleanup emits nothing after room_closed');
     assert.equal(mod.rooms.has(timeoutRoomId), false, 'inactive room is deleted');
-    timeoutClient._m.length = 0;
 
     // The same connected socket must be able to join that room again. This
     // proves timeout cleanup removed its stale socketToRoom membership.

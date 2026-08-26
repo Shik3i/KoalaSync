@@ -116,11 +116,17 @@ describe('target tab lifecycle', () => {
         expect(backgroundSource).toContain("data.message === 'Removed from room after inactivity'");
         expect(backgroundSource).toContain('await endRoomSession({ reason: `Room session ended: ${data.message}` });');
 
+        const controlModeStart = backgroundSource.indexOf('case EVENTS.CONTROL_MODE:');
+        const controlModeEnd = backgroundSource.indexOf('case EVENTS.ROOM_LIST:', controlModeStart);
+        expect(backgroundSource.slice(controlModeStart, controlModeEnd)).toContain('if (!currentRoom) break;');
+
         expect(sharedConstantsSource).toContain("ROOM_CLOSED: 'room_closed'");
         expect(sharedConstantsSource).toContain("PEER_TIMED_OUT: 'peer_timed_out'");
         expect(serverSource).toContain('code: ERROR_CODES.ROOM_CLOSED');
         expect(serverSource).toContain('code: ERROR_CODES.PEER_TIMED_OUT');
-        expect(serverSource).toContain("removePeerFromRoom(sid, roomId, 'room-timeout')");
+        expect(serverSource).toContain(
+            "removePeerFromRoom(sid, roomId, 'room-timeout', { notifyRemainingPeers: false })"
+        );
     });
 
     it('does not promote a nested media target without confirmed parent visibility', () => {

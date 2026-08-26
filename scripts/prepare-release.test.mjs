@@ -87,4 +87,16 @@ describe('release preparation helpers', () => {
             .toThrow('vMAJOR.MINOR.PATCH');
         expect(readFixture(root)).toEqual(before);
     });
+
+    it('does not partially update release sources when a later marker is invalid', () => {
+        const root = createReleaseFixture();
+        const llmsPath = path.join(root, 'website/llms.txt');
+        fs.writeFileSync(llmsPath, fs.readFileSync(llmsPath, 'utf8')
+            .replace(/Current website release: .+/u, 'Release marker intentionally missing'), 'utf8');
+        const before = readFixture(root);
+
+        expect(() => prepareRelease('9.8.7', new Date('2030-01-01T00:00:00Z'), root))
+            .toThrow('website/llms.txt must contain exactly one release-version marker');
+        expect(readFixture(root)).toEqual(before);
+    });
 });

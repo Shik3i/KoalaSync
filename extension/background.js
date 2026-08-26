@@ -2172,6 +2172,9 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             break;
         }
         case EVENTS.CONTROL_MODE:
+            // Terminal room teardown is authoritative. Older/custom relays may
+            // still emit a trailing role update after ROOM_CLOSED.
+            if (!currentRoom) break;
             // Host Control Mode changed (toggle or host-leave fallback).
             controlMode = data.controlMode || CONTROL_MODES.EVERYONE;
             hostPeerId = data.hostPeerId || null;
@@ -2239,7 +2242,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             await chatReceiveQueue;
             break;
         }
-        case EVENTS.ERROR:
+        case EVENTS.ERROR: {
             isConnecting = false;
             const terminalRoomError = data.code === ERROR_CODES.ROOM_CLOSED
                 || data.code === ERROR_CODES.PEER_TIMED_OUT
@@ -2274,6 +2277,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             const errStatusMsg = { type: 'JOIN_STATUS', success: false, message: data.message };
             await broadcastJoinStatus(errStatusMsg);
             break;
+        }
         case EVENTS.PLAY:
         case EVENTS.PAUSE:
         case EVENTS.SEEK:
