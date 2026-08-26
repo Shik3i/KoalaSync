@@ -1237,7 +1237,7 @@
         return canonicalMediaApplyGeneration;
     }
 
-    function cancelCanonicalMediaApply(action = null, video = null) {
+    function cancelCanonicalMediaApply(action = null, video = null, preserveLocalState = false) {
         canonicalMediaApplyGeneration++;
         if ((action === EVENTS.PLAY || action === EVENTS.PAUSE || action === EVENTS.SEEK) && video) {
             canonicalSupersedingLocalState = {
@@ -1246,6 +1246,8 @@
                     : (action === EVENTS.PAUSE ? 'paused' : (video.paused ? 'paused' : 'playing')),
                 currentTime: action === EVENTS.SEEK ? getSyncCurrentTime(video) : null
             };
+        } else if (!preserveLocalState) {
+            canonicalSupersedingLocalState = null;
         }
         return canonicalMediaApplyGeneration;
     }
@@ -1495,7 +1497,10 @@
         }
 
         if (message.type === 'CANCEL_CANONICAL_MEDIA_STATE') {
-            cancelCanonicalMediaApply();
+            const preserveLocalState = message.reason === `local ${EVENTS.PLAY}`
+                || message.reason === `local ${EVENTS.PAUSE}`
+                || message.reason === `local ${EVENTS.SEEK}`;
+            cancelCanonicalMediaApply(null, null, preserveLocalState);
             sendResponse({ status: 'cancelled' });
             return true;
         }
@@ -1512,9 +1517,6 @@
         if (message.type === 'SERVER_COMMAND') {
             const { action, payload } = message;
             let actionCompleted = false;
-            if ([EVENTS.PLAY, EVENTS.PAUSE, EVENTS.SEEK, EVENTS.FORCE_SYNC_PREPARE, EVENTS.FORCE_SYNC_EXECUTE].includes(action)) {
-                cancelCanonicalMediaApply();
-            }
 
             // Host Control Mode: while watching on our own (desynced), don't apply
             // host commands. Only ACK FORCE_SYNC_PREPARE — that's the one the host's
@@ -1547,6 +1549,10 @@
                     }
                     return;
                 }
+            }
+
+            if (syncActions.includes(action)) {
+                cancelCanonicalMediaApply();
             }
             
             if (action === EVENTS.PLAY) {

@@ -87,6 +87,18 @@ async function applyCanonicalMediaState(context, extensionId, tabId, mediaState)
     }, { tabId, mediaState }));
 }
 
+async function sendContentServerCommand(context, extensionId, tabId, action, payload = {}) {
+    return withExtensionPage(context, extensionId, page => page.evaluate(async ({ tabId, action, payload }) => {
+        return chrome.tabs.sendMessage(tabId, {
+            type: 'SERVER_COMMAND',
+            action,
+            payload,
+            actionTimestamp: Date.now(),
+            commandSenderId: 'e2e-newer-command'
+        });
+    }, { tabId, action, payload }));
+}
+
 async function connectLegacyRelayClient(port) {
     const socket = new NodeWebSocket(
         `ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket&version=3.1.3&token=${OFFICIAL_SERVER_TOKEN}`
@@ -494,6 +506,68 @@ test('local media input cancels an in-flight canonical recovery', async ({ conte
     await page.waitForTimeout(700);
     expect(await page.locator('#player').evaluate(video => video.paused)).toBe(true);
     expect(await page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(9);
+});
+
+test('newer server command clears local recovery state before a delayed apply resolves', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId: selectedTabId },
+            world: 'ISOLATED',
+            func: () => {
+                const video = document.querySelector('#player');
+                if (!video) throw new Error('canonical server-supersession fixture video missing');
+                video.pause();
+                video.currentTime = 0;
+                const nativePlay = video.play.bind(video);
+                video.dataset.koalaDelayedPlayAttempts = '0';
+                Object.defineProperty(video, 'play', {
+                    configurable: true,
+                    value: () => {
+                        const attempts = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
+                        video.dataset.koalaDelayedPlayAttempts = String(attempts);
+                        return nativePlay().then(() => new Promise(resolve => setTimeout(resolve, 400)));
+                    }
+                });
+            }
+        });
+    }, tabId));
+
+    let applyResponse = null;
+    const applyPromise = applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 21,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    }).then(response => {
+        applyResponse = response;
+        return response;
+    });
+    await expect.poll(async () => ({
+        attempts: await page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaDelayedPlayAttempts || '0')),
+        response: applyResponse
+    })).toMatchObject({ attempts: 1, response: null });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(false);
+
+    await page.locator('#player').evaluate(video => {
+        video.pause();
+        video.currentTime = 10;
+    });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(true);
+    await sendContentServerCommand(context, extensionId, tabId, 'play');
+
+    await expect(applyPromise).resolves.toMatchObject({ status: 'superseded' });
+    await page.waitForTimeout(700);
+    expect(await page.locator('#player').evaluate(video =>
+        Number(video.dataset.koalaDelayedPlayAttempts || '0'))).toBe(2);
+    expect(await page.locator('#player').evaluate(video => video.paused)).toBe(false);
 });
 
 test('recovers relay ROOM_DATA through background retries into the packed player', async ({ context, extensionId, baseURL }) => {
