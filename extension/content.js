@@ -1352,25 +1352,28 @@
             // starting. Both paths reuse the same site/page-API abstractions and
             // native-event suppression as ordinary remote commands.
             if (mediaState.playbackState === 'paused' && !video.paused) {
-                if (!await tryMediaAction(EVENTS.PAUSE)) {
+                const pauseApplied = await tryMediaAction(EVENTS.PAUSE);
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+                if (!pauseApplied) {
                     return { status: 'apply_failed', reason: 'pause_action_failed' };
                 }
-                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             }
             if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             if (shouldSeek) {
                 _setSuppress('seek');
-                if (!await tryMediaAction(EVENTS.SEEK, { targetTime: mediaState.currentTime })) {
+                const seekApplied = await tryMediaAction(EVENTS.SEEK, { targetTime: mediaState.currentTime });
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+                if (!seekApplied) {
                     return { status: 'apply_failed', reason: 'seek_action_failed' };
                 }
-                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             }
             if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             if (mediaState.playbackState === 'playing' && video.paused) {
-                if (!await tryMediaAction(EVENTS.PLAY)) {
+                const playApplied = await tryMediaAction(EVENTS.PLAY);
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+                if (!playApplied) {
                     return { status: 'apply_failed', reason: 'play_action_failed' };
                 }
-                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
             }
             const verified = await pollCanonicalMediaState(mediaState, startedAt, applyGeneration);
             if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();

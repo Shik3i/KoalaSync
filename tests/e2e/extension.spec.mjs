@@ -451,7 +451,15 @@ test('local media input cancels an in-flight canonical recovery', async ({ conte
                     value: () => {
                         const attempts = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
                         video.dataset.koalaDelayedPlayAttempts = String(attempts);
-                        return nativePlay().then(() => new Promise(resolve => setTimeout(resolve, 400)));
+                        return nativePlay().then(() => new Promise((resolve, reject) => setTimeout(() => {
+                            if (video.paused) {
+                                const error = new Error('play interrupted by local pause');
+                                error.name = 'AbortError';
+                                reject(error);
+                            } else {
+                                resolve();
+                            }
+                        }, 400)));
                     }
                 });
             }

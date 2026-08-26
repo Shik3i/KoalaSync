@@ -2534,18 +2534,23 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             }
             break;
         case EVENTS.EPISODE_READY:
-            if (episodeLobby && data.senderId) {
-                if (!episodeLobby.readyPeers.includes(data.senderId)) {
-                    episodeLobby.readyPeers.push(data.senderId);
+            {
+                const lobby = episodeLobby;
+                if (!lobby || !data.senderId) break;
+                let readyAdded = false;
+                if (!lobby.readyPeers.includes(data.senderId)) {
+                    lobby.readyPeers.push(data.senderId);
+                    readyAdded = true;
                     persistEpisodeLobby();
                     broadcastLobbyUpdate();
-                    addLog(`Episode ready from ${data.senderId} (${episodeLobby.readyPeers.length})`, 'info');
-                    checkEpisodeLobbyCompletion();
+                    addLog(`Episode ready from ${data.senderId} (${lobby.readyPeers.length})`, 'info');
                 }
+                const readyPeers = [...lobby.readyPeers];
                 if (currentRoom?.activeLobby) {
-                    currentRoom.activeLobby.readyPeers = [...episodeLobby.readyPeers];
+                    currentRoom.activeLobby.readyPeers = readyPeers;
                     if (storageInitialized) chrome.storage.session.set({ currentRoom });
                 }
+                if (readyAdded) checkEpisodeLobbyCompletion();
             }
             break;
         case EVENTS.EPISODE_LOBBY_CANCEL:
@@ -2698,6 +2703,10 @@ function cancelEpisodeLobby(reason) {
 function executeEpisodeLobby() {
     if (!episodeLobby) return;
     const title = episodeLobby.expectedTitle;
+    if (currentRoom) {
+        currentRoom.activeLobby = null;
+        if (storageInitialized) chrome.storage.session.set({ currentRoom });
+    }
     clearEpisodeLobbyState();
     addLog(`Episode lobby complete: Starting "${title}" via Force Sync`, 'success');
 
@@ -5259,15 +5268,24 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
         }
         // Content script confirmed it loaded the lobby episode
-        if (episodeLobby && message.payload && sameEpisode(message.payload.title, episodeLobby.expectedTitle)) {
-            if (!episodeLobby.readyPeers.includes(peerId)) {
+        const lobby = episodeLobby;
+        if (lobby && message.payload && sameEpisode(message.payload.title, lobby.expectedTitle)) {
+            if (!lobby.readyPeers.includes(peerId)) {
                 const settings = await getSettings();
+                if (episodeLobby !== lobby) {
+                    sendResponse({ status: 'ignored_stale_lobby' });
+                    return;
+                }
+                if (lobby.readyPeers.includes(peerId)) {
+                    sendResponse({ status: 'ok' });
+                    return;
+                }
                 const readyTitle = sanitizeSharedTitle(message.payload.title, settings.mediaTitlePrivacyMode);
-                episodeLobby.readyPeers.push(peerId);
+                lobby.readyPeers.push(peerId);
                 persistEpisodeLobby();
                 broadcastLobbyUpdate();
                 emit(EVENTS.EPISODE_READY, { peerId, title: readyTitle });
-                addLog(`Local episode ready: "${readyTitle || episodeLobby.expectedTitle}"`, 'success');
+                addLog(`Local episode ready: "${readyTitle || lobby.expectedTitle}"`, 'success');
                 checkEpisodeLobbyCompletion();
             }
         }
