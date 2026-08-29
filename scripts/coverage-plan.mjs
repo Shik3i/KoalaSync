@@ -1,10 +1,12 @@
 export const VITEST_COVERAGE_INCLUDE = Object.freeze([
     'server/chat.js',
+    'server/media-state.js',
     'server/ops.js',
     'server/rate-limiter.js',
     'shared/blacklist.js',
     'shared/invite-links.js',
     'shared/names.js',
+    'extension/canonical-media-state.js',
     'extension/chat-activity.js',
     'extension/chat-crypto.js',
     'extension/chat-format.js',
@@ -13,6 +15,7 @@ export const VITEST_COVERAGE_INCLUDE = Object.freeze([
     'extension/episode-utils.js',
     'extension/host-access.js',
     'extension/media-frame-target.js',
+    'extension/offline-media-intent.js',
     'extension/title-privacy.js',
     'scripts/release-artifact-checks.mjs'
 ]);

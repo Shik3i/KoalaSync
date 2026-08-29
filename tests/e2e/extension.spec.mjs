@@ -1,4 +1,12 @@
 import { test, expect } from './helpers/extension-fixture.mjs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION } from '../../shared/constants.js';
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(path.join(testDir, '..', '..', 'server', 'package.json'));
+const NodeWebSocket = require('ws');
 
 /**
  * Drives the packed extension itself: real background service worker, real
@@ -10,7 +18,9 @@ import { test, expect } from './helpers/extension-fixture.mjs';
 /** Runs code in an extension page, where the privileged chrome.* APIs exist. */
 async function withExtensionPage(context, extensionId, fn) {
     const page = await context.newPage();
-    await page.goto(`chrome-extension://${extensionId}/popup.html`);
+    // popup.html performs normal connection/settings initialization. Using it as
+    // a test transport can race and overwrite a just-seeded custom relay URL.
+    await page.goto(`chrome-extension://${extensionId}/audio-options.html`);
     const result = await fn(page);
     await page.close();
     return result;
@@ -52,6 +62,109 @@ async function getExtensionState(context, extensionId, message) {
         request => chrome.runtime.sendMessage(request),
         message
     ));
+}
+
+async function expectConnectedRoom(context, extensionId, roomId, expected = {}) {
+    try {
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+            .toMatchObject({ status: 'connected', roomId, ...expected });
+    } catch (error) {
+        const [status, logs] = await Promise.all([
+            getExtensionState(context, extensionId, { type: 'GET_STATUS' }).catch(() => null),
+            getExtensionState(context, extensionId, { type: 'GET_LOGS' }).catch(() => [])
+        ]);
+        console.error(`Extension connection diagnostics: ${JSON.stringify({ status, logs: logs?.slice?.(0, 20) || logs })}`);
+        throw error;
+    }
+}
+
+async function applyCanonicalMediaState(context, extensionId, tabId, mediaState) {
+    return withExtensionPage(context, extensionId, page => page.evaluate(async ({ tabId, mediaState }) => {
+        return chrome.tabs.sendMessage(tabId, {
+            type: 'APPLY_CANONICAL_MEDIA_STATE',
+            mediaState
+        });
+    }, { tabId, mediaState }));
+}
+
+async function sendContentServerCommand(context, extensionId, tabId, action, payload = {}) {
+    return withExtensionPage(context, extensionId, page => page.evaluate(async ({ tabId, action, payload }) => {
+        return chrome.tabs.sendMessage(tabId, {
+            type: 'SERVER_COMMAND',
+            action,
+            payload,
+            actionTimestamp: Date.now(),
+            commandSenderId: 'e2e-newer-command'
+        });
+    }, { tabId, action, payload }));
+}
+
+async function connectLegacyRelayClient(port) {
+    const socket = new NodeWebSocket(
+        `ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket&version=3.1.3&token=${OFFICIAL_SERVER_TOKEN}`
+    );
+    socket.messages = [];
+    socket.on('message', value => socket.messages.push(value.toString()));
+    await new Promise((resolve, reject) => {
+        let timeout;
+        const onError = error => {
+            clearTimeout(timeout);
+            socket.off('open', onOpen);
+            reject(new Error(`legacy relay connection failed: ${error.message}`));
+        };
+        const onOpen = () => {
+            clearTimeout(timeout);
+            socket.off('error', onError);
+            resolve();
+        };
+        timeout = setTimeout(() => {
+            socket.off('open', onOpen);
+            socket.off('error', onError);
+            reject(new Error('legacy relay connection timed out'));
+        }, 5000);
+        socket.once('error', onError);
+        socket.once('open', onOpen);
+    });
+    socket.send('40');
+    await expect.poll(() => socket.messages.filter(message => message.startsWith('0') || message.startsWith('40')).length).toBeGreaterThanOrEqual(2);
+    socket.messages.length = 0;
+    return socket;
+}
+
+function sendLegacyRelayEvent(socket, event, data = {}) {
+    socket.send(`42${JSON.stringify([event, data])}`);
+}
+
+async function waitForLegacyRelayEvent(socket, event, timeoutMs = 10_000) {
+    await expect.poll(() => socket.messages.some(message => {
+        if (!message.startsWith('42')) return false;
+        try { return JSON.parse(message.substring(2))[0] === event; } catch { return false; }
+    }), { timeout: timeoutMs }).toBe(true);
+    const index = socket.messages.findIndex(message => {
+        if (!message.startsWith('42')) return false;
+        try { return JSON.parse(message.substring(2))[0] === event; } catch { return false; }
+    });
+    return JSON.parse(socket.messages.splice(index, 1)[0].substring(2))[1];
+}
+
+async function joinLegacyRelayRoom(socket, roomId, peerId) {
+    sendLegacyRelayEvent(socket, 'join_room', { roomId, peerId, protocolVersion: PROTOCOL_VERSION });
+    return waitForLegacyRelayEvent(socket, 'room_data');
+}
+
+async function terminateExtensionServiceWorker(context, extensionId, page) {
+    const session = await context.newCDPSession(page);
+    try {
+        const { targetInfos } = await session.send('Target.getTargets');
+        const target = targetInfos.find(candidate =>
+            candidate.type === 'service_worker'
+            && candidate.url.startsWith(`chrome-extension://${extensionId}/`)
+        );
+        if (!target) throw new Error('extension service worker target not found');
+        await session.send('Target.closeTarget', { targetId: target.targetId });
+    } finally {
+        await session.detach();
+    }
 }
 
 async function setAudioSettings(context, extensionId, settings) {
@@ -261,6 +374,462 @@ test('applies remote play, pause and seek to the framed player', async ({ contex
         () => page.evaluate(() => document.querySelector('iframe').contentDocument.querySelector('video').currentTime),
         { message: 'remote seek should move the framed player' }
     ).toBeGreaterThan(5);
+});
+
+test('applies canonical recovery without echoing media commands or activity', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    const historyBefore = await getExtensionState(context, extensionId, { type: 'GET_HISTORY' });
+
+    const playingApply = await applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 10,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    });
+    expect(playingApply).toMatchObject({ status: 'applied', revision: 10 });
+    await expect.poll(() => page.locator('#player').evaluate(video => ({
+        paused: video.paused,
+        currentTime: video.currentTime
+    }))).toMatchObject({ paused: false });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(5);
+
+    const pausedApply = await applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 11,
+        playbackState: 'paused',
+        currentTime: 10,
+        updatedBy: 'peer-a'
+    });
+    expect(pausedApply).toMatchObject({ status: 'applied', revision: 11 });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(true);
+    await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(9);
+
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId: selectedTabId },
+            world: 'ISOLATED',
+            func: () => {
+                navigator.mediaSession.metadata = new globalThis.MediaMetadata({ title: 'Series S01E02' });
+            }
+        });
+    }, tabId));
+    const mismatchedApply = await applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 12,
+        playbackState: 'playing',
+        currentTime: 2,
+        updatedBy: 'peer-a',
+        mediaTitle: 'Series S01E01'
+    });
+    expect(mismatchedApply).toMatchObject({ status: 'ignored_episode_mismatch' });
+    await expect.poll(() => page.locator('#player').evaluate(video => ({
+        paused: video.paused,
+        currentTime: video.currentTime
+    }))).toMatchObject({ paused: true });
+    expect(await page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(9);
+
+    // Wait past seek debounce and play/pause coalescing windows. A leaked native
+    // echo would have reached background.js and appeared as user activity by now.
+    await page.waitForTimeout(700);
+    const historyAfter = await getExtensionState(context, extensionId, { type: 'GET_HISTORY' });
+    expect(historyAfter).toEqual(historyBefore);
+});
+
+test('local media input cancels an in-flight canonical recovery', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId: selectedTabId },
+            world: 'ISOLATED',
+            func: () => {
+                const video = document.querySelector('#player');
+                if (!video) throw new Error('canonical local-supersession fixture video missing');
+                video.pause();
+                video.currentTime = 0;
+                const nativePlay = video.play.bind(video);
+                video.dataset.koalaDelayedPlayAttempts = '0';
+                Object.defineProperty(video, 'play', {
+                    configurable: true,
+                    value: () => {
+                        const attempts = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
+                        video.dataset.koalaDelayedPlayAttempts = String(attempts);
+                        return nativePlay().then(() => new Promise((resolve, reject) => setTimeout(() => {
+                            if (video.paused) {
+                                const error = new Error('play interrupted by local pause');
+                                error.name = 'AbortError';
+                                reject(error);
+                            } else {
+                                resolve();
+                            }
+                        }, 400)));
+                    }
+                });
+            }
+        });
+    }, tabId));
+
+    let applyResponse = null;
+    const applyPromise = applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 20,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    }).then(response => {
+        applyResponse = response;
+        return response;
+    });
+    await expect.poll(async () => ({
+        attempts: await page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaDelayedPlayAttempts || '0')),
+        response: applyResponse
+    })).toMatchObject({ attempts: 1, response: null });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(false);
+
+    await page.locator('#player').evaluate(video => {
+        video.pause();
+        video.currentTime = 10;
+    });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime))
+        .toBeGreaterThan(9);
+
+    await expect(applyPromise).resolves.toMatchObject({ status: 'superseded' });
+    await page.waitForTimeout(700);
+    expect(await page.locator('#player').evaluate(video => video.paused)).toBe(true);
+    expect(await page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(9);
+});
+
+test('newer server command clears local recovery state before a delayed apply resolves', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId: selectedTabId },
+            world: 'ISOLATED',
+            func: () => {
+                const video = document.querySelector('#player');
+                if (!video) throw new Error('canonical server-supersession fixture video missing');
+                video.pause();
+                video.currentTime = 0;
+                const nativePlay = video.play.bind(video);
+                video.dataset.koalaDelayedPlayAttempts = '0';
+                Object.defineProperty(video, 'play', {
+                    configurable: true,
+                    value: () => {
+                        const attempts = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
+                        video.dataset.koalaDelayedPlayAttempts = String(attempts);
+                        return nativePlay().then(() => new Promise(resolve => setTimeout(resolve, 400)));
+                    }
+                });
+            }
+        });
+    }, tabId));
+
+    let applyResponse = null;
+    const applyPromise = applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 21,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    }).then(response => {
+        applyResponse = response;
+        return response;
+    });
+    await expect.poll(async () => ({
+        attempts: await page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaDelayedPlayAttempts || '0')),
+        response: applyResponse
+    })).toMatchObject({ attempts: 1, response: null });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(false);
+
+    await page.locator('#player').evaluate(video => {
+        video.pause();
+        video.currentTime = 10;
+    });
+    await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(true);
+    await sendContentServerCommand(context, extensionId, tabId, 'play');
+
+    await expect(applyPromise).resolves.toMatchObject({ status: 'superseded' });
+    await page.waitForTimeout(700);
+    expect(await page.locator('#player').evaluate(video =>
+        Number(video.dataset.koalaDelayedPlayAttempts || '0'))).toBe(2);
+    expect(await page.locator('#player').evaluate(video => video.paused)).toBe(false);
+});
+
+test('newer remote pause wins after a stale restoration play settles late', async ({ context, extensionId, baseURL }) => {
+    const url = `${baseURL}/pages/simple-player.html`;
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.__fixtureReady === true);
+
+    const { tabId } = await selectTargetTab(context, extensionId, url);
+    await expect.poll(() => page.locator('#player').getAttribute('data-koala-attached')).toBe('true');
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId: selectedTabId },
+            world: 'ISOLATED',
+            func: () => {
+                const video = document.querySelector('#player');
+                if (!video) throw new Error('late restoration fixture video missing');
+                video.pause();
+                video.currentTime = 0;
+                const nativePlay = video.play.bind(video);
+                video.dataset.koalaDelayedPlayAttempts = '0';
+                Object.defineProperty(video, 'play', {
+                    configurable: true,
+                    value: () => {
+                        const attempt = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
+                        video.dataset.koalaDelayedPlayAttempts = String(attempt);
+                        if (attempt === 1) {
+                            return nativePlay().then(() => new Promise(resolve => setTimeout(resolve, 200)));
+                        }
+                        return new Promise((resolve, reject) => setTimeout(() => {
+                            nativePlay().then(resolve, reject);
+                        }, 400));
+                    }
+                });
+            }
+        });
+    }, tabId));
+
+    const applyPromise = applyCanonicalMediaState(context, extensionId, tabId, {
+        revision: 22,
+        playbackState: 'playing',
+        currentTime: 6,
+        updatedBy: 'peer-a'
+    });
+    await expect.poll(() => page.locator('#player').evaluate(video =>
+        Number(video.dataset.koalaDelayedPlayAttempts || '0'))).toBe(1);
+
+    // Capture a superseding play intent while leaving the fixture paused, so
+    // stale recovery has to enter its delayed restoration play path.
+    await page.locator('#player').evaluate(video => {
+        video.pause();
+    });
+    await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(
+        selectedTabId => chrome.tabs.sendMessage(selectedTabId, {
+            type: 'CANCEL_CANONICAL_MEDIA_STATE',
+            reason: 'local play',
+            action: 'play',
+            payload: { currentTime: 0 }
+        }),
+        tabId
+    ));
+    await expect.poll(() => page.locator('#player').evaluate(video =>
+        Number(video.dataset.koalaDelayedPlayAttempts || '0'))).toBe(2);
+
+    await sendContentServerCommand(context, extensionId, tabId, 'pause');
+    await expect(applyPromise).resolves.toMatchObject({ status: 'superseded' });
+    await page.waitForTimeout(500);
+    expect(await page.locator('#player').evaluate(video => video.paused)).toBe(true);
+});
+
+test('recovers relay ROOM_DATA through background retries into the packed player', async ({ context, extensionId, baseURL }) => {
+    test.setTimeout(45_000);
+    const relay = await import('../../server/index.js');
+    let legacy = null;
+    try {
+        await relay.startServer(0, '127.0.0.1');
+        const port = relay.httpServer.address().port;
+        const roomId = `e2e-canonical-room-data-${Date.now()}`;
+        legacy = await connectLegacyRelayClient(port);
+        await joinLegacyRelayRoom(legacy, roomId, 'canonical-source');
+        sendLegacyRelayEvent(legacy, 'play', { currentTime: 6, seq: 1, actionTimestamp: 1 });
+        await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
+            .toMatchObject({ revision: 1, playbackState: 'playing', currentTime: 6 });
+
+        const url = `${baseURL}/pages/simple-player.html`;
+        const page = await context.newPage();
+        await page.goto(url);
+        await page.waitForFunction(() => window.__fixtureReady === true);
+        const { tabId } = await selectTargetTab(context, extensionId, url);
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+            await chrome.scripting.executeScript({
+                target: { tabId: selectedTabId },
+                world: 'ISOLATED',
+                func: () => {
+                    const video = document.querySelector('#player');
+                    if (!video) throw new Error('canonical recovery fixture video missing');
+                    const nativePlay = video.play.bind(video);
+                    video.dataset.koalaCanonicalPlayAttempts = '0';
+                    Object.defineProperty(video, 'play', {
+                        configurable: true,
+                        value: () => {
+                            const attempts = Number(video.dataset.koalaCanonicalPlayAttempts || '0') + 1;
+                            video.dataset.koalaCanonicalPlayAttempts = String(attempts);
+                            if (attempts === 1) {
+                                return Promise.reject(Object.assign(
+                                    new Error('audit autoplay rejection'),
+                                    { name: 'NotAllowedError' }
+                                ));
+                            }
+                            return nativePlay();
+                        }
+                    });
+                }
+            });
+        }, tabId));
+        legacy.messages.length = 0;
+
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
+            await chrome.storage.local.set(settings);
+            return chrome.runtime.sendMessage({ type: 'CONNECT' });
+        }, {
+            serverUrl: `ws://127.0.0.1:${port}`,
+            useCustomServer: true,
+            roomId,
+            password: '',
+            username: 'canonical-receiver'
+        }));
+
+        await expectConnectedRoom(context, extensionId, roomId, { queuedLogicalEvents: 0 });
+        await expect.poll(() => page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaCanonicalPlayAttempts || '0')))
+            .toBeGreaterThanOrEqual(2);
+        await expect.poll(() => page.locator('#player').evaluate(video => ({
+            paused: video.paused,
+            currentTime: video.currentTime
+        }))).toMatchObject({ paused: false });
+        await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime))
+            .toBeGreaterThan(5);
+
+        await page.waitForTimeout(700);
+        const recoveryEchoes = legacy.messages.filter(message => {
+            if (!message.startsWith('42')) return false;
+            try { return ['play', 'pause', 'seek'].includes(JSON.parse(message.substring(2))[0]); } catch { return false; }
+        });
+        expect(recoveryEchoes).toEqual([]);
+    } finally {
+        try { legacy?.close(); } catch { /* already closed */ }
+        await relay.stopServerForTests();
+    }
+});
+
+test('newer mixed-version playback supersedes an in-flight canonical recovery', async ({ context, extensionId, baseURL }) => {
+    test.setTimeout(45_000);
+    const relay = await import('../../server/index.js');
+    let legacy = null;
+    try {
+        await relay.startServer(0, '127.0.0.1');
+        const port = relay.httpServer.address().port;
+        const roomId = `e2e-canonical-supersede-${Date.now()}`;
+        legacy = await connectLegacyRelayClient(port);
+        await joinLegacyRelayRoom(legacy, roomId, 'legacy-newer-control');
+        sendLegacyRelayEvent(legacy, 'play', { currentTime: 6, seq: 1, actionTimestamp: 1 });
+        await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
+            .toMatchObject({ revision: 1, playbackState: 'playing', currentTime: 6 });
+
+        const url = `${baseURL}/pages/simple-player.html`;
+        const page = await context.newPage();
+        await page.goto(url);
+        await page.waitForFunction(() => window.__fixtureReady === true);
+        const { tabId } = await selectTargetTab(context, extensionId, url);
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async selectedTabId => {
+            await chrome.scripting.executeScript({
+                target: { tabId: selectedTabId },
+                world: 'ISOLATED',
+                func: () => {
+                    const video = document.querySelector('#player');
+                    if (!video) throw new Error('canonical supersession fixture video missing');
+                    video.dataset.koalaCanonicalPlayAttempts = '0';
+                    Object.defineProperty(video, 'play', {
+                        configurable: true,
+                        value: () => {
+                            const attempts = Number(video.dataset.koalaCanonicalPlayAttempts || '0') + 1;
+                            video.dataset.koalaCanonicalPlayAttempts = String(attempts);
+                            return new Promise((_, reject) => {
+                                setTimeout(() => reject(new Error('delayed audit autoplay rejection')), 400);
+                            });
+                        }
+                    });
+                }
+            });
+        }, tabId));
+
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
+            await chrome.storage.local.set(settings);
+            return chrome.runtime.sendMessage({ type: 'CONNECT' });
+        }, {
+            serverUrl: `ws://127.0.0.1:${port}`,
+            useCustomServer: true,
+            roomId,
+            password: '',
+            username: 'current-superseded'
+        }));
+        await expectConnectedRoom(context, extensionId, roomId, { queuedLogicalEvents: 0 });
+        await expect.poll(() => page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaCanonicalPlayAttempts || '0')))
+            .toBe(1);
+
+        sendLegacyRelayEvent(legacy, 'seek', { currentTime: 10, targetTime: 10, seq: 2, actionTimestamp: 2 });
+        sendLegacyRelayEvent(legacy, 'pause', { currentTime: 10, seq: 3, actionTimestamp: 3 });
+        await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
+            .toMatchObject({ revision: 3, playbackState: 'paused', currentTime: 10 });
+        await expect.poll(() => page.locator('#player').evaluate(video => ({
+            paused: video.paused,
+            currentTime: video.currentTime
+        }))).toMatchObject({ paused: true });
+        await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime))
+            .toBeGreaterThan(9);
+
+        await page.waitForTimeout(1_200);
+        expect(await page.locator('#player').evaluate(video =>
+            Number(video.dataset.koalaCanonicalPlayAttempts || '0'))).toBe(1);
+        expect(await page.locator('#player').evaluate(video => video.paused)).toBe(true);
+    } finally {
+        try { legacy?.close(); } catch { /* already closed */ }
+        await relay.stopServerForTests();
+    }
+});
+
+test('keeps canonical media state current while the capable extension is solo', async ({ context, extensionId, baseURL }) => {
+    test.setTimeout(35_000);
+    const relay = await import('../../server/index.js');
+    try {
+        await relay.startServer(0, '127.0.0.1');
+        const port = relay.httpServer.address().port;
+        const roomId = `e2e-canonical-solo-${Date.now()}`;
+        const url = `${baseURL}/pages/simple-player.html`;
+        const page = await context.newPage();
+        await page.goto(url);
+        await page.waitForFunction(() => window.__fixtureReady === true);
+        const { tabId } = await selectTargetTab(context, extensionId, url);
+
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
+            await chrome.storage.local.set(settings);
+            return chrome.runtime.sendMessage({ type: 'CONNECT' });
+        }, {
+            serverUrl: `ws://127.0.0.1:${port}`,
+            useCustomServer: true,
+            roomId,
+            password: '',
+            username: 'current-solo'
+        }));
+        await expectConnectedRoom(context, extensionId, roomId);
+
+        expect(await sendServerCommand(context, extensionId, tabId, 'pause', { currentTime: 8 }))
+            .toMatchObject({ status: 'ok' });
+        expect(await sendServerCommand(context, extensionId, tabId, 'seek', { targetTime: 9 }))
+            .toMatchObject({ status: 'ok' });
+        await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
+            .toMatchObject({ revision: 2, playbackState: 'paused', currentTime: 9 });
+    } finally {
+        await relay.stopServerForTests();
+    }
 });
 
 test('@race reinjects after the target tab navigates', async ({ context, extensionId, baseURL }) => {
@@ -996,6 +1565,132 @@ test('keeps controlling a Drive-style player across an ordinary play and pause',
     const command = await sendServerCommand(context, extensionId, tabId, 'play', { time: 1 });
     expect(command).toMatchObject({ status: 'ok_solo' });
     await expect.poll(() => playerFrame.locator('video').evaluate(video => video.paused)).toBe(false);
+});
+
+test('coalesces persisted offline media intent before canonical reconnect recovery', async ({ context, extensionId, baseURL }) => {
+    test.setTimeout(60_000);
+    const relay = await import('../../server/index.js');
+    let legacy = null;
+    let canonicalKeeper = null;
+    let lateJoiner = null;
+    try {
+        await relay.startServer(0, '127.0.0.1');
+        const port = relay.httpServer.address().port;
+        const roomId = `e2e-coalesced-${Date.now()}`;
+        legacy = await connectLegacyRelayClient(port);
+        await joinLegacyRelayRoom(legacy, roomId, 'legacy-e2e');
+        canonicalKeeper = await connectLegacyRelayClient(port);
+        await joinLegacyRelayRoom(canonicalKeeper, roomId, 'legacy-keeper');
+
+        const url = `${baseURL}/pages/simple-player.html`;
+        const page = await context.newPage();
+        await page.goto(url);
+        await page.waitForFunction(() => window.__fixtureReady === true);
+        const { tabId } = await selectTargetTab(context, extensionId, url);
+
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
+            await chrome.storage.local.set(settings);
+            return chrome.runtime.sendMessage({ type: 'CONNECT' });
+        }, {
+            serverUrl: `ws://127.0.0.1:${port}`,
+            useCustomServer: true,
+            roomId,
+            password: '',
+            username: 'current-e2e'
+        }));
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+            .toMatchObject({ status: 'connected', roomId, queuedLogicalEvents: 0 });
+
+        // Establish accepted server truth that would be stale for this client
+        // after its later offline actions.
+        sendLegacyRelayEvent(legacy, 'play', { currentTime: 1, seq: 1, actionTimestamp: 1 });
+        sendLegacyRelayEvent(legacy, 'seek', { currentTime: 1, targetTime: 1, seq: 2, actionTimestamp: 2 });
+        await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
+            .toMatchObject({ revision: 2, playbackState: 'playing', currentTime: 1, updatedBy: 'legacy-e2e' });
+        await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeGreaterThan(0.8);
+        legacy.messages.length = 0;
+
+        const connectedStatus = await getExtensionState(context, extensionId, { type: 'GET_STATUS' });
+        const extensionSocketId = Array.from(relay.rooms.get(roomId).peerData.entries())
+            .find(([, data]) => data.peerId === connectedStatus.peerId)?.[0];
+        expect(extensionSocketId).toBeTruthy();
+        // Point future reconnect attempts at an unused local port, then sever
+        // only the extension socket. The relay and legacy peer stay live.
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(
+            serverUrl => chrome.storage.local.set({ serverUrl }),
+            'ws://127.0.0.1:1'
+        ));
+        relay.io.sockets.sockets.get(extensionSocketId).disconnect(true);
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }).then(status => status.status))
+            .not.toBe('connected');
+
+        expect(await sendServerCommand(context, extensionId, tabId, 'play', { currentTime: 2 })).toMatchObject({ status: 'ok' });
+        expect(await sendServerCommand(context, extensionId, tabId, 'seek', { targetTime: 4 })).toMatchObject({ status: 'ok' });
+        expect(await sendServerCommand(context, extensionId, tabId, 'seek', { targetTime: 6 })).toMatchObject({ status: 'ok' });
+        expect(await sendServerCommand(context, extensionId, tabId, 'pause', { currentTime: 6 })).toMatchObject({ status: 'ok' });
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+            .toMatchObject({ queuedLogicalEvents: 1, queuedMediaIntents: 1, queuedWireEvents: 2 });
+        await expect.poll(() => page.locator('#player').evaluate(video => ({ paused: video.paused, currentTime: video.currentTime })))
+            .toMatchObject({ paused: true });
+
+        // Terminate the actual MV3 worker. The next runtime message starts a new
+        // worker, which must migrate/restore the logical queue and local sequence.
+        await terminateExtensionServiceWorker(context, extensionId, page);
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }).then(status => status.queuedMediaIntents))
+            .toBe(1);
+        const restoredQueue = await getExtensionState(context, extensionId, { type: 'GET_STATUS' });
+        expect(restoredQueue.queuedLogicalEvents).toBeGreaterThanOrEqual(1);
+        expect(restoredQueue.queuedWireEvents).toBeGreaterThanOrEqual(2);
+
+        await page.locator('#player').evaluate(video => {
+            window.__koalaReconnectSeeks = [];
+            video.addEventListener('seeked', () => window.__koalaReconnectSeeks.push(video.currentTime));
+        });
+
+        const retryResult = await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async serverUrl => {
+            await chrome.storage.local.set({ serverUrl });
+            return chrome.runtime.sendMessage({ type: 'RETRY_CONNECT' });
+        }, `ws://127.0.0.1:${port}`));
+        expect(retryResult).toMatchObject({ status: 'ok' });
+        const replaySeek = await waitForLegacyRelayEvent(legacy, 'seek', 20_000);
+        const replayPause = await waitForLegacyRelayEvent(legacy, 'pause', 20_000);
+        expect(replaySeek).toMatchObject({ currentTime: 6, targetTime: 6 });
+        expect(replayPause).toMatchObject({ currentTime: 6 });
+        expect(replaySeek.seq).toBeLessThan(replayPause.seq);
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+            .toMatchObject({ status: 'connected', roomId, queuedLogicalEvents: 0, queuedMediaIntents: 0 });
+        await expect.poll(() => relay.rooms.get(roomId)?.mediaState)
+            .toMatchObject({ playbackState: 'paused', currentTime: 6 });
+        expect(relay.rooms.get(roomId).mediaState.revision).toBeGreaterThan(2);
+
+        // The stale r2 snapshot must never have sought the local player back to 1
+        // before its authorized pending intent replayed.
+        const reconnectSeeks = await page.evaluate(() => window.__koalaReconnectSeeks || []);
+        expect(reconnectSeeks.some(value => value < 3)).toBe(false);
+        await expect.poll(() => page.locator('#player').evaluate(video => ({ paused: video.paused, currentTime: video.currentTime })))
+            .toMatchObject({ paused: true });
+
+        lateJoiner = await connectLegacyRelayClient(port);
+        const lateRoom = await joinLegacyRelayRoom(lateJoiner, roomId, 'late-e2e');
+        expect(lateRoom.mediaState).toMatchObject({
+            revision: relay.rooms.get(roomId).mediaState.revision,
+            playbackState: 'paused',
+            currentTime: 6
+        });
+
+        await page.waitForTimeout(700);
+        const leakedMediaEvents = legacy.messages.filter(message => {
+            if (!message.startsWith('42')) return false;
+            try { return ['play', 'pause', 'seek'].includes(JSON.parse(message.substring(2))[0]); } catch { return false; }
+        });
+        expect(leakedMediaEvents).toEqual([]);
+    } finally {
+        await context.setOffline(false).catch(() => {});
+        try { legacy?.close(); } catch { /* already closed */ }
+        try { canonicalKeeper?.close(); } catch { /* already closed */ }
+        try { lateJoiner?.close(); } catch { /* already closed */ }
+        await relay.stopServerForTests();
+    }
 });
 
 function FRAMED_VIDEO_PAUSED() {

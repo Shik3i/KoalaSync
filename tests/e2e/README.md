@@ -21,6 +21,7 @@ npm run test:e2e:race      # @race scenarios, repeated 20 times
 | `extension.spec.mjs` | Loads `dist/chrome`, injects into a tab, applies remote play/pause/seek |
 | `room-sync.spec.mjs` | Starts a local relay and proves two packed clients, relay restart, and MV3 worker recovery |
 | `popup-accessibility.spec.mjs` | Checks visible control names and keyboard tab activation in the real popup |
+| `global-setup.mjs` | Owns the fixture server for the complete Playwright run and closes it during teardown |
 | `fixture-server.mjs` | Static server for the fixtures, with byte-range support for media |
 | `fixtures/pages/` | One page per scenario |
 | `fixtures/media/` | Small generated clips (see below) |
@@ -31,6 +32,11 @@ and WebKit. Packed-extension tests remain Chromium-only because they exercise
 Chrome MV3 APIs and a persistent service-worker context. The scheduled
 `.github/workflows/race-tests.yml` lane repeats tests marked `@race` and uploads
 traces/results on failure.
+
+Locally, global setup reuses an already running fixture server on the configured
+port. CI always owns a fresh server so a port collision fails instead of testing
+against an unknown process. Keeping the server inside Playwright's lifecycle
+also prevents an orphaned `node` process from blocking teardown on Windows.
 
 ## Two rules worth keeping
 

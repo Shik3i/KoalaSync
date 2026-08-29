@@ -107,6 +107,7 @@ function copyExtensionFiles(targetDir, browserName) {
   // Robust Extraction using flexible regex
   const eventsMatch = constantsContent.match(/export const EVENTS\s*=\s*({[\s\S]+?});/);
   const heartbeatMatch = constantsContent.match(/export const HEARTBEAT_INTERVAL\s*=\s*(\d+);/);
+  const maxMediaTimeMatch = constantsContent.match(/export const MAX_MEDIA_TIME\s*=\s*(\d+);/);
 
   if (!eventsMatch) {
     throw new Error('CRITICAL: Could not find EVENTS object in shared/constants.js');
@@ -114,9 +115,13 @@ function copyExtensionFiles(targetDir, browserName) {
   if (!heartbeatMatch) {
     throw new Error('CRITICAL: Could not find HEARTBEAT_INTERVAL in shared/constants.js');
   }
+  if (!maxMediaTimeMatch) {
+    throw new Error('CRITICAL: Could not find MAX_MEDIA_TIME in shared/constants.js');
+  }
 
   const eventsObject = eventsMatch[1];
   const heartbeatVal = heartbeatMatch[1];
+  const maxMediaTimeVal = maxMediaTimeMatch[1];
   
   const items = fs.readdirSync(extDir);
   for (const item of items) {
@@ -136,7 +141,7 @@ function copyExtensionFiles(targetDir, browserName) {
         const eStart = '// --- SHARED_EVENTS_INJECT_START ---';
         const eEnd = '// --- SHARED_EVENTS_INJECT_END ---';
         const ePattern = new RegExp(`${eStart}[\\s\\S]+?${eEnd}`);
-        const eRep = `${eStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n    const EVENTS = ${eventsObject};\n    ${eEnd}`;
+        const eRep = `${eStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n    const EVENTS = ${eventsObject};\n    const MAX_MEDIA_TIME = ${maxMediaTimeVal};\n    ${eEnd}`;
         
         content = replaceRequiredBlock(content, ePattern, eRep, 'Event injection');
 
@@ -184,6 +189,14 @@ function copyExtensionFiles(targetDir, browserName) {
 
         fs.writeFileSync(destPath, content);
         console.log(`✓ Injected uninstall URL constants for ${browserName} into background.js`);
+      } else if (item === 'canonical-media-state.js' || item === 'offline-media-intent.js') {
+        let content = fs.readFileSync(srcPath, 'utf8');
+        const sourceImport = "from '../shared/constants.js'";
+        if (!content.includes(sourceImport)) {
+          throw new Error(`CRITICAL: Source shared constants import missing in ${item}. Aborting build.`);
+        }
+        content = content.replace(sourceImport, "from './shared/constants.js'");
+        fs.writeFileSync(destPath, content);
       } else if (item === 'popup.html') {
         let content = fs.readFileSync(srcPath, 'utf8');
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';

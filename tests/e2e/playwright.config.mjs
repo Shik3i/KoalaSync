@@ -6,6 +6,7 @@ const PORT = Number(process.env.KOALA_E2E_PORT || 4173);
 export default defineConfig({
     testDir: '.',
     testMatch: '**/*.spec.mjs',
+    globalSetup: fileURLToPath(new URL('./global-setup.mjs', import.meta.url)),
     // Extension tests drive a persistent context and a service worker; running
     // them in parallel makes the profile directories fight each other.
     workers: 1,
@@ -46,12 +47,5 @@ export default defineConfig({
             name: 'extension-chromium',
             testIgnore: 'detection.spec.mjs'
         }
-    ],
-    webServer: {
-        command: `node "${fileURLToPath(new URL('./fixture-server.mjs', import.meta.url))}" ${PORT}`,
-        url: `http://localhost:${PORT}/pages/simple-player.html`,
-        reuseExistingServer: !process.env.CI,
-        stdout: 'ignore',
-        stderr: 'pipe'
-    }
+    ]
 });

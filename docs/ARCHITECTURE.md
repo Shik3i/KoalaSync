@@ -32,6 +32,70 @@ Ensures all peers are buffered and synchronized before resuming:
    > **Network Transit Buffer Rule**: The orchestrator (`background.js`) must always use a timeout at least 500ms longer than the worker (`content.js`) to account for IPC and network transit time. Never align them exactly 1:1, as this will introduce a race condition on slow connections.
 4. **Resume**: All peers call `play()` simultaneously.
 
+## 3.1 Canonical Media State v1
+
+The relay keeps one optional, in-memory canonical playback state per active room.
+Accepted `PLAY`, `PAUSE`, and `SEEK` commands advance a server-owned revision.
+Playing positions advance lazily from the server update time; paused positions do
+not. Heartbeats remain observational and do not mutate canonical state.
+
+`ROOM_DATA` materializes the playing position at snapshot creation and advertises
+the optional `media-state-v1` capability. A joining/reconnecting client validates
+the room/revision and optional privacy-sanitized media title, respects Host Control
+solo mode and Episode Lobby, then queues an internal
+`APPLY_CANONICAL_MEDIA_STATE` message on the same ordered content path as newer
+live commands.
+That path reuses frame election, Netflix/Disney page-API seeks, native play/pause,
+the 2-second drift tolerance, and programmatic-event suppression. Recovery only
+completes after playback state and position verification. Transient failures
+retry after 250, 750, 1500, and 3000 ms, while target, heartbeat, and content-boot
+signals can retrigger a pending attempt within that bound. A pending playing
+snapshot advances from its local receipt time while waiting for a target, and
+the apply creates no action history, notification, command ACK, or relay media
+event.
+
+Current clients announce `media-state-v1` as an optional client capability and
+continue sending accepted media controls while alone on a capable relay. If a
+room instead falls back to one legacy client that suppresses solo controls, the
+relay clears canonical state so a future joiner receives no snapshot rather than
+known-unreliable playback truth.
+
+Force Sync remains a two-phase ACK protocol. A valid `PREPARE` is temporary
+room-wide choreography; the next authorized `EXECUTE` commits the latest target
+visible to peers to canonical state. Delayed execution is logged but remains
+valid until newer accepted playback or lobby state explicitly supersedes it; an
+untracked post-restart execute retains legacy relay liveness without inventing a
+canonical target. The
+offline queue replays an adjacent `PREPARE`/`EXECUTE` pair in one paced batch and
+retains both if delivery fails. Per-sender
+`seq`, peer heartbeats, and the reconnect queue remain separate mechanisms. The
+relay rejects duplicate/regressing current-client media sequences before they
+can diverge canonical truth from live receivers.
+
+## 3.2 Offline Media Intent
+
+Canonical Media State and Offline Media Intent have different ownership:
+
+- Canonical Media State is the relay's last accepted shared playback truth.
+- Offline Media Intent is one room-scoped client representation of local
+  `PLAY`/`PAUSE`/`SEEK` commands that have not reached the relay yet.
+
+Contiguous offline controls merge into a bounded logical queue entry. Every
+retained coordination event, including Force Sync and Episode Lobby events, is
+an ordering barrier. Stale offline `PING`, `PONG`, heartbeat `PEER_STATUS`, and
+`EVENT_ACK` frames are not persisted because they are no longer meaningful after
+reconnect. Force Sync ACK remains transactional and is not dropped or merged.
+
+Media intent waits for the reconnecting room's `ROOM_DATA`. An authorized intent
+takes precedence over the older canonical snapshot, materializes into the
+minimum ordered legacy `SEEK` plus `PLAY`/`PAUSE` frames needed by old peers, and
+thereby advances relay canonical state normally. With no intent, canonical
+recovery is unchanged. Role loss discards room-driving intent before recovery;
+intentional Host Control solo mode and an active Episode Lobby remain
+authoritative. MV3 session restoration migrates the previous raw queue format,
+preserves barriers, repairs `localSeq` monotonically, and rejects another room's
+intent.
+
 ## 4. Episode Auto-Sync
 Maintains continuous synchronized viewing when watching series:
 1. **Detection**: `content.js` monitors the Media Session API for title changes.

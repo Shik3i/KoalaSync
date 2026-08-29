@@ -8,6 +8,20 @@ import { clearChatKeyCache, decryptChatMessage, encryptChatMessage, generateChat
 import { buildChatRelayPayload, encodeSocketEvent } from './chat-wire.js';
 import { createChatEchoTracker, createChatSendLimiter, createLatestTaskQueue, normalizeRoomId, shouldShowChatNotification } from './chat-session.js';
 import { createChatActivityStore } from './chat-activity.js';
+import { canonicalMediaStateFromRoomData, createCanonicalMediaStateTracker } from './canonical-media-state.js';
+import {
+    drainQueuedBatch,
+    enqueueQueuedEvent,
+    isMediaQueueEvent,
+    isQueuedMediaIntent,
+    maxQueuedSequence,
+    mediaIntentNeedsSequenceReservation,
+    normalizePersistedEventQueue,
+    queuedMediaIntentCount,
+    queuedWireCount,
+    reconcileQueuedRoomIntent,
+    reserveLatestMediaIntentSequence
+} from './offline-media-intent.js';
 import { HOST_ACCESS_REQUIRED_STATUS, normalizeTabId, inspectTabHostAccess, isHostAccessError, addTabHostAccessRequest, removeTabHostAccessRequest } from './host-access.js';
 import {
     MEDIA_FRAME_ACCESS_REQUIRED,
@@ -66,6 +80,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 // --- State Management ---
 let socket = null;
+let connectionGeneration = 0;
 let isConnecting = false;
 let peerId = null; // initialized via getPeerId()
 let currentRoom = null;
@@ -233,11 +248,28 @@ let storageInitialized = false;
 let pendingLogs = [];
 let pendingHistory = [];
 let eventQueue = [];
+let eventQueueVersion = 0;
 let flushTimer = null; // paces draining of eventQueue after (re)connect
+let flushInProgress = null;
 let isNamespaceJoined = false;
+let awaitingRoomData = false;
+let pendingRoomDataRoomId = null;
 let lastActionState = { action: null, senderId: null, timestamp: 0, acks: [] };
 let localSeq = 0;                         // Monotonically increasing command sequence for this peer
 const lastSeqBySender = {};               // senderId → last received seq (stale command guard)
+const canonicalMediaStateTracker = createCanonicalMediaStateTracker();
+const CANONICAL_RECOVERY_RETRY_DELAYS = Object.freeze([250, 750, 1500, 3000]);
+const CANONICAL_RECOVERY_RETRYABLE = new Set([
+    'no_video',
+    'apply_failed',
+    'no_response',
+    'pending_unreachable',
+    'stale_target',
+    'superseded'
+]);
+let canonicalRecoveryRetryTimer = null;
+let canonicalRecoveryRetryAttempt = 0;
+let canonicalRecoveryApplyInProgress = null;
 
 // --- Host Control Mode ---
 let controlMode = CONTROL_MODES.EVERYONE;  // 'everyone' | 'host-only'
@@ -256,7 +288,70 @@ function serverSupports(cap) { return Array.isArray(serverCapabilities) && serve
 function serverSupportsChat() {
     return serverSupports(CAPABILITIES.CHAT_V1) || serverSupports(CAPABILITIES.CHAT);
 }
-const CLIENT_CAPABILITIES = Object.freeze([CAPABILITIES.CHAT_V1]);
+const CLIENT_CAPABILITIES = Object.freeze([
+    CAPABILITIES.CHAT_V1,
+    CAPABILITIES.MEDIA_STATE_V1
+]);
+
+function persistCanonicalMediaRecovery() {
+    if (!storageInitialized) return;
+    chrome.storage.session.set({
+        canonicalMediaRecovery: canonicalMediaStateTracker.snapshot()
+    }).catch(() => {});
+}
+
+function resetCanonicalMediaRecoveryRetries() {
+    if (canonicalRecoveryRetryTimer) {
+        clearTimeout(canonicalRecoveryRetryTimer);
+        canonicalRecoveryRetryTimer = null;
+    }
+    canonicalRecoveryRetryAttempt = 0;
+}
+
+function scheduleCanonicalMediaRecoveryRetry(reason) {
+    const roomId = currentRoom?.roomId;
+    const pending = canonicalMediaStateTracker.getPending(roomId);
+    if (!pending
+        || canonicalRecoveryRetryTimer
+        || canonicalRecoveryApplyInProgress
+        || canonicalRecoveryRetryAttempt >= CANONICAL_RECOVERY_RETRY_DELAYS.length) {
+        return false;
+    }
+    const expectedRevision = pending.mediaState.revision;
+    const delay = CANONICAL_RECOVERY_RETRY_DELAYS[canonicalRecoveryRetryAttempt++];
+    canonicalRecoveryRetryTimer = setTimeout(() => {
+        canonicalRecoveryRetryTimer = null;
+        const latest = canonicalMediaStateTracker.getPending(roomId);
+        if (currentRoom?.roomId !== roomId || latest?.mediaState.revision !== expectedRevision) return;
+        addLog(`Retrying canonical media state r${expectedRevision} after ${reason}`, 'info');
+        tryApplyPendingCanonicalMediaState().catch(error => {
+            addLog(`Canonical media state retry failed: ${error.message}`, 'warn');
+        });
+    }, delay);
+    return true;
+}
+
+function requestCanonicalMediaRecoveryAttempt() {
+    if (canonicalRecoveryRetryTimer
+        || canonicalRecoveryApplyInProgress
+        || canonicalRecoveryRetryAttempt >= CANONICAL_RECOVERY_RETRY_DELAYS.length
+        || !canonicalMediaStateTracker.getPending(currentRoom?.roomId)) {
+        return false;
+    }
+    tryApplyPendingCanonicalMediaState().catch(error => {
+        addLog(`Canonical media state retry failed: ${error.message}`, 'warn');
+    });
+    return true;
+}
+
+function clearCanonicalMediaRecovery() {
+    resetCanonicalMediaRecoveryRetries();
+    // The content command itself may still finish, but it belongs to the room
+    // being cleared and must not block the first recovery attempt of a new room.
+    canonicalRecoveryApplyInProgress = null;
+    canonicalMediaStateTracker.clear();
+    persistCanonicalMediaRecovery();
+}
 
 function invalidateChatSession() {
     chatSessionGeneration++;
@@ -274,6 +369,8 @@ function clearChatActivity() {
 async function clearFailedJoinCredentials() {
     webJoinCoordinator.invalidate();
     connectIntent = false;
+    clearEventQueue();
+    clearCanonicalMediaRecovery();
     chatSecretGuard = '';
     invalidateChatSession();
     await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
@@ -349,9 +446,11 @@ function ensureState() {
     if (!restorationTask) {
         restorationTask = new Promise(resolve => {
             let resolved = false;
+            let restorationTimedOut = false;
             const done = () => { if (!resolved) { resolved = true; resolve(); } };
 
             const storageTimeout = setTimeout(() => {
+                restorationTimedOut = true;
                 addLog('Storage restoration timed out, continuing with defaults', 'warn');
                 storageInitialized = true;
                 done();
@@ -364,10 +463,15 @@ function ensureState() {
                 'currentTargetFrameId', 'currentTargetDocumentId', 'currentTargetHasVideo',
                 'selectedTabId', 'selectedTabTitle', 'selectionErrorTabId', 'selectionErrorMessage',
                 'episodeLobby', 'localSeq', 'lastSeqBySender', 'expectedAcksCount', 'roomIdleSince', 'lastContentHeartbeatAt',
-                'hcmDesynced', 'chatActivityTimeline'
+                'hcmDesynced', 'chatActivityTimeline', 'canonicalMediaRecovery'
             ], (data) => {
+                // A late callback must not resurrect a room, queue or canonical
+                // snapshot after the worker already continued with defaults.
+                if (restorationTimedOut) return;
                 clearTimeout(storageTimeout);
-                if (data.expectedAcksCount !== undefined) expectedAcksCount = data.expectedAcksCount;
+                if (Number.isSafeInteger(data.expectedAcksCount) && data.expectedAcksCount >= 0) {
+                    expectedAcksCount = data.expectedAcksCount;
+                }
                 if (data.currentTabId !== undefined) currentTabId = normalizeTabId(data.currentTabId);
                 userSelectedTabId = normalizeTabId(data.selectedTabId);
                 userSelectedTabTitle = userSelectedTabId !== null && typeof data.selectedTabTitle === 'string'
@@ -396,10 +500,22 @@ function ensureState() {
                 }
                 // Merge data from storage with any early-arriving state
                 // New entries (added during boot) must stay at the top (index 0)
-                if (data.logs) logs = [...logs, ...data.logs].slice(0, 200);
-                if (data.history) history = [...history, ...data.history].slice(0, 20);
-                if (data.currentRoom) {
-                    currentRoom = data.currentRoom;
+                if (Array.isArray(data.logs)) logs = [...logs, ...data.logs].slice(0, 200);
+                if (Array.isArray(data.history)) history = [...history, ...data.history].slice(0, 20);
+                if (data.currentRoom
+                    && typeof data.currentRoom === 'object'
+                    && typeof data.currentRoom.roomId === 'string'
+                    && data.currentRoom.roomId) {
+                    currentRoom = { ...data.currentRoom };
+                    currentRoom.peers = (Array.isArray(data.currentRoom.peers) ? data.currentRoom.peers : [])
+                        .map(createPeerData)
+                        .filter(candidate => candidate.peerId);
+                    const restoredPeerIds = new Set(currentRoom.peers.map(candidate => candidate.peerId));
+                    currentRoom.activeLobby = normalizeEpisodeLobby(
+                        data.currentRoom.activeLobby,
+                        Date.now(),
+                        restoredPeerIds
+                    );
                     // Host Control Mode: restore role/mode/capabilities from persisted room.
                     controlMode = currentRoom.controlMode || CONTROL_MODES.EVERYONE;
                     hostPeerId = currentRoom.hostPeerId || null;
@@ -413,13 +529,18 @@ function ensureState() {
                 // the host, or the room is in 'everyone'). Without this, the first heartbeat
                 // after SW restart would broadcast a bogus Solo flag for up to 15s.
                 hcmEnforceDesyncInvariant();
-                if (data.lastActionState) lastActionState = data.lastActionState;
-                
-                if (data.eventQueue) eventQueue = [...eventQueue, ...data.eventQueue].slice(0, 50);
-                if (data.isForceSyncInitiator !== undefined && isForceSyncInitiator === false) {
-                    isForceSyncInitiator = data.isForceSyncInitiator;
+                canonicalMediaStateTracker.restore(
+                    data.canonicalMediaRecovery,
+                    currentRoom?.roomId || null
+                );
+                if (data.lastActionState && typeof data.lastActionState === 'object') {
+                    lastActionState = data.lastActionState;
                 }
-                if (data.forceSyncAcks) {
+                
+                if (currentRoom && data.isForceSyncInitiator === true && isForceSyncInitiator === false) {
+                    isForceSyncInitiator = true;
+                }
+                if (currentRoom && isForceSyncInitiator && Array.isArray(data.forceSyncAcks)) {
                     const mergedAcks = new Set([...forceSyncAcks, ...data.forceSyncAcks]);
                     forceSyncAcks = mergedAcks;
                 }
@@ -430,7 +551,7 @@ function ensureState() {
                 if (data.lastContentHeartbeatAt !== undefined) lastContentHeartbeatAt = data.lastContentHeartbeatAt;
 
                 // Recover Force Sync Timeout
-                if (data.forceSyncDeadline) {
+                if (currentRoom && Number.isFinite(data.forceSyncDeadline)) {
                     const remaining = data.forceSyncDeadline - Date.now();
                     if (remaining > 0 && isForceSyncInitiator) {
                         forceSyncTimeout = setTimeout(() => {
@@ -445,8 +566,15 @@ function ensureState() {
                 }
 
                 // Recover Episode Lobby
-                if (data.episodeLobby && !episodeLobby) {
-                    episodeLobby = data.episodeLobby;
+                const restoredEpisodeLobby = currentRoom
+                    ? normalizeEpisodeLobby(
+                        data.episodeLobby,
+                        Date.now(),
+                        new Set(currentRoom.peers.map(candidate => candidate.peerId))
+                    )
+                    : null;
+                if (restoredEpisodeLobby && !episodeLobby) {
+                    episodeLobby = restoredEpisodeLobby;
                     const lobbyRemaining = (episodeLobby.createdAt + EPISODE_LOBBY_TIMEOUT) - Date.now();
                     if (lobbyRemaining > 0) {
                         episodeLobbyTimeout = setTimeout(() => cancelEpisodeLobby('Timeout'), lobbyRemaining);
@@ -455,10 +583,19 @@ function ensureState() {
                     }
                 }
 
-                if (data.localSeq !== undefined && !isNaN(data.localSeq)) localSeq = data.localSeq;
+                if (Number.isSafeInteger(data.localSeq) && data.localSeq >= 0) localSeq = data.localSeq;
+                eventQueue = normalizePersistedEventQueue(
+                    [...eventQueue, ...(Array.isArray(data.eventQueue) ? data.eventQueue : [])],
+                    currentRoom?.roomId || null
+                );
+                eventQueueVersion++;
+                // An MV3 restart can restore queue and sequence writes in either
+                // order. Never let the sender sequence fall behind persisted work.
+                localSeq = Math.max(localSeq, maxQueuedSequence(eventQueue));
                 if (data.lastSeqBySender && typeof data.lastSeqBySender === 'object') Object.assign(lastSeqBySender, data.lastSeqBySender);
 
                 storageInitialized = true;
+                chrome.storage.session.set({ eventQueue, localSeq }).catch(() => {});
                 
                 // Process any early logs/history that weren't captured in the spread
                 if (pendingLogs.length > 0) {
@@ -490,6 +627,7 @@ let currentServerUrl = null;
 let roomIdleSince = null;
 let lastContentHeartbeatAt = null;
 let connectIntent = false;
+let roomTeardownPromise = null;
 const MAX_RECONNECT_ATTEMPTS = 20;
 // Backoff tuned so that at most ~8 connection attempts land in any 60s window,
 // keeping a single client comfortably under the server's per-IP connection
@@ -533,17 +671,47 @@ let episodeLobbyTimeout = null;
  * @returns {object} Normalized peer data object.
  */
 function createPeerData(raw) {
+    const source = raw && typeof raw === 'object'
+        ? raw
+        : (typeof raw === 'string' ? { peerId: raw } : {});
     return {
-        peerId:        raw.peerId        || null,
-        username:      raw.username      || null,
-        tabTitle:      raw.tabTitle      || null,
-        mediaTitle:    raw.mediaTitle    || null,
-        playbackState: raw.playbackState || null,
-        currentTime:   raw.currentTime   != null ? raw.currentTime : null,
-        volume:        raw.volume        != null ? raw.volume       : null,
-        muted:         raw.muted         != null ? raw.muted        : null,
-        desynced:      raw.desynced === true,   // HCM: peer is watching on their own
+        peerId:        typeof source.peerId === 'string' && source.peerId ? source.peerId.substring(0, 16) : null,
+        username:      typeof source.username === 'string' ? source.username.substring(0, 30) : null,
+        tabTitle:      typeof source.tabTitle === 'string' ? source.tabTitle.substring(0, 100) : null,
+        mediaTitle:    typeof source.mediaTitle === 'string' ? source.mediaTitle.substring(0, 100) : null,
+        playbackState: source.playbackState === 'playing' || source.playbackState === 'paused' ? source.playbackState : null,
+        currentTime:   Number.isFinite(source.currentTime) ? source.currentTime : null,
+        volume:        Number.isFinite(source.volume) ? source.volume : null,
+        muted:         typeof source.muted === 'boolean' ? source.muted : null,
+        desynced:      source.desynced === true,   // HCM: peer is watching on their own
         lastHeartbeat: Date.now()
+    };
+}
+
+function normalizeEpisodeLobby(value, fallbackCreatedAt = Date.now(), allowedPeerIds = null) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const expectedTitle = typeof value.expectedTitle === 'string'
+        ? value.expectedTitle.substring(0, 100)
+        : '';
+    const initiatorPeerId = typeof value.initiatorPeerId === 'string'
+        ? value.initiatorPeerId.substring(0, 16)
+        : '';
+    if (!expectedTitle
+        || !initiatorPeerId
+        || !Array.isArray(value.readyPeers)
+        || (allowedPeerIds && !allowedPeerIds.has(initiatorPeerId))) return null;
+    const readyPeers = [...new Set(value.readyPeers
+        .filter(candidate => typeof candidate === 'string' && candidate)
+        .map(candidate => candidate.substring(0, 16))
+        .filter(candidate => !allowedPeerIds || allowedPeerIds.has(candidate)))];
+    if (!readyPeers.includes(initiatorPeerId)) readyPeers.unshift(initiatorPeerId);
+    return {
+        expectedTitle,
+        initiatorPeerId,
+        readyPeers,
+        createdAt: Number.isFinite(value.createdAt) && value.createdAt > 0
+            ? value.createdAt
+            : fallbackCreatedAt
     };
 }
 
@@ -628,9 +796,13 @@ function withTitlePrivacy(payload, settings, keys) {
 
 function emitEpisodeLobbyForCurrentPrivacy() {
     if (!episodeLobby || episodeLobby.initiatorPeerId !== peerId) return;
+    const lobby = episodeLobby;
+    const roomId = currentRoom?.roomId || null;
     getSettings().then(settings => {
-        if (!episodeLobby || episodeLobby.initiatorPeerId !== peerId) return;
-        const expectedTitle = sanitizeSharedTitle(episodeLobby.expectedTitle, settings.mediaTitlePrivacyMode);
+        if (episodeLobby !== lobby
+            || currentRoom?.roomId !== roomId
+            || settings.roomId !== roomId) return;
+        const expectedTitle = sanitizeSharedTitle(lobby.expectedTitle, settings.mediaTitlePrivacyMode);
         if (expectedTitle) {
             emit(EVENTS.EPISODE_LOBBY, { peerId, expectedTitle });
         }
@@ -675,7 +847,9 @@ function resolveServerUrl(settings) {
     return (settings.serverUrl && settings.useCustomServer) ? settings.serverUrl : OFFICIAL_SERVER_URL;
 }
 
-function forceDisconnect() {
+function forceDisconnect({ preserveEventQueue = false } = {}) {
+    connectionGeneration++;
+    resetCanonicalMediaRecoveryRetries();
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -701,6 +875,8 @@ function forceDisconnect() {
     currentServerUrl = null;
     isConnecting = false;
     isNamespaceJoined = false;
+    awaitingRoomData = false;
+    pendingRoomDataRoomId = null;
     invalidateChatSession();
     isForceSyncInitiator = false;
     expectedAcksCount = 0;
@@ -708,13 +884,17 @@ function forceDisconnect() {
     lastContentHeartbeatAt = null;
     forceSyncAcks.clear();
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    eventQueue = [];
+    flushInProgress = null;
+    if (!preserveEventQueue) {
+        eventQueue = [];
+        eventQueueVersion++;
+    }
     chrome.storage.session.set({
         isForceSyncInitiator: false,
         forceSyncAcks: [],
         forceSyncDeadline: null,
         expectedAcksCount: 0,
-        eventQueue: [],
+        eventQueue,
         episodeLobby: null,
         roomIdleSince: null,
         lastContentHeartbeatAt: null
@@ -883,7 +1063,12 @@ function adoptReportingFrame(sender) {
     const senderFrameId = normalizeFrameId(sender.frameId);
     if (senderFrameId === normalizeFrameId(currentTargetFrameId)
         && (!currentTargetDocumentId || sender.documentId === currentTargetDocumentId)) {
-        return false;
+        if (currentTargetHasVideo === true) return false;
+        currentTargetHasVideo = true;
+        stopMediaDiscoveryPoll();
+        chrome.storage.session.set({ currentTargetHasVideo }).catch(() => {});
+        requestCanonicalMediaRecoveryAttempt();
+        return true;
     }
 
     currentTargetFrameId = senderFrameId;
@@ -897,6 +1082,7 @@ function adoptReportingFrame(sender) {
         currentTargetDocumentId,
         currentTargetHasVideo
     }).catch(() => {});
+    requestCanonicalMediaRecoveryAttempt();
     return true;
 }
 
@@ -988,7 +1174,7 @@ function clearTargetTabForIdle(expectedTabId = null, expectedGeneration = null) 
     return true;
 }
 
-async function endRoomSession({ notifyServer = false, reason = 'Left Room' } = {}) {
+async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left Room' } = {}) {
     webJoinCoordinator.invalidate();
     connectIntent = false;
     reconnectFailed = false;
@@ -1002,6 +1188,7 @@ async function endRoomSession({ notifyServer = false, reason = 'Left Room' } = {
     // it is still available, regardless of who initiated the exit.
     clearEpisodeLobbyState();
     currentRoom = null;
+    clearCanonicalMediaRecovery();
     clearChatActivity();
     controlMode = CONTROL_MODES.EVERYONE;
     hostPeerId = null;
@@ -1056,6 +1243,22 @@ async function endRoomSession({ notifyServer = false, reason = 'Left Room' } = {
     updateBadgeStatus();
 }
 
+async function endRoomSession(options = {}) {
+    if (roomTeardownPromise) return roomTeardownPromise;
+
+    const teardown = performRoomSessionTeardown(options);
+    roomTeardownPromise = teardown;
+    try {
+        return await teardown;
+    } finally {
+        if (roomTeardownPromise === teardown) roomTeardownPromise = null;
+    }
+}
+
+async function waitForRoomTeardown() {
+    if (roomTeardownPromise) await roomTeardownPromise;
+}
+
 async function leaveRoomAfterIdleGrace(reason) {
     if (!currentRoom) return;
     await endRoomSession({ notifyServer: true, reason });
@@ -1064,6 +1267,9 @@ async function leaveRoomAfterIdleGrace(reason) {
 async function connect() {
     if (isConnecting) return;
     isConnecting = true;
+    const startingGeneration = connectionGeneration;
+    let attemptGeneration = startingGeneration;
+    let handedOffToSocket = false;
 
     let finalUrl = '';
     try {
@@ -1072,6 +1278,8 @@ async function connect() {
         try {
             if (!peerId) peerId = await getPeerId();
             settings = await getSettings();
+            if (startingGeneration !== connectionGeneration) return;
+            pendingRoomDataRoomId = settings.roomId || currentRoom?.roomId || null;
         } catch (e) {
             throw new Error(`[Storage Error] ${e.message}`);
         }
@@ -1128,6 +1336,8 @@ async function connect() {
 
         // --- Phase 4: WebSocket Init ---
         try {
+            canonicalMediaStateTracker.beginRecovery(settings.roomId || currentRoom?.roomId || null);
+            persistCanonicalMediaRecovery();
             const url = new URL(finalUrl);
             url.pathname = '/socket.io/';
             url.searchParams.set('EIO', '4');
@@ -1135,107 +1345,126 @@ async function connect() {
             url.searchParams.set('version', chrome.runtime.getManifest().version);
             url.searchParams.set('token', OFFICIAL_SERVER_TOKEN);
 
-            socket = new WebSocket(url.toString());
+            const generation = ++connectionGeneration;
+            attemptGeneration = generation;
+            const connectionSocket = new WebSocket(url.toString());
+            socket = connectionSocket;
+
+            // --- Phase 5: Event Listeners ---
+            connectionSocket.onopen = () => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                reconnectAttempts = 0;
+                reconnectStartTime = null;
+                reconnectFailed = false;
+                addLog('WebSocket Connection Opened', 'success');
+                chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null }).catch(() => {});
+                isNamespaceJoined = false;
+                connectionSocket.send('40');
+            };
+
+            connectionSocket.onmessage = async (event) => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                await ensureState();
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                const msg = event.data;
+                if (msg === '2') {
+                    connectionSocket.send('3');
+                    return;
+                }
+                if (msg.startsWith('0')) {
+                    addLog(`Socket.IO Handshake: ${msg}`, 'info');
+                } else if (msg.startsWith('40')) {
+                    isConnecting = false;
+                    isNamespaceJoined = true;
+                    broadcastConnectionStatus('connected');
+                    startPing();
+                    addLog('Joined Namespace /', 'success');
+                    const joinedSettings = await getSettings();
+                    if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                    if (joinedSettings.roomId) {
+                        awaitingRoomData = true;
+                        pendingRoomDataRoomId = joinedSettings.roomId;
+                        const sharedTitles = getSharedTitleFields(joinedSettings);
+                        emit(EVENTS.JOIN_ROOM, {
+                            roomId: joinedSettings.roomId,
+                            password: joinedSettings.password,
+                            peerId,
+                            username: joinedSettings.username,
+                            tabTitle: sharedTitles.tabTitle,
+                            clientCapabilities: CLIENT_CAPABILITIES,
+                            protocolVersion: PROTOCOL_VERSION
+                        });
+                    } else {
+                        awaitingRoomData = false;
+                        pendingRoomDataRoomId = null;
+                        flushEventQueue().catch(error => addLog(`Queue replay failed: ${error.message}`, 'warn'));
+                    }
+                } else if (msg.startsWith('42')) {
+                    try {
+                        const payload = JSON.parse(msg.substring(2));
+                        try {
+                            await handleServerEvent(payload[0], payload[1], generation);
+                        } catch (handlerErr) {
+                            addLog(`Handler error for ${payload[0]}: ${handlerErr.message}`, 'error');
+                        }
+                    } catch (_e) {
+                        addLog(`Failed to parse message: ${msg}`, 'error');
+                    }
+                }
+            };
+
+            connectionSocket.onclose = () => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                // Invalidate any async message handler that began before the
+                // close event and is still suspended at an await boundary.
+                connectionGeneration++;
+                isConnecting = false;
+                isNamespaceJoined = false;
+                awaitingRoomData = false;
+                pendingRoomDataRoomId = null;
+                invalidateChatSession();
+                stopPing();
+                if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+
+                if (!connectIntent && !currentRoom) {
+                    isForceSyncInitiator = false;
+                    forceSyncAcks.clear();
+                    if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
+                    chrome.storage.session.set({
+                        isForceSyncInitiator: false,
+                        forceSyncAcks: [],
+                        forceSyncDeadline: null
+                    }).catch(() => {});
+                }
+
+                if (currentRoom && !connectIntent) {
+                    currentRoom.peers = [];
+                    if (storageInitialized) chrome.storage.session.set({ currentRoom }).catch(() => {});
+                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
+                }
+                broadcastConnectionStatus('disconnected');
+                socket = null;
+                if (currentRoom || connectIntent) {
+                    addLog('Disconnected. Scheduling reconnect...', 'warn');
+                    scheduleReconnect();
+                } else {
+                    addLog('Disconnected. No active session — staying disconnected.', 'info');
+                }
+            };
+
+            connectionSocket.onerror = () => {
+                if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                broadcastConnectionStatus('disconnected');
+                const logType = reconnectAttempts > 1 ? 'error' : 'warn';
+                addLog('WebSocket Error: Connection failed', logType);
+            };
+            handedOffToSocket = true;
         } catch (e) {
             throw new Error(`[Connection Error] ${e.message}`);
         }
 
-        // --- Phase 5: Event Listeners ---
-        socket.onopen = () => {
-            reconnectAttempts = 0;
-            reconnectStartTime = null;
-            reconnectFailed = false;
-            addLog('WebSocket Connection Opened', 'success');
-            chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null }).catch(() => {});
-            isNamespaceJoined = false;
-            socket.send('40');
-        };
-
-        socket.onmessage = async (event) => {
-            await ensureState();
-            const msg = event.data;
-            if (msg === '2') {
-                socket.send('3');
-                return;
-            }
-            if (msg.startsWith('0')) {
-                addLog(`Socket.IO Handshake: ${msg}`, 'info');
-            } else if (msg.startsWith('40')) {
-                isConnecting = false;
-                isNamespaceJoined = true;
-                broadcastConnectionStatus('connected');
-                startPing();
-                addLog('Joined Namespace /', 'success');
-                const settings = await getSettings();
-                if (settings.roomId) {
-                    const sharedTitles = getSharedTitleFields(settings);
-                    emit(EVENTS.JOIN_ROOM, { 
-                        roomId: settings.roomId, 
-                        password: settings.password,
-                        peerId,
-                        username: settings.username,
-                        tabTitle: sharedTitles.tabTitle,
-                        clientCapabilities: CLIENT_CAPABILITIES,
-                        protocolVersion: PROTOCOL_VERSION
-                    });
-                }
-                flushEventQueue();
-            } else if (msg.startsWith('42')) {
-                try {
-                    const payload = JSON.parse(msg.substring(2));
-                    try {
-                        await handleServerEvent(payload[0], payload[1]);
-                    } catch (handlerErr) {
-                        addLog(`Handler error for ${payload[0]}: ${handlerErr.message}`, 'error');
-                    }
-                } catch (_e) {
-                    addLog(`Failed to parse message: ${msg}`, 'error');
-                }
-            }
-        };
-
-        socket.onclose = () => {
-            isConnecting = false;
-            isNamespaceJoined = false;
-            invalidateChatSession();
-            stopPing();
-            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-            
-            if (!connectIntent && !currentRoom) {
-                isForceSyncInitiator = false;
-                forceSyncAcks.clear();
-                if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
-                chrome.storage.session.set({ 
-                    isForceSyncInitiator: false, 
-                    forceSyncAcks: [], 
-                    forceSyncDeadline: null 
-                }).catch(() => {});
-            }
-
-            
-            if (currentRoom && !connectIntent) {
-                currentRoom.peers = [];
-                if (storageInitialized) chrome.storage.session.set({ currentRoom }).catch(() => {});
-                chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
-            }
-            broadcastConnectionStatus('disconnected');
-            if (currentRoom || connectIntent) {
-                addLog('Disconnected. Scheduling reconnect...', 'warn');
-                socket = null;
-                scheduleReconnect();
-            } else {
-                addLog('Disconnected. No active session — staying disconnected.', 'info');
-                socket = null;
-            }
-        };
-
-        socket.onerror = () => {
-            broadcastConnectionStatus('disconnected');
-            const logType = reconnectAttempts > 1 ? 'error' : 'warn';
-            addLog('WebSocket Error: Connection failed', logType);
-        };
-
     } catch (e) {
+        if (attemptGeneration !== connectionGeneration) return;
         isConnecting = false;
         const logType = reconnectAttempts > 1 ? 'error' : 'warn';
         const errMsg = (e && e.message) ? e.message : String(e || 'Unknown connection error');
@@ -1244,6 +1473,8 @@ async function connect() {
         if (currentRoom || connectIntent) {
             scheduleReconnect();
         }
+    } finally {
+        if (!handedOffToSocket) isConnecting = false;
     }
 }
 
@@ -1472,7 +1703,13 @@ function scheduleReconnect() {
 // Slow reconnect logic is now handled in the keepAlive alarm
 
 function emit(event, data) {
-    if (socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined) {
+    const mustWaitForRoomData = awaitingRoomData
+        && event !== EVENTS.JOIN_ROOM
+        && event !== EVENTS.GET_ROOMS;
+    if (socket && socket.readyState === WebSocket.OPEN
+        && isNamespaceJoined
+        && !mustWaitForRoomData
+        && !flushInProgress) {
         try {
             const msg = encodeSocketEvent(event, data, chatSecretGuard);
             socket.send(msg);
@@ -1504,41 +1741,150 @@ function emitLive(event, data) {
 }
 
 function queueEvent(event, data) {
-    eventQueue.push({ event, data });
-    if (eventQueue.length > 50) {
-        eventQueue.shift();
+    const queueRoomId = currentRoom?.roomId || pendingRoomDataRoomId;
+    const queued = enqueueQueuedEvent(eventQueue, event, data, { roomId: queueRoomId });
+    eventQueue = queued.queue;
+    eventQueueVersion++;
+
+    if (isMediaQueueEvent(event)) {
+        const latest = eventQueue.at(-1);
+        if (mediaIntentNeedsSequenceReservation(latest)) {
+            const nextSequence = Math.max(localSeq, maxQueuedSequence(eventQueue)) + 1;
+            const reserved = reserveLatestMediaIntentSequence(eventQueue, queueRoomId, nextSequence);
+            eventQueue = reserved.queue;
+            if (reserved.reserved) {
+                localSeq = nextSequence;
+                chrome.storage.session.set({ localSeq }).catch(() => {});
+            }
+        }
+        const sourceCount = isQueuedMediaIntent(eventQueue.at(-1))
+            ? eventQueue.at(-1).intent.sourceEventCount
+            : 0;
+        if (sourceCount === 1) {
+            addLog('Offline media intent queued; replay deferred until ROOM_DATA', 'info');
+        } else if ([10, 50, 100, 500, 1000].includes(sourceCount)) {
+            addLog(`Collapsed ${sourceCount} queued media commands into one intent`, 'info');
+        }
+    }
+    if (queued.dropped > 0) {
         addLog('Event queue cap reached, dropping oldest event', 'warn');
     }
-    chrome.storage.session.set({ eventQueue });
+    chrome.storage.session.set({ eventQueue }).catch(() => {});
+}
+
+function clearEventQueue() {
+    if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+    }
+    eventQueue = [];
+    eventQueueVersion++;
+    chrome.storage.session.set({ eventQueue: [] }).catch(() => {});
+}
+
+function applyQueuedRoomPolicy(roomId, policy, reason) {
+    const result = reconcileQueuedRoomIntent(eventQueue, { roomId, ...policy });
+    eventQueue = result.queue;
+    eventQueueVersion++;
+    const { discarded } = result;
+    if (discarded > 0) {
+        chrome.storage.session.set({ eventQueue }).catch(() => {});
+        addLog(`${reason}: discarded ${discarded} queued room action${discarded === 1 ? '' : 's'}`, 'warn');
+    }
+    return result;
 }
 
 /**
- * Drain the offline event queue in paced batches. A reconnect after a long
- * outage can leave up to 50 queued events; dumping them in one tick would
- * exceed the server's per-socket event budget and get us disconnected right
- * after rejoining. We send FLUSH_BATCH_SIZE events, then wait
- * FLUSH_BATCH_INTERVAL_MS before the next batch. Remaining events drain across
- * subsequent batches; if the connection drops mid-drain, the rest stay queued.
+ * Drain logical queue entries only after ROOM_DATA confirms the current room,
+ * role and lobby. Pacing counts materialized wire frames, not logical entries.
+ * A two-frame media intent is kept whole at a batch boundary and retained in
+ * full if either send fails. Replaying its first legacy frame can repeat a
+ * canonical revision/activity side effect, but the ordered full retry remains
+ * final-state recoverable without a new delivery-ACK protocol.
  */
-function flushEventQueue() {
-    if (flushTimer) return; // a drain is already in progress
-    const drainBatch = () => {
-        flushTimer = null;
-        if (!socket || socket.readyState !== WebSocket.OPEN || !isNamespaceJoined) {
-            return; // lost the connection — leave the rest queued for next connect
+async function flushEventQueue(replaySettingsOverride = undefined) {
+    if (flushTimer || flushInProgress || awaitingRoomData) return;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
+    const flushToken = {};
+    const flushConnectionGeneration = connectionGeneration;
+    const flushSocket = socket;
+    const flushRoomId = currentRoom?.roomId || null;
+    flushInProgress = flushToken;
+    try {
+        // Resolve privacy settings before taking queue ownership. If new work
+        // arrives during the drain, keep it behind the original logical entries;
+        // final-state retry is safer than losing concurrent intent.
+        const replaySettings = replaySettingsOverride !== undefined
+            ? replaySettingsOverride
+            : (eventQueue.some(isQueuedMediaIntent) ? await getSettings() : null);
+        if (flushConnectionGeneration !== connectionGeneration
+            || socket !== flushSocket
+            || currentRoom?.roomId !== flushRoomId
+            || awaitingRoomData) {
+            return;
         }
-        let sent = 0;
-        while (eventQueue.length > 0 && sent < FLUSH_BATCH_SIZE) {
-            const queuedMsg = eventQueue.shift();
-            emit(queuedMsg.event, queuedMsg.data);
-            sent++;
+        applyQueuedRoomPolicy(flushRoomId, {
+            canControl: !(controlMode === CONTROL_MODES.HOST_ONLY && hostPeerId && !amController()),
+            activeLobby: !!episodeLobby,
+            desynced: hcmDesynced,
+            authoritativeLobby: !!currentRoom?.activeLobby
+        }, 'Queue replay authority changed');
+        const drainSource = eventQueue;
+        const drainVersion = eventQueueVersion;
+        const result = await drainQueuedBatch(drainSource, {
+            roomId: currentRoom?.roomId || null,
+            maxWireEvents: FLUSH_BATCH_SIZE,
+            sendFrame: async (frame, entry) => {
+                if (flushConnectionGeneration !== connectionGeneration
+                    || socket !== flushSocket
+                    || currentRoom?.roomId !== flushRoomId
+                    || awaitingRoomData) {
+                    return false;
+                }
+                let payload = frame.data && typeof frame.data === 'object' ? { ...frame.data } : {};
+                if (isQueuedMediaIntent(entry)) {
+                    payload = withTitlePrivacy(payload, replaySettings, ['mediaTitle']);
+                    payload.peerId = peerId;
+                }
+                return emitLive(frame.event, payload);
+            }
+        });
+        if (eventQueueVersion === drainVersion) {
+            eventQueue = result.queue;
+            eventQueueVersion++;
+        } else {
+            // enqueueQueuedEvent preserves object identity for untouched queue
+            // entries. Remove only entries the drain completed, leaving any
+            // concurrently appended or merged work in place. A partial intent
+            // failure returns the complete entry in result.queue, so it is not
+            // included in consumedEntries and remains retryable as a unit.
+            const consumedCount = drainSource.length - result.queue.length;
+            const consumedEntries = new Set(drainSource.slice(0, consumedCount));
+            eventQueue = eventQueue.filter(entry => !consumedEntries.has(entry));
+            eventQueueVersion++;
+            addLog('Queue changed during replay; reconciled completed and concurrent work', 'info');
         }
         chrome.storage.session.set({ eventQueue }).catch(() => {});
-        if (eventQueue.length > 0) {
-            flushTimer = setTimeout(drainBatch, FLUSH_BATCH_INTERVAL_MS);
+        if (result.droppedStaleIntents > 0) {
+            addLog(`Dropped ${result.droppedStaleIntents} stale media intent${result.droppedStaleIntents === 1 ? '' : 's'} for a previous room`, 'warn');
         }
-    };
-    drainBatch();
+        if (result.sentWireEvents > 0) {
+            addLog(`Replayed ${result.sentWireEvents} queued wire event${result.sentWireEvents === 1 ? '' : 's'}`, 'info');
+        }
+        if (eventQueue.length > 0
+            && flushConnectionGeneration === connectionGeneration
+            && socket === flushSocket
+            && socket?.readyState === WebSocket.OPEN
+            && isNamespaceJoined
+            && !awaitingRoomData) {
+            flushTimer = setTimeout(() => {
+                flushTimer = null;
+                flushEventQueue().catch(error => addLog(`Queue replay failed: ${error.message}`, 'warn'));
+            }, FLUSH_BATCH_INTERVAL_MS);
+        }
+    } finally {
+        if (flushInProgress === flushToken) flushInProgress = null;
+    }
 }
 
 function addToHistory(action, senderId) {
@@ -1607,8 +1953,168 @@ function stopPing() {
     missedPongs = 0;
 }
 
+function markCanonicalMediaStateHandled(roomId, revision) {
+    if (!canonicalMediaStateTracker.markHandled(roomId, revision)) return false;
+    resetCanonicalMediaRecoveryRetries();
+    persistCanonicalMediaRecovery();
+    return true;
+}
+
+function supersedeCanonicalMediaRecovery(reason, action = null, payload = null) {
+    const roomId = currentRoom?.roomId;
+    const pending = canonicalMediaStateTracker.getPending(roomId);
+    if (!pending || !markCanonicalMediaStateHandled(roomId, pending.mediaState.revision)) {
+        return false;
+    }
+    // Tracking cancellation alone is insufficient: content.js may still be
+    // awaiting an asynchronous player action. Invalidate that operation before
+    // a newer local or remote control is allowed to win.
+    sendMessageToCurrentContent({
+        type: 'CANCEL_CANONICAL_MEDIA_STATE',
+        reason,
+        action,
+        payload
+    }).catch(() => {});
+    addLog(`Canonical media state r${pending.mediaState.revision} superseded by ${reason}`, 'info');
+    return true;
+}
+
+function isCanonicalSupersedingControl(event, data) {
+    if (event === EVENTS.SEEK) {
+        return Number.isFinite(data?.targetTime) || Number.isFinite(data?.currentTime);
+    }
+    if (event === EVENTS.FORCE_SYNC_PREPARE) {
+        return Number.isFinite(data?.targetTime);
+    }
+    return event === EVENTS.PLAY || event === EVENTS.PAUSE || event === EVENTS.FORCE_SYNC_EXECUTE;
+}
+
+async function performPendingCanonicalMediaStateApply() {
+    const roomId = currentRoom?.roomId;
+    const pending = canonicalMediaStateTracker.getPendingProjected(roomId);
+    if (!pending || !roomId) return { status: 'none' };
+
+    const { mediaState } = pending;
+    if (hcmDesynced) {
+        markCanonicalMediaStateHandled(roomId, mediaState.revision);
+        addLog(`Canonical media state r${mediaState.revision} skipped: local guest is desynced`, 'info');
+        return { status: 'ignored_desynced' };
+    }
+    if (episodeLobby) {
+        markCanonicalMediaStateHandled(roomId, mediaState.revision);
+        addLog(`Canonical media state r${mediaState.revision} skipped: episode lobby is active`, 'info');
+        return { status: 'ignored_episode_lobby' };
+    }
+
+    const tabId = normalizeTabId(currentTabId);
+    if (tabId === null || currentTargetHasVideo !== true) return { status: 'pending_no_target' };
+    const targetGeneration = targetActivationGeneration;
+    const targetFrameId = normalizeFrameId(currentTargetFrameId);
+    const targetDocumentId = currentTargetDocumentId;
+
+    try {
+        const response = await enqueueContentCommand(async () => {
+            if (currentRoom?.roomId !== roomId) return { status: 'stale_room' };
+            if (!isCurrentTargetIdentity(tabId, targetGeneration)
+                || normalizeFrameId(currentTargetFrameId) !== targetFrameId
+                || currentTargetDocumentId !== targetDocumentId) {
+                return { status: 'stale_target' };
+            }
+            const latest = canonicalMediaStateTracker.getPending(roomId);
+            if (latest?.mediaState.revision !== mediaState.revision) {
+                return { status: 'superseded' };
+            }
+            return sendMessageToContentTab(tabId, {
+                type: 'APPLY_CANONICAL_MEDIA_STATE',
+                mediaState
+            });
+        });
+        if (currentRoom?.roomId !== roomId) return { status: 'stale_room' };
+        if (!isCurrentTargetIdentity(tabId, targetGeneration)
+            || normalizeFrameId(currentTargetFrameId) !== targetFrameId
+            || currentTargetDocumentId !== targetDocumentId) {
+            return { status: 'stale_target' };
+        }
+        const latestPending = canonicalMediaStateTracker.getPending(roomId);
+        if (latestPending?.mediaState.revision !== mediaState.revision) return { status: 'superseded' };
+
+        if (response?.status === 'applied') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            const drift = Number.isFinite(response.drift) ? ` (drift ${response.drift.toFixed(2)}s)` : '';
+            addLog(`Applied canonical media state r${mediaState.revision}${drift}`, 'success');
+        } else if (response?.status === 'ignored_desynced') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            addLog(`Canonical media state r${mediaState.revision} skipped: content is desynced`, 'info');
+        } else if (response?.status === 'ignored_episode_mismatch') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            addLog(`Canonical media state r${mediaState.revision} skipped: content is on a different episode`, 'info');
+        } else if (response?.status === 'invalid') {
+            markCanonicalMediaStateHandled(roomId, mediaState.revision);
+            addLog(`Canonical media state r${mediaState.revision} rejected by content validation`, 'warn');
+        }
+        return response || { status: 'no_response' };
+    } catch (error) {
+        addLog(`Canonical media state r${mediaState.revision} pending: ${error.message}`, 'warn');
+        return { status: 'pending_unreachable' };
+    }
+}
+
+async function tryApplyPendingCanonicalMediaState() {
+    if (canonicalRecoveryApplyInProgress) return canonicalRecoveryApplyInProgress;
+    const applyTask = performPendingCanonicalMediaStateApply();
+    canonicalRecoveryApplyInProgress = applyTask;
+    let result;
+    try {
+        result = await applyTask;
+    } finally {
+        if (canonicalRecoveryApplyInProgress === applyTask) canonicalRecoveryApplyInProgress = null;
+    }
+    if (CANONICAL_RECOVERY_RETRYABLE.has(result?.status)) {
+        scheduleCanonicalMediaRecoveryRetry(result.status);
+    }
+    return result;
+}
+
+async function handleCanonicalRoomData(data, hasPendingLocalIntent) {
+    canonicalMediaStateTracker.adoptRoom(data?.roomId || null);
+    const canonicalSnapshot = canonicalMediaStateFromRoomData(data);
+    if (canonicalSnapshot.status === 'unsupported' || canonicalSnapshot.status === 'empty') {
+        persistCanonicalMediaRecovery();
+        return;
+    }
+
+    if (canonicalSnapshot.status === 'invalid') {
+        addLog('Ignored invalid canonical media state in ROOM_DATA', 'warn');
+        persistCanonicalMediaRecovery();
+        return;
+    }
+    const { mediaState } = canonicalSnapshot;
+
+    const received = canonicalMediaStateTracker.receive(data.roomId, mediaState);
+    if (received.status === 'stale') {
+        addLog(`Canonical media state ignored: stale revision ${mediaState.revision}`, 'info');
+        return;
+    }
+    if (received.status !== 'pending') return;
+
+    resetCanonicalMediaRecoveryRetries();
+    persistCanonicalMediaRecovery();
+    addLog(`Canonical media state received: r${mediaState.revision} ${mediaState.playbackState} @ ${mediaState.currentTime.toFixed(2)}s`, 'info');
+
+    if (hasPendingLocalIntent) {
+        markCanonicalMediaStateHandled(data.roomId, mediaState.revision);
+        addLog(`Canonical media state r${mediaState.revision} skipped: authorized queued local intent takes precedence`, 'info');
+        return;
+    }
+    const result = await tryApplyPendingCanonicalMediaState();
+    if (result.status === 'pending_no_target') {
+        addLog(`Canonical media state r${mediaState.revision} pending: no media target`, 'info');
+    }
+}
+
 // --- Event Handlers ---
-async function handleServerEvent(event, data) {
+async function handleServerEvent(event, data, expectedConnectionGeneration = connectionGeneration) {
+    if (expectedConnectionGeneration !== connectionGeneration) return;
     if (!data) {
         addLog(`Ignored server event ${event} due to empty payload`, 'warn');
         return;
@@ -1627,7 +2133,15 @@ async function handleServerEvent(event, data) {
         return;
     }
     switch (event) {
-        case EVENTS.ROOM_DATA:
+        case EVENTS.ROOM_DATA: {
+            if (typeof data.roomId !== 'string' || !data.roomId) {
+                addLog('Ignored malformed ROOM_DATA without a room ID', 'warn');
+                return;
+            }
+            if (pendingRoomDataRoomId && data.roomId !== pendingRoomDataRoomId) {
+                addLog(`Ignored stale ROOM_DATA for ${data.roomId}`, 'warn');
+                return;
+            }
             if (currentRoom?.roomId !== data.roomId) {
                 invalidateChatSession();
                 clearChatActivity();
@@ -1643,7 +2157,9 @@ async function handleServerEvent(event, data) {
             broadcastControlMode();
             markRoomPotentiallyIdle();
             if (currentRoom && Array.isArray(currentRoom.peers)) {
-                currentRoom.peers = currentRoom.peers.map(p => typeof p === 'object' ? createPeerData(p) : { peerId: p, username: null, tabTitle: null, mediaTitle: null, playbackState: null, currentTime: null, volume: null, muted: null, lastHeartbeat: Date.now() });
+                currentRoom.peers = currentRoom.peers
+                    .map(createPeerData)
+                    .filter(candidate => candidate.peerId);
                 
                 // Clear sequence tracking for peers that are no longer in the room
                 const activePeerIds = new Set(currentRoom.peers.map(p => typeof p === 'object' ? p.peerId : p));
@@ -1657,20 +2173,47 @@ async function handleServerEvent(event, data) {
                 currentRoom.peers = [];
             }
 
-            // Recover server-tracked active Episode Lobby if present
-            if (data && data.activeLobby && !episodeLobby) {
+            // ROOM_DATA is authoritative for an already-active server lobby,
+            // but a locally-created offline lobby has not reached the relay
+            // yet and must remain owned by its initiator until queued replay.
+            const hasQueuedLocalLobby = eventQueue.some(entry =>
+                entry?.event === EVENTS.EPISODE_LOBBY
+                && (!entry.roomId || entry.roomId === data.roomId)
+            );
+            const authoritativeLobby = normalizeEpisodeLobby(
+                data.activeLobby,
+                Date.now(),
+                new Set(currentRoom.peers.map(candidate => candidate.peerId))
+            );
+            if (data.activeLobby && !authoritativeLobby) {
+                addLog('Ignored malformed active Episode Lobby in ROOM_DATA', 'warn');
+            }
+            currentRoom.activeLobby = authoritativeLobby;
+            if (!authoritativeLobby && episodeLobby && !hasQueuedLocalLobby) {
+                clearEpisodeLobbyState();
+                addLog('Discarded stale local Episode Lobby after ROOM_DATA confirmed it ended', 'info');
+            } else if (authoritativeLobby) {
+                const sameLobby = episodeLobby
+                    && episodeLobby.expectedTitle === authoritativeLobby.expectedTitle
+                    && episodeLobby.initiatorPeerId === authoritativeLobby.initiatorPeerId;
+                if (!sameLobby && episodeLobbyTimeout) {
+                    clearTimeout(episodeLobbyTimeout);
+                    episodeLobbyTimeout = null;
+                }
                 episodeLobby = {
-                    expectedTitle: data.activeLobby.expectedTitle,
-                    initiatorPeerId: data.activeLobby.initiatorPeerId,
-                    readyPeers: data.activeLobby.readyPeers,
-                    createdAt: Date.now()
+                    ...authoritativeLobby,
+                    createdAt: sameLobby && Number.isFinite(episodeLobby.createdAt)
+                        ? episodeLobby.createdAt
+                        : authoritativeLobby.createdAt
                 };
                 persistEpisodeLobby();
                 broadcastLobbyUpdate();
-                addLog(`Recovered active episode lobby from server: "${episodeLobby.expectedTitle}"`, 'info');
+                if (!sameLobby) {
+                    addLog(`Recovered active episode lobby from server: "${episodeLobby.expectedTitle}"`, 'info');
+                }
 
                 // Notify content script to start polling
-                if (currentTabId) {
+                if (!sameLobby && currentTabId) {
                     const tabId = parseInt(currentTabId);
                     if (!isNaN(tabId)) {
                         sendMessageToCurrentContent({
@@ -1692,8 +2235,40 @@ async function handleServerEvent(event, data) {
             // Inform Website Bridge & Popup
             const joinStatusMsg = { type: 'JOIN_STATUS', success: true, message: 'Joined' };
             await broadcastJoinStatus(joinStatusMsg);
+            if (expectedConnectionGeneration !== connectionGeneration
+                || currentRoom?.roomId !== data.roomId) return;
+            // Resolve replay privacy before declaring ROOM_DATA complete. Local
+            // commands remain queued during this await, and any intervening
+            // role/lobby event is reflected by the policy below before the
+            // canonical precedence decision is made.
+            const replaySettings = eventQueue.some(isQueuedMediaIntent)
+                ? await getSettings()
+                : null;
+            if (expectedConnectionGeneration !== connectionGeneration
+                || currentRoom?.roomId !== data.roomId) return;
+            awaitingRoomData = false;
+            pendingRoomDataRoomId = null;
+
+            const lostRoomAuthority = controlMode === CONTROL_MODES.HOST_ONLY
+                && hostPeerId
+                && !amController();
+            const queuePolicy = applyQueuedRoomPolicy(data.roomId, {
+                canControl: !lostRoomAuthority,
+                activeLobby: !!episodeLobby,
+                desynced: hcmDesynced,
+                authoritativeLobby: !!authoritativeLobby
+            }, lostRoomAuthority
+                ? 'Host Control role changed while offline'
+                : (episodeLobby ? 'Active Episode Lobby takes precedence' : 'Reconnect queue policy'));
+
+            await handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent);
+            await flushEventQueue(replaySettings);
             break;
+        }
         case EVENTS.CONTROL_MODE:
+            // Terminal room teardown is authoritative. Older/custom relays may
+            // still emit a trailing role update after ROOM_CLOSED.
+            if (!currentRoom) break;
             // Host Control Mode changed (toggle or host-leave fallback).
             controlMode = data.controlMode || CONTROL_MODES.EVERYONE;
             hostPeerId = data.hostPeerId || null;
@@ -1761,7 +2336,7 @@ async function handleServerEvent(event, data) {
             await chatReceiveQueue;
             break;
         }
-        case EVENTS.ERROR:
+        case EVENTS.ERROR: {
             isConnecting = false;
             const terminalRoomError = data.code === ERROR_CODES.ROOM_CLOSED
                 || data.code === ERROR_CODES.PEER_TIMED_OUT
@@ -1796,10 +2371,15 @@ async function handleServerEvent(event, data) {
             const errStatusMsg = { type: 'JOIN_STATUS', success: false, message: data.message };
             await broadcastJoinStatus(errStatusMsg);
             break;
+        }
         case EVENTS.PLAY:
         case EVENTS.PAUSE:
         case EVENTS.SEEK:
         case EVENTS.FORCE_SYNC_PREPARE:
+            if (event === EVENTS.FORCE_SYNC_PREPARE && episodeLobby) {
+                if (currentRoom) currentRoom.activeLobby = null;
+                clearEpisodeLobbyState();
+            }
             if (data.senderId && typeof data.seq === 'number') {
                 const lastSeq = lastSeqBySender[data.senderId];
                 if (lastSeq !== undefined && data.seq <= lastSeq) {
@@ -1808,6 +2388,9 @@ async function handleServerEvent(event, data) {
                 }
                 lastSeqBySender[data.senderId] = data.seq;
                 _persistLastSeq();
+            }
+            if (isCanonicalSupersedingControl(event, data)) {
+                supersedeCanonicalMediaRecovery(`newer ${event}`, event, data);
             }
             if (data.senderId) {
                 addToHistory(event, data.senderId);
@@ -1861,12 +2444,17 @@ async function handleServerEvent(event, data) {
             }
             break;
         case EVENTS.FORCE_SYNC_EXECUTE:
+            if (episodeLobby) {
+                if (currentRoom) currentRoom.activeLobby = null;
+                clearEpisodeLobbyState();
+            }
             if (data?.senderId && typeof data.seq === 'number') {
                 const lastSeq = lastSeqBySender[data.senderId];
                 if (lastSeq !== undefined && data.seq <= lastSeq) break;
                 lastSeqBySender[data.senderId] = data.seq;
                 _persistLastSeq();
             }
+            supersedeCanonicalMediaRecovery(`newer ${event}`, event, data);
             if (data?.senderId) {
                 addToHistory(event, data.senderId);
                 showNotification(data.senderId, event);
@@ -2001,19 +2589,40 @@ async function handleServerEvent(event, data) {
             }
             break;
         case EVENTS.EPISODE_LOBBY:
-            if (data.senderId && data.expectedTitle) {
-                addLog(`Episode lobby from ${data.senderId}: "${data.expectedTitle}"`, 'info');
+            if (typeof data.senderId === 'string'
+                && typeof data.expectedTitle === 'string'
+                && data.expectedTitle
+                && currentRoom?.peers?.some(peer => (typeof peer === 'object' ? peer.peerId : peer) === data.senderId)) {
+                const expectedTitle = data.expectedTitle.substring(0, 100);
+                const incomingLobby = normalizeEpisodeLobby({
+                    expectedTitle,
+                    initiatorPeerId: data.senderId,
+                    readyPeers: data.authoritative === true && Array.isArray(data.readyPeers)
+                        ? data.readyPeers
+                        : [data.senderId],
+                    createdAt: Date.now()
+                }, Date.now(), new Set(currentRoom.peers.map(peer => peer.peerId)));
+                if (!incomingLobby) {
+                    addLog(`Ignored malformed Episode lobby from ${data.senderId}`, 'warn');
+                    break;
+                }
+                supersedeCanonicalMediaRecovery(`newer ${event}`);
+                if (currentRoom) {
+                    currentRoom.activeLobby = incomingLobby;
+                    if (storageInitialized) chrome.storage.session.set({ currentRoom });
+                }
+                addLog(`Episode lobby from ${data.senderId}: "${expectedTitle}"`, 'info');
                 // If we already have a lobby for this same title, treat as dedup
-                if (episodeLobby && sameEpisode(episodeLobby.expectedTitle, data.expectedTitle)) {
+                if (episodeLobby
+                    && episodeLobby.initiatorPeerId === data.senderId
+                    && sameEpisode(episodeLobby.expectedTitle, expectedTitle)) {
                     break; // Already tracking this lobby
                 }
                 // Cancel any existing lobby before starting a new one
                 if (episodeLobby) clearEpisodeLobbyState();
                 
                 episodeLobby = {
-                    expectedTitle: data.expectedTitle,
-                    initiatorPeerId: data.senderId,
-                    readyPeers: [data.senderId], // Initiator is already ready
+                    ...incomingLobby,
                     createdAt: Date.now()
                 };
                 persistEpisodeLobby();
@@ -2028,24 +2637,52 @@ async function handleServerEvent(event, data) {
                     if (!isNaN(tabId)) {
                         sendMessageToCurrentContent({
                             type: 'EPISODE_LOBBY',
-                            expectedTitle: data.expectedTitle
+                            expectedTitle
                         }).catch(() => {});
                     }
                 }
             }
             break;
         case EVENTS.EPISODE_READY:
-            if (episodeLobby && data.senderId) {
-                if (!episodeLobby.readyPeers.includes(data.senderId)) {
-                    episodeLobby.readyPeers.push(data.senderId);
+            {
+                const lobby = episodeLobby;
+                if (!lobby || !data.senderId) break;
+                const senderPresent = currentRoom?.peers?.some(peer =>
+                    (typeof peer === 'object' ? peer.peerId : peer) === data.senderId
+                );
+                if (!senderPresent
+                    || (data.expectedTitle
+                        && !sameEpisode(data.expectedTitle, lobby.expectedTitle))) {
+                    addLog(`Ignored stale Episode ready from ${data.senderId}`, 'warn');
+                    break;
+                }
+                let readyAdded = false;
+                if (!lobby.readyPeers.includes(data.senderId)) {
+                    lobby.readyPeers.push(data.senderId);
+                    readyAdded = true;
                     persistEpisodeLobby();
                     broadcastLobbyUpdate();
-                    addLog(`Episode ready from ${data.senderId} (${episodeLobby.readyPeers.length})`, 'info');
-                    checkEpisodeLobbyCompletion();
+                    addLog(`Episode ready from ${data.senderId} (${lobby.readyPeers.length})`, 'info');
                 }
+                const readyPeers = [...lobby.readyPeers];
+                if (currentRoom?.activeLobby) {
+                    currentRoom.activeLobby.readyPeers = readyPeers;
+                    if (storageInitialized) chrome.storage.session.set({ currentRoom });
+                }
+                if (readyAdded) checkEpisodeLobbyCompletion();
             }
             break;
         case EVENTS.EPISODE_LOBBY_CANCEL:
+            if (typeof data.senderId !== 'string' || !currentRoom?.peers?.some(peer =>
+                (typeof peer === 'object' ? peer.peerId : peer) === data.senderId)) {
+                addLog(`Ignored Episode lobby cancellation from unknown peer ${data.senderId || 'unknown'}`, 'warn');
+                break;
+            }
+            supersedeCanonicalMediaRecovery(`newer ${event}`);
+            if (currentRoom) {
+                currentRoom.activeLobby = null;
+                if (storageInitialized) chrome.storage.session.set({ currentRoom });
+            }
             if (episodeLobby) {
                 const title = episodeLobby.expectedTitle;
                 clearEpisodeLobbyState();
@@ -2074,6 +2711,7 @@ async function handleServerEvent(event, data) {
 }
 
 function executeForceSync() {
+    supersedeCanonicalMediaRecovery('local force_sync_execute', EVENTS.FORCE_SYNC_EXECUTE);
     if (forceSyncTimeout) clearTimeout(forceSyncTimeout);
     isForceSyncInitiator = false;
     forceSyncAcks.clear();
@@ -2147,6 +2785,7 @@ function clearEpisodeLobbyState() {
 function cancelEpisodeLobby(reason) {
     if (!episodeLobby) return;
     const title = episodeLobby.expectedTitle;
+    supersedeCanonicalMediaRecovery('local episode_lobby_cancel');
     
     // Broadcast cancellation to room
     emit(EVENTS.EPISODE_LOBBY_CANCEL, { peerId });
@@ -2188,6 +2827,10 @@ function cancelEpisodeLobby(reason) {
 function executeEpisodeLobby() {
     if (!episodeLobby) return;
     const title = episodeLobby.expectedTitle;
+    if (currentRoom) {
+        currentRoom.activeLobby = null;
+        if (storageInitialized) chrome.storage.session.set({ currentRoom });
+    }
     clearEpisodeLobbyState();
     addLog(`Episode lobby complete: Starting "${title}" via Force Sync`, 'success');
 
@@ -2226,8 +2869,13 @@ function checkEpisodeLobbyCompletion() {
     // M-3: desynced peers (watching on their own) sit out the lobby — their content
     // script ignores EPISODE_LOBBY and never reports ready. Don't let them block
     // completion: count only peers who actually participate.
-    const participatingCount = peers.filter(p => !(typeof p === 'object' && p.desynced)).length;
-    if (episodeLobby.readyPeers.length >= participatingCount) {
+    const participatingPeerIds = new Set(peers
+        .filter(candidate => !(typeof candidate === 'object' && candidate.desynced))
+        .map(candidate => typeof candidate === 'object' ? candidate.peerId : candidate)
+        .filter(Boolean));
+    const readyParticipatingCount = episodeLobby.readyPeers
+        .filter(candidate => participatingPeerIds.has(candidate)).length;
+    if (readyParticipatingCount >= participatingPeerIds.size) {
         executeEpisodeLobby();
     }
 }
@@ -2276,6 +2924,10 @@ function routeToContent(action, payload) {
         commandSenderId,
         0
     );
+    return enqueueContentCommand(deliver);
+}
+
+function enqueueContentCommand(deliver) {
     const queued = contentCommandQueue.catch(() => {}).then(deliver);
     contentCommandQueue = queued;
     return queued;
@@ -3310,6 +3962,9 @@ async function activateTargetTab(tabId, tabTitle, {
             return { status: 'superseded' };
         }
         updateBadgeStatus();
+        if (currentTargetHasVideo) {
+            await tryApplyPendingCanonicalMediaState();
+        }
         return {
             status: 'ok',
             tabId: selectedTabId,
@@ -3731,6 +4386,7 @@ function leaveOldRoomIfSwitching(newRoomId) {
         addLog(`Switching rooms: leaving ${currentRoom.roomId} to join ${newRoomId}`, 'info');
         forceDisconnect();
         currentRoom = null;
+        clearCanonicalMediaRecovery();
         clearChatActivity();
         controlMode = CONTROL_MODES.EVERYONE;
         hostPeerId = null;
@@ -3853,6 +4509,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
     }
 
     if (message.type === 'CONNECT') {
+        await waitForRoomTeardown();
         webJoinCoordinator.invalidate();
         const settings = await getSettings();
         connectIntent = !!settings.roomId;
@@ -3891,12 +4548,13 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'RETRY_CONNECT') {
+        await waitForRoomTeardown();
         connectIntent = true;
         reconnectFailed = false;
         reconnectStartTime = null;
         reconnectAttempts = 0;
         chrome.storage.session.set({ reconnectFailed: false, reconnectAttempts: 0, reconnectStartTime: null });
-        forceDisconnect();
+        forceDisconnect({ preserveEventQueue: true });
         connect();
         sendResponse({ status: 'ok' });
     } else if (message.type === 'GET_STATUS') {
@@ -3953,6 +4611,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             episodeLobby: episodeLobby,
             reconnectAttempts,
             reconnectSlowMode: reconnectFailed,
+            queuedLogicalEvents: eventQueue.length,
+            queuedMediaIntents: queuedMediaIntentCount(eventQueue, currentRoom?.roomId || pendingRoomDataRoomId),
+            queuedWireEvents: queuedWireCount(eventQueue),
             roomId: currentRoom ? currentRoom.roomId : null,
             serverUrl: currentServerUrl,
             version: chrome.runtime.getManifest().version,
@@ -3974,9 +4635,20 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             sendResponse({ supported: false, hasKey: false });
             return;
         }
+        const generation = chatSessionGeneration;
+        const roomId = currentRoom.roomId;
+        const tabId = Number(currentTabId);
+        const isCurrentSession = () => generation === chatSessionGeneration
+            && currentRoom?.roomId === roomId
+            && Number(currentTabId) === tabId
+            && isCurrentContentSender(sender);
         const settings = await getSettings();
         const localeData = await chrome.storage.local.get(['locale', 'browserNotifications']);
         await loadLocale(localeData.locale || getSystemLanguage());
+        if (!isCurrentSession() || settings.roomId !== roomId) {
+            sendResponse({ supported: false, hasKey: false, status: 'session_changed' });
+            return;
+        }
         const translated = key => {
             const value = getMessage(key);
             return value === key ? '' : value;
@@ -3988,7 +4660,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             connected: !!(socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined),
             eventNotifications: localeData.browserNotifications === true,
             peerId,
-            roomId: currentRoom.roomId,
+            roomId,
             activity: chatActivityStore.snapshot(),
             strings: {
                 title: translated('CHAT_TITLE'),
@@ -4155,6 +4827,21 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         // heartbeat survives SW restarts (idle timeout, crash).
         hcmDesynced = !!message.desynced;
         if (storageInitialized) chrome.storage.session.set({ hcmDesynced });
+        if (hcmDesynced) {
+            applyQueuedRoomPolicy(currentRoom?.roomId, { desynced: true }, 'Intentional solo mode');
+            const pending = canonicalMediaStateTracker.getPending(currentRoom?.roomId);
+            if (pending) {
+                markCanonicalMediaStateHandled(pending.roomId, pending.mediaState.revision);
+                addLog(`Canonical media state r${pending.mediaState.revision} skipped: local guest chose desynced mode`, 'info');
+            }
+        }
+        if (episodeLobby) {
+            if (hcmDesynced && episodeLobby.initiatorPeerId === peerId) {
+                cancelEpisodeLobby('Initiator entered solo mode');
+            } else {
+                checkEpisodeLobbyCompletion();
+            }
+        }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'LEAVE_ROOM') {
         await endRoomSession({ notifyServer: true, reason: 'Left Room' });
@@ -4170,6 +4857,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         emit(EVENTS.GET_ROOMS, {});
         sendResponse({ status: 'ok' });
     } else if (message.type === 'WEB_JOIN_REQUEST') {
+        await waitForRoomTeardown();
         const { roomId: rawRoomId, password, chatKey: rawChatKey, useCustomServer, serverUrl } = message;
         const roomId = normalizeRoomId(rawRoomId);
         const chatKey = validateChatSecret(rawChatKey);
@@ -4301,6 +4989,11 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
         }
         const processEvent = async () => {
+            const eventRoomId = currentRoom?.roomId || pendingRoomDataRoomId || null;
+            const eventTabId = normalizeTabId(currentTabId);
+            const isCurrentEventContext = () => (currentRoom?.roomId || pendingRoomDataRoomId || null) === eventRoomId
+                && normalizeTabId(currentTabId) === eventTabId
+                && (!senderIsContent || isCurrentContentSender(sender));
             // Host Control Mode (sender-side): a non-controller in host-only mode must
             // not drive the room. Don't broadcast; hand the action back to content.js so
             // it can snap the local player back / offer desync.
@@ -4324,7 +5017,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             // event (the list is updated synchronously on PEER_STATUS join/leave),
             // never cached, so the instant a peer joins we resume sending.
             const otherCount = currentRoom && Array.isArray(currentRoom.peers) ? currentRoom.peers.filter(p => (typeof p === 'object' ? p.peerId : p) !== peerId).length : 0;
-            const hasOtherPeers = otherCount > 0;
+            let hasOtherPeers = otherCount > 0;
 
             // Force Sync only makes sense with other peers. Solo it is a no-op:
             // skip the pause/seek + ACK-wait entirely (no freeze, no server traffic).
@@ -4352,11 +5045,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 payload.targetTime = targetTime;
             }
 
-            const timestamp = Date.now();
-            localSeq++;
-            chrome.storage.session.set({ localSeq });
-            updateLastAction(message.action, 'You', timestamp);
-            
             const hasPlaybackTime = Number.isFinite(payload.currentTime) || Number.isFinite(payload.targetTime);
             if (!senderIsContent && (message.action === EVENTS.PLAY || message.action === EVENTS.PAUSE) && !hasPlaybackTime) {
                 const tabId = currentTabId ? parseInt(currentTabId) : NaN;
@@ -4367,6 +5055,36 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     }
                 }
             }
+            if (!isCurrentEventContext()) {
+                sendResponse({ status: 'ignored_stale_session' });
+                return;
+            }
+
+            const isNonEssentialEvent = message.action === EVENTS.PLAY
+                || message.action === EVENTS.PAUSE
+                || message.action === EVENTS.SEEK;
+            const settings = await getSettings();
+            if (!isCurrentEventContext()
+                || (eventRoomId && settings.roomId !== eventRoomId)) {
+                sendResponse({ status: 'ignored_stale_session' });
+                return;
+            }
+            const currentOtherCount = currentRoom && Array.isArray(currentRoom.peers)
+                ? currentRoom.peers.filter(p => (typeof p === 'object' ? p.peerId : p) !== peerId).length
+                : 0;
+            hasOtherPeers = currentOtherCount > 0;
+            const shouldEmit = !(isNonEssentialEvent
+                && !hasOtherPeers
+                && !serverSupports(CAPABILITIES.MEDIA_STATE_V1));
+
+            if (isCanonicalSupersedingControl(message.action, payload)) {
+                supersedeCanonicalMediaRecovery(`local ${message.action}`);
+            }
+            const timestamp = Date.now();
+            localSeq++;
+            chrome.storage.session.set({ localSeq });
+            updateLastAction(message.action, 'You', timestamp);
+
             lastActionState.targetTime = payload.targetTime !== undefined ? payload.targetTime : payload.currentTime;
             if (storageInitialized) chrome.storage.session.set({ lastActionState });
             
@@ -4410,13 +5128,11 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             addToHistory(message.action, 'You');
             sendChatActivity(message.action, peerId, timestamp);
 
-            const isNonEssentialEvent = message.action === EVENTS.PLAY || message.action === EVENTS.PAUSE || message.action === EVENTS.SEEK;
-            if (isNonEssentialEvent && !hasOtherPeers) {
+            if (!shouldEmit) {
                 sendResponse({ status: 'ok_solo' });
                 return;
             }
-            
-            const settings = await getSettings();
+
             const outboundPayload = withTitlePrivacy(message.payload, settings, ['mediaTitle']);
             emit(message.action, { ...outboundPayload, peerId });
             sendResponse({ status: 'ok' });
@@ -4500,11 +5216,22 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             updateBadgeStatus();
         }
 
+        requestCanonicalMediaRecoveryAttempt();
         markRoomUseful();
+        const heartbeatRoomId = currentRoom?.roomId || null;
+        const heartbeatPayload = message.payload && typeof message.payload === 'object'
+            ? { ...message.payload }
+            : {};
         getSettings().then(settings => {
-            const sharedTitles = getSharedTitleFields(settings, message.payload?.mediaTitle);
+            if ((sender.tab && !isCurrentContentSender(sender))
+                || currentRoom?.roomId !== heartbeatRoomId
+                || settings.roomId !== heartbeatRoomId) {
+                sendResponse({ status: 'ignored_stale_session' });
+                return;
+            }
+            const sharedTitles = getSharedTitleFields(settings, heartbeatPayload.mediaTitle);
             const statusPayload = {
-                ...message.payload,
+                ...heartbeatPayload,
                 peerId,
                 username: settings.username,
                 tabTitle: sharedTitles.tabTitle,
@@ -4520,10 +5247,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     me.tabTitle = sharedTitles.tabTitle;
                     me.username = settings.username;
                     me.mediaTitle = sharedTitles.mediaTitle;
-                    me.playbackState = message.payload?.playbackState;
-                    me.currentTime = message.payload?.currentTime;
-                    me.volume = message.payload?.volume;
-                    me.muted = message.payload?.muted;
+                    me.playbackState = heartbeatPayload.playbackState;
+                    me.currentTime = heartbeatPayload.currentTime;
+                    me.volume = heartbeatPayload.volume;
+                    me.muted = heartbeatPayload.muted;
                     me.lastHeartbeat = Date.now();
                     if (storageInitialized) chrome.storage.session.set({ currentRoom });
                     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
@@ -4619,6 +5346,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 return;
             }
         }
+        const episodeRoomId = currentRoom?.roomId || null;
+        const isCurrentEpisodeContext = () => currentRoom?.roomId === episodeRoomId
+            && (!sender.tab || isCurrentContentSender(sender));
 
         const newTitle = message.payload && message.payload.newTitle;
         if (newTitle && extractEpisodeId(newTitle) === null) {
@@ -4632,6 +5362,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
 
         const settings = await getSettings();
+        if (!isCurrentEpisodeContext() || settings.roomId !== episodeRoomId) {
+            sendResponse({ status: 'ignored_stale_session' });
+            return;
+        }
         const lobbyTitle = sanitizeSharedTitle(newTitle, settings.mediaTitlePrivacyMode);
         if (!lobbyTitle) {
             addLog(`Episode change detected but media title sharing is ${settings.mediaTitlePrivacyMode}; not creating a lobby.`, 'info');
@@ -4641,9 +5375,19 @@ async function handleAsyncMessage(message, sender, sendResponse) {
 
         // Check setting
         const epSettings = await chrome.storage.local.get(['autoSyncNextEpisode']);
+        if (!isCurrentEpisodeContext()) {
+            sendResponse({ status: 'ignored_stale_session' });
+            return;
+        }
         if (epSettings.autoSyncNextEpisode === false) {
             addLog(`Episode change detected ("${lobbyTitle}") but Auto-Sync is disabled.`, 'info');
             sendResponse({ status: 'disabled' });
+            return;
+        }
+
+        if (hcmDesynced) {
+            addLog(`Episode change ("${lobbyTitle}") — intentional solo mode, not creating a lobby.`, 'info');
+            sendResponse({ status: 'desynced_skip' });
             return;
         }
 
@@ -4675,7 +5419,11 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 episodeLobby.readyPeers.push(peerId);
                 persistEpisodeLobby();
                 broadcastLobbyUpdate();
-                emit(EVENTS.EPISODE_READY, { peerId, title: lobbyTitle });
+                emit(EVENTS.EPISODE_READY, {
+                    peerId,
+                    title: lobbyTitle,
+                    expectedTitle: episodeLobby.expectedTitle
+                });
                 checkEpisodeLobbyCompletion();
             }
             sendResponse({ status: 'ready_sent' });
@@ -4686,6 +5434,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         if (episodeLobby) clearEpisodeLobbyState();
 
         // Create new lobby
+        supersedeCanonicalMediaRecovery('local episode_lobby', EVENTS.PAUSE);
         episodeLobby = {
             expectedTitle: lobbyTitle,
             initiatorPeerId: peerId,
@@ -4723,24 +5472,47 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
         }
         // Content script confirmed it loaded the lobby episode
-        if (episodeLobby && message.payload && sameEpisode(message.payload.title, episodeLobby.expectedTitle)) {
-            if (!episodeLobby.readyPeers.includes(peerId)) {
+        const lobby = episodeLobby;
+        const lobbyRoomId = currentRoom?.roomId || null;
+        const isCurrentLobbyContext = () => episodeLobby === lobby
+            && currentRoom?.roomId === lobbyRoomId
+            && (!sender.tab || isCurrentContentSender(sender));
+        if (lobby && message.payload && sameEpisode(message.payload.title, lobby.expectedTitle)) {
+            if (!lobby.readyPeers.includes(peerId)) {
                 const settings = await getSettings();
+                if (!isCurrentLobbyContext() || settings.roomId !== lobbyRoomId) {
+                    sendResponse({ status: 'ignored_stale_lobby' });
+                    return;
+                }
+                if (lobby.readyPeers.includes(peerId)) {
+                    sendResponse({ status: 'ok' });
+                    return;
+                }
                 const readyTitle = sanitizeSharedTitle(message.payload.title, settings.mediaTitlePrivacyMode);
-                episodeLobby.readyPeers.push(peerId);
+                lobby.readyPeers.push(peerId);
                 persistEpisodeLobby();
                 broadcastLobbyUpdate();
-                emit(EVENTS.EPISODE_READY, { peerId, title: readyTitle });
-                addLog(`Local episode ready: "${readyTitle || episodeLobby.expectedTitle}"`, 'success');
+                emit(EVENTS.EPISODE_READY, {
+                    peerId,
+                    title: readyTitle,
+                    expectedTitle: lobby.expectedTitle
+                });
+                addLog(`Local episode ready: "${readyTitle || lobby.expectedTitle}"`, 'success');
                 checkEpisodeLobbyCompletion();
             }
         }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'TITLE_PRIVACY_CHANGED') {
+        const privacyRoomId = currentRoom?.roomId || null;
+        const privacyLobby = episodeLobby;
         const settings = await getSettings();
-        if (episodeLobby && episodeLobby.initiatorPeerId === peerId) {
-            const nextLobbyTitle = sanitizeSharedTitle(episodeLobby.expectedTitle, settings.mediaTitlePrivacyMode);
-            if (!nextLobbyTitle || nextLobbyTitle !== episodeLobby.expectedTitle) {
+        if (currentRoom?.roomId !== privacyRoomId || settings.roomId !== privacyRoomId) {
+            sendResponse({ status: 'ignored_stale_session' });
+            return;
+        }
+        if (episodeLobby === privacyLobby && privacyLobby?.initiatorPeerId === peerId) {
+            const nextLobbyTitle = sanitizeSharedTitle(privacyLobby.expectedTitle, settings.mediaTitlePrivacyMode);
+            if (!nextLobbyTitle || nextLobbyTitle !== privacyLobby.expectedTitle) {
                 cancelEpisodeLobby('Title privacy changed');
             }
         }
@@ -4826,6 +5598,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 return;
             }
         }
+        requestCanonicalMediaRecoveryAttempt();
         // Content script re-injected, check if there's an active lobby
         if (episodeLobby) {
             sendResponse({ lobbyActive: true, expectedTitle: episodeLobby.expectedTitle });

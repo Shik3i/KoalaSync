@@ -83,6 +83,7 @@
         EPISODE_LOBBY: "episode_lobby",
         EPISODE_READY: "episode_ready"
     };
+    const MAX_MEDIA_TIME = 86400;
     // --- SHARED_EVENTS_INJECT_END ---
 
     // Suppresses native event reporting after a programmatic action.
@@ -90,6 +91,9 @@
     // While a timer exists, matching native events are consumed and not relayed.
     // Timers self-clean after 300ms if the native event never fires.
     let _suppressTimers = {};
+    const canonicalRestorePlaySuppressions = new Set();
+    let canonicalMediaApplyGeneration = 0;
+    let canonicalSupersedingLocalState = null;
 
     function _setSuppress(state) {
         if (_suppressTimers[state]) clearTimeout(_suppressTimers[state]);
@@ -103,6 +107,25 @@
             clearTimeout(_suppressTimers[state]);
             delete _suppressTimers[state];
         }
+    }
+
+    function holdCanonicalRestorePlaySuppression() {
+        const hold = { timeout: null };
+        hold.timeout = setTimeout(() => canonicalRestorePlaySuppressions.delete(hold), 5000);
+        canonicalRestorePlaySuppressions.add(hold);
+        return hold;
+    }
+
+    function releaseCanonicalRestorePlaySuppression(hold) {
+        if (!canonicalRestorePlaySuppressions.delete(hold)) return;
+        clearTimeout(hold.timeout);
+    }
+
+    function consumeCanonicalRestorePlaySuppression() {
+        const hold = canonicalRestorePlaySuppressions.values().next().value;
+        if (!hold) return false;
+        releaseCanonicalRestorePlaySuppression(hold);
+        return true;
     }
 
     // --- Seek Relay Filtering ---
@@ -1184,13 +1207,13 @@
     // --- Helper: site-specific player actions, then native HTML5 fallback ---
     function tryMediaAction(action, data) {
         const video = findVideo();
-        if (!video) return;
+        if (!video) return false;
 
         if (action === EVENTS.SEEK) {
             const target = data ? (data.targetTime !== undefined ? data.targetTime : data.currentTime) : undefined;
             if (!Number.isFinite(target)) {
                 reportLog(`Media Action Error: Invalid seek payload - ${JSON.stringify(data)}`, 'error');
-                return;
+                return false;
             }
             data = { ...data, targetTime: target };
         }
@@ -1198,24 +1221,218 @@
         try {
             const actionFix = getActivePlayerActionFix();
             if (tryPlayerActionFix(actionFix, action, video, data)) {
-                return;
+                return true;
             }
 
             // Fallback for native HTML5
             if (action === EVENTS.PLAY) {
                 _setSuppress('playing');
-                video.play().catch((e) => {
-                    reportLog(`Playback prevented: ${e.message}`, 'warn');
-                    _clearSuppress('playing');
-                });
+                const playResult = video.play();
+                if (playResult && typeof playResult.then === 'function') {
+                    return playResult.then(() => true).catch((e) => {
+                        reportLog(`Playback prevented: ${e.message}`, 'warn');
+                        _clearSuppress('playing');
+                        return false;
+                    });
+                }
+                return true;
             } else if (action === EVENTS.PAUSE) {
                 _setSuppress('paused');
                 video.pause();
+                return true;
             } else if (action === EVENTS.SEEK) {
                 seekVideo(video, data.targetTime, data.delta);
+                return true;
             }
-    } catch (e) {
+            return false;
+        } catch (e) {
             reportLog(`Media Action Error: ${e.message}`, 'error');
+            return false;
+        }
+    }
+
+    function beginCanonicalMediaApply() {
+        canonicalMediaApplyGeneration++;
+        canonicalSupersedingLocalState = null;
+        return canonicalMediaApplyGeneration;
+    }
+
+    function cancelCanonicalMediaApply(action = null, video = null, preserveLocalState = false, data = null) {
+        canonicalMediaApplyGeneration++;
+        const storesPlaybackIntent = action === EVENTS.PLAY
+            || action === EVENTS.PAUSE
+            || action === EVENTS.SEEK
+            || action === EVENTS.FORCE_SYNC_PREPARE
+            || action === EVENTS.FORCE_SYNC_EXECUTE;
+        if (storesPlaybackIntent) {
+            const payloadTime = Number.isFinite(data?.targetTime)
+                ? data.targetTime
+                : (Number.isFinite(data?.currentTime) ? data.currentTime : null);
+            const videoTime = video ? getSyncCurrentTime(video) : null;
+            canonicalSupersedingLocalState = {
+                playbackState: action === EVENTS.PLAY || action === EVENTS.FORCE_SYNC_EXECUTE
+                    ? 'playing'
+                    : (action === EVENTS.PAUSE || action === EVENTS.FORCE_SYNC_PREPARE
+                        ? 'paused'
+                        : (video ? (video.paused ? 'paused' : 'playing') : canonicalSupersedingLocalState?.playbackState)),
+                currentTime: payloadTime ?? videoTime
+            };
+        } else if (!preserveLocalState) {
+            canonicalSupersedingLocalState = null;
+        }
+        return canonicalMediaApplyGeneration;
+    }
+
+    function isCanonicalMediaApplyCurrent(generation) {
+        return !destroyed && generation === canonicalMediaApplyGeneration;
+    }
+
+    async function restoreSupersedingLocalState(video) {
+        const restorationGeneration = canonicalMediaApplyGeneration;
+        const state = canonicalSupersedingLocalState;
+        if (!state || !video || destroyed || video.isConnected === false) return;
+
+        if (state.playbackState === 'paused' && !video.paused) {
+            _setSuppress('paused');
+            video.pause();
+        }
+        if (Number.isFinite(state.currentTime)) {
+            const currentTime = getSyncCurrentTime(video);
+            if (currentTime === null || Math.abs(currentTime - state.currentTime) >= MIN_SEEK_DELTA) {
+                _setSuppress('seek');
+                seekVideo(video, state.currentTime);
+            }
+        }
+        if (state.playbackState === 'playing' && video.paused) {
+            _setSuppress('playing');
+            const playSuppression = holdCanonicalRestorePlaySuppression();
+            try {
+                await video.play();
+            } catch (error) {
+                _clearSuppress('playing');
+                reportLog(`Could not restore locally superseding playback: ${error.message}`, 'warn');
+            } finally {
+                releaseCanonicalRestorePlaySuppression(playSuppression);
+            }
+        }
+        // A delayed play() can settle after an even newer command already ran.
+        // Re-assert that newest intent so the old promise cannot win last.
+        if (!destroyed && restorationGeneration !== canonicalMediaApplyGeneration) {
+            await restoreSupersedingLocalState(video);
+        }
+    }
+
+    function pollCanonicalMediaState(mediaState, startedAt, applyGeneration, timeoutMs = 2500) {
+        return new Promise((resolve) => {
+            const interval = 100;
+            const finishAt = Date.now() + timeoutMs;
+            const timer = setInterval(() => {
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) {
+                    clearInterval(timer);
+                    seekPollTimers.delete(timer);
+                    resolve(null);
+                    return;
+                }
+                const video = findVideo();
+                const currentTime = video ? getSyncCurrentTime(video) : null;
+                const projectedTime = mediaState.currentTime
+                    + (mediaState.playbackState === 'playing'
+                        ? Math.max(0, Date.now() - startedAt) / 1000
+                        : 0);
+                const playbackMatches = video
+                    && (mediaState.playbackState === 'playing' ? !video.paused : video.paused);
+                const drift = currentTime === null ? null : projectedTime - currentTime;
+                if (playbackMatches && drift !== null && Math.abs(drift) < MIN_SEEK_DELTA) {
+                    clearInterval(timer);
+                    seekPollTimers.delete(timer);
+                    resolve({ currentTime, drift });
+                } else if (Date.now() >= finishAt) {
+                    clearInterval(timer);
+                    seekPollTimers.delete(timer);
+                    resolve(null);
+                }
+            }, interval);
+            seekPollTimers.add(timer);
+        });
+    }
+
+    async function applyCanonicalMediaState(mediaState, applyGeneration) {
+        if (!mediaState || typeof mediaState !== 'object'
+            || !Number.isSafeInteger(mediaState.revision) || mediaState.revision < 1
+            || (mediaState.playbackState !== 'playing' && mediaState.playbackState !== 'paused')
+            || typeof mediaState.currentTime !== 'number'
+            || !Number.isFinite(mediaState.currentTime)
+            || mediaState.currentTime < 0
+            || mediaState.currentTime > MAX_MEDIA_TIME
+            || (mediaState.mediaTitle !== undefined
+                && mediaState.mediaTitle !== null
+                && typeof mediaState.mediaTitle !== 'string')) {
+            return { status: 'invalid' };
+        }
+        if (!isCanonicalMediaApplyCurrent(applyGeneration)) return { status: 'superseded' };
+        if (hcmDesynced) return { status: 'ignored_desynced' };
+        const localMediaTitle = getMediaTitle();
+        if (_autoSyncEnabled && isDifferentEpisode(mediaState.mediaTitle, localMediaTitle)) {
+            reportLog(`Canonical media state ignored: sender="${mediaState.mediaTitle || '?'}" vs mine="${localMediaTitle || '?'}"`, 'warn');
+            return { status: 'ignored_episode_mismatch' };
+        }
+
+        const video = findVideo();
+        if (!video) return { status: 'no_video' };
+
+        const currentTime = getSyncCurrentTime(video);
+        const drift = currentTime === null ? null : mediaState.currentTime - currentTime;
+        const shouldSeek = drift === null || Math.abs(drift) >= MIN_SEEK_DELTA;
+        const startedAt = Date.now();
+        const superseded = async () => {
+            await restoreSupersedingLocalState(video);
+            return { status: 'superseded', revision: mediaState.revision };
+        };
+
+        try {
+            // Paused recovery pauses before seeking; playing recovery seeks before
+            // starting. Both paths reuse the same site/page-API abstractions and
+            // native-event suppression as ordinary remote commands.
+            if (mediaState.playbackState === 'paused' && !video.paused) {
+                const pauseApplied = await tryMediaAction(EVENTS.PAUSE);
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+                if (!pauseApplied) {
+                    return { status: 'apply_failed', reason: 'pause_action_failed' };
+                }
+            }
+            if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+            if (shouldSeek) {
+                _setSuppress('seek');
+                const seekApplied = await tryMediaAction(EVENTS.SEEK, { targetTime: mediaState.currentTime });
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+                if (!seekApplied) {
+                    return { status: 'apply_failed', reason: 'seek_action_failed' };
+                }
+            }
+            if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+            if (mediaState.playbackState === 'playing' && video.paused) {
+                const playApplied = await tryMediaAction(EVENTS.PLAY);
+                if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+                if (!playApplied) {
+                    return { status: 'apply_failed', reason: 'play_action_failed' };
+                }
+            }
+            const verified = await pollCanonicalMediaState(mediaState, startedAt, applyGeneration);
+            if (!isCanonicalMediaApplyCurrent(applyGeneration)) return superseded();
+            if (!verified) {
+                reportLog(`Canonical media state r${mediaState.revision} could not be verified`, 'warn');
+                return { status: 'apply_failed', reason: 'verification_timeout' };
+            }
+            scheduleProactiveHeartbeat();
+            return {
+                status: 'applied',
+                revision: mediaState.revision,
+                drift: verified.drift,
+                sought: shouldSeek
+            };
+        } catch (error) {
+            reportLog(`Canonical media state apply failed: ${error.message}`, 'warn');
+            return { status: 'apply_failed' };
         }
     }
 
@@ -1319,6 +1536,29 @@
             return true;
         }
 
+        if (message.type === 'CANCEL_CANONICAL_MEDIA_STATE') {
+            const preserveLocalState = message.reason === `local ${EVENTS.PLAY}`
+                || message.reason === `local ${EVENTS.PAUSE}`
+                || message.reason === `local ${EVENTS.SEEK}`;
+            cancelCanonicalMediaApply(
+                message.action,
+                findVideo(),
+                preserveLocalState,
+                message.payload
+            );
+            sendResponse({ status: 'cancelled' });
+            return true;
+        }
+
+        if (message.type === 'APPLY_CANONICAL_MEDIA_STATE') {
+            const applyGeneration = beginCanonicalMediaApply();
+            applyCanonicalMediaState(message.mediaState, applyGeneration).then(sendResponse).catch(error => {
+                reportLog(`Canonical media state apply failed: ${error.message}`, 'warn');
+                sendResponse({ status: 'apply_failed', reason: 'unexpected_error' });
+            });
+            return true;
+        }
+
         if (message.type === 'SERVER_COMMAND') {
             const { action, payload } = message;
             let actionCompleted = false;
@@ -1354,6 +1594,10 @@
                     }
                     return;
                 }
+            }
+
+            if (syncActions.includes(action)) {
+                cancelCanonicalMediaApply(action, findVideo(), false, payload);
             }
             
             if (action === EVENTS.PLAY) {
@@ -1664,6 +1908,11 @@
             _clearSuppress(eventState);
             return;
         }
+        if (action === EVENTS.PLAY && consumeCanonicalRestorePlaySuppression()) return;
+
+        if (action === EVENTS.PLAY || action === EVENTS.PAUSE) {
+            cancelCanonicalMediaApply(action, video);
+        }
 
         // Suppress only SEEK during visibility grace period (tab re-focus ghost jump).
         // Play/Pause pass through — user may want to immediately pause after tabbing back.
@@ -1818,6 +2067,13 @@
             return;
         }
 
+        // `seeking` normally captured the local state synchronously. Keep this
+        // as a fallback for players that emit only `seeked`, without replacing
+        // the earlier paused/playing state after an async stale action resolves.
+        if (!canonicalSupersedingLocalState) {
+            cancelCanonicalMediaApply(EVENTS.SEEK, video);
+        }
+
         // Step 4: Debounce rapid consecutive seeks (e.g. scrubbing)
         // — wait 300ms for the user to settle before relaying
         if (seekDebounceTimer) clearTimeout(seekDebounceTimer);
@@ -1835,6 +2091,18 @@
         }, 300);
     };
 
+    const handleSeeking = event => {
+        if (!isCurrentVideoEvent(event)) return;
+        const video = event.currentTarget;
+        const current = getSyncCurrentTime(video);
+        if (current === null) return;
+        if (expectedSeekTime !== null && Math.abs(current - expectedSeekTime) < 1.0) return;
+        if (Date.now() < visibilityGraceUntil) return;
+        const delta = lastReportedSeekTime !== null ? Math.abs(current - lastReportedSeekTime) : null;
+        if (delta !== null && delta < MIN_SEEK_DELTA) return;
+        cancelCanonicalMediaApply(EVENTS.SEEK, video);
+    };
+
 
     let lastVideoSrc = undefined;
 
@@ -1849,6 +2117,7 @@
         if (handlers) {
             video.removeEventListener('play', handlers.play);
             video.removeEventListener('pause', handlers.pause);
+            if (handlers.seeking) video.removeEventListener('seeking', handlers.seeking);
             video.removeEventListener('seeked', handlers.seeked);
             video.removeEventListener('loadeddata', handlers.loadeddata);
             if (handlers.waiting) video.removeEventListener('waiting', handlers.waiting);
@@ -1881,9 +2150,17 @@
             const existing = video._koalaHandlers;
             if (existing) detachVideoListeners(video);
             activeVideo = video;
-            video._koalaHandlers = { play: handlePlay, pause: handlePause, seeked: handleSeeked, loadeddata: handleLoadedData, waiting: handleWaiting };
+            video._koalaHandlers = {
+                play: handlePlay,
+                pause: handlePause,
+                seeking: handleSeeking,
+                seeked: handleSeeked,
+                loadeddata: handleLoadedData,
+                waiting: handleWaiting
+            };
             video.addEventListener('play', handlePlay);
             video.addEventListener('pause', handlePause);
+            video.addEventListener('seeking', handleSeeking);
             video.addEventListener('seeked', handleSeeked);
             video.addEventListener('loadeddata', handleLoadedData);
             video.addEventListener('waiting', handleWaiting);
@@ -2096,6 +2373,8 @@
 
         for (const timer of Object.values(_suppressTimers)) clearTimeout(timer);
         _suppressTimers = {};
+        for (const hold of canonicalRestorePlaySuppressions) clearTimeout(hold.timeout);
+        canonicalRestorePlaySuppressions.clear();
         for (const timer of lifecycleTimeouts) clearTimeout(timer);
         lifecycleTimeouts.clear();
         for (const timer of seekPollTimers) clearInterval(timer);

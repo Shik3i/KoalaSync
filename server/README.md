@@ -106,5 +106,6 @@ and `server/rate-limiter.test.mjs`, or use `scripts/test-server-routes.mjs` and
 | File | Purpose |
 |---|---|
 | `index.js` | Express + Socket.IO server: room management, relay loop, graceful shutdown |
+| `media-state.js` | Canonical room media clock, control updates, and projected ROOM_DATA snapshots |
 | `rate-limiter.js` | Connection, event, health, and auth rate limiting with 6 functions + cleanup intervals |
 | `ops.js` | Health endpoint helpers, metrics payload builder, auth validation |

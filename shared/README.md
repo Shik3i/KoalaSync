@@ -31,6 +31,7 @@ Browser extensions cannot import files outside their own root directory, so the 
 - `CONTROL_MODES.HOST_ONLY`: only the host and promoted controllers may move playback.
 - `CAPABILITIES.HOST_CONTROL`: relay supports host-only room authority.
 - `CAPABILITIES.CO_HOST`: relay supports promoted controller peers.
+- `CAPABILITIES.MEDIA_STATE_V1`: relay exposes canonical room playback recovery snapshots.
 
 Clients should enable capability-gated UI only when the relay advertises the matching flag in `room_data.capabilities`.
 
@@ -63,7 +64,9 @@ For the complete event list, read the `EVENTS` object in [`constants.js`](consta
 
 - `HEARTBEAT_INTERVAL`: content heartbeat interval in milliseconds.
 - `FORCE_SYNC_TIMEOUT`: max wait for force-sync ACKs.
+- `FORCE_SYNC_TARGET_DELAY_WARNING`: threshold for logging delayed Force Sync execution; an unsuperseded prepared target remains executable for receiver liveness.
 - `EPISODE_LOBBY_TIMEOUT`: max wait for episode-lobby readiness.
+- `MAX_MEDIA_TIME`: shared relay/extension upper bound, in seconds, for synchronized media positions.
 
 ## Do Not Break
 
