@@ -135,7 +135,7 @@
   "LABEL_HISTORY": "Historial",
   "LABEL_HISTORY_TOOLTIP": "Registro de todas las acciones en la sala.",
   "HISTORY_EMPTY": "No hay actividad todavía.",
-  "LABEL_LOGS": "Logs (Últimos 50)",
+  "LABEL_LOGS": "Logs (últimos 50)",
   "LABEL_LOGS_TOOLTIP": "Registros de conexión para solucionar problemas.",
   "BTN_CLEAR": "Limpiar",
   "BTN_CLEAR_TOOLTIP": "Borra el registro actual.",
