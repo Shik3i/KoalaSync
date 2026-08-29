@@ -67,3 +67,6 @@ scratch/
 .clinerules
 .windsurfrules
 .codeium/
+
+#txt files
+LOCALES_CHANGES.txt
