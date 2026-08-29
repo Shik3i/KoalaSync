@@ -3,12 +3,14 @@
         {
             name: 'netflix-page-api-seek',
             urls: ['netflix.com'],
-            provider: 'netflix'
+            provider: 'netflix',
+            actions: ['play', 'pause', 'seek']
         },
         {
             name: 'disney-page-api-seek',
             urls: ['disneyplus.com'],
-            provider: 'disney'
+            provider: 'disney',
+            actions: ['seek']
         }
     ];
 

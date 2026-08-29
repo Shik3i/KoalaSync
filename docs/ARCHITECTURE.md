@@ -45,8 +45,9 @@ the room/revision and optional privacy-sanitized media title, respects Host Cont
 solo mode and Episode Lobby, then queues an internal
 `APPLY_CANONICAL_MEDIA_STATE` message on the same ordered content path as newer
 live commands.
-That path reuses frame election, Netflix/Disney page-API seeks, native play/pause,
-the 2-second drift tolerance, and programmatic-event suppression. Recovery only
+That path reuses frame election, Netflix page-API play/pause/seek, Disney+
+page-API seeks, native controls on other services, the 2-second drift tolerance,
+and programmatic-event suppression. Recovery only
 completes after playback state and position verification. Transient failures
 retry after 250, 750, 1500, and 3000 ms, while target, heartbeat, and content-boot
 signals can retrigger a pending attempt within that bound. A pending playing

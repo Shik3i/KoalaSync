@@ -136,21 +136,35 @@
     let seekDebounceTimer = null;     // debounce timer for rapid seek events
     let expectedSeekTime = null;      // strictly track programmatic seeks
 
-    const PAGE_API_SEEK_BRIDGE = 1;
+    const PAGE_API_PLAYER_BRIDGE = 1;
+    const PAGE_API_ACTION_TIMEOUT_MS = 2000;
+    const pendingPageApiActions = new Map();
+    let pageApiActionSequence = 0;
     // Accurate Disney+ playhead pushed by the MAIN-world page-API bridge
-    // (background.js installPageApiSeekBridge). The isolated content world
+    // (background.js installPageApiPlayerBridge). The isolated content world
     // can't read the page's media player directly.
     let disneyPageApiTime = null;
-    function handlePageApiTime(event) {
+    function handlePageApiMessage(event) {
         if (destroyed || event.source !== window) return;
         const data = event.data;
         if (data && data.__koalaPlayerTime === 1 && data.provider === 'disney'
             && Number.isFinite(data.position) && Number.isFinite(data.duration) && data.duration > 0) {
             disneyPageApiTime = { position: data.position, duration: data.duration, at: Date.now() };
+            return;
         }
+        if (!data || data.__koalaPageApiPlayer !== PAGE_API_PLAYER_BRIDGE
+            || data.kind !== 'result' || typeof data.requestId !== 'string') return;
+        const pending = pendingPageApiActions.get(data.requestId);
+        if (!pending || pending.action !== data.action) return;
+        pendingPageApiActions.delete(data.requestId);
+        clearTimeout(pending.timeout);
+        if (data.ok !== true) {
+            reportLog(`Page API ${pending.action} failed: ${data.reason || 'unknown_error'}`, 'warn');
+        }
+        pending.resolve(data.ok === true);
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-        window.addEventListener('message', handlePageApiTime);
+        window.addEventListener('message', handlePageApiMessage);
     }
 
     function hostMatchesUrl(host, url) {
@@ -239,22 +253,56 @@
         return Math.max(min, Math.min(max, nativeTarget));
     }
 
-    function shouldUsePageApiSeek() {
-        return window.KOALA_PAGE_API_SEEK_ENABLED === true &&
-            typeof window.koalaFindPageApiSeekProvider === 'function' &&
-            !!window.koalaFindPageApiSeekProvider(window.location.hostname);
+    function getPageApiPlayerProvider() {
+        return typeof window.koalaFindPageApiSeekProvider === 'function'
+            ? window.koalaFindPageApiSeekProvider(window.location.hostname)
+            : null;
+    }
+
+    function pageApiActionRequired(action) {
+        const provider = getPageApiPlayerProvider();
+        return !!provider && Array.isArray(provider.actions) && provider.actions.includes(action);
+    }
+
+    function requestPageApiAction(action, time = null) {
+        if (window.KOALA_PAGE_API_PLAYER_ENABLED !== true) {
+            reportLog(`Page API ${action} unavailable; refusing unsafe native fallback`, 'warn');
+            return Promise.resolve(false);
+        }
+        const requestId = `${Date.now()}:${++pageApiActionSequence}`;
+        return new Promise(resolve => {
+            const timeout = setTimeout(() => {
+                pendingPageApiActions.delete(requestId);
+                reportLog(`Page API ${action} timed out`, 'warn');
+                resolve(false);
+            }, PAGE_API_ACTION_TIMEOUT_MS);
+            pendingPageApiActions.set(requestId, { action, resolve, timeout });
+            try {
+                window.postMessage({
+                    __koalaPageApiPlayer: PAGE_API_PLAYER_BRIDGE,
+                    kind: 'command',
+                    requestId,
+                    action,
+                    time
+                }, '*');
+            } catch (_error) {
+                clearTimeout(timeout);
+                pendingPageApiActions.delete(requestId);
+                resolve(false);
+            }
+        });
     }
 
     function seekVideo(video, targetTime) {
-        // Prefer a precise page-level seek API when available (Netflix, Disney+);
-        // for those players the DOM/button seek path is imprecise or impossible.
-        if (shouldUsePageApiSeek()) {
+        // Netflix/Disney must never fall through to video.currentTime when their
+        // page bridge is unavailable: Netflix treats that as player tampering.
+        if (pageApiActionRequired(EVENTS.SEEK)) {
             expectedSeekTime = targetTime;
-            window.postMessage({ __koalaPageApiSeek: PAGE_API_SEEK_BRIDGE, kind: 'seek', time: targetTime }, '*');
-            return;
+            return requestPageApiAction(EVENTS.SEEK, targetTime);
         }
         expectedSeekTime = targetTime;
         video.currentTime = toNativeSeekTime(video, targetTime);
+        return true;
     }
 
     // --- Play/Pause Coalescing (leading + trailing) ---
@@ -1121,13 +1169,11 @@
         if (video && currentTitle && sameEpisode(currentTitle, expectedTitle)
             && current !== null && video.readyState >= 1) {
             if (current >= 5) {
-                expectedSeekTime = 0;
-                video.currentTime = 0;
+                Promise.resolve(tryMediaAction(EVENTS.SEEK, { targetTime: 0 })).catch(() => {});
             }
             // Match! Pause at start and report ready.
             if (!video.paused) {
-                _setSuppress('paused');
-                video.pause();
+                Promise.resolve(tryMediaAction(EVENTS.PAUSE)).catch(() => {});
             }
             stopLobbyPoll();
             runtimeMessage({
@@ -1219,6 +1265,17 @@
         }
 
         try {
+            if (pageApiActionRequired(action)) {
+                const suppression = action === EVENTS.PLAY ? 'playing'
+                    : (action === EVENTS.PAUSE ? 'paused' : 'seek');
+                _setSuppress(suppression);
+                const targetTime = action === EVENTS.SEEK ? data.targetTime : null;
+                return requestPageApiAction(action, targetTime).then(applied => {
+                    if (!applied) _clearSuppress(suppression);
+                    return applied;
+                });
+            }
+
             const actionFix = getActivePlayerActionFix();
             if (tryPlayerActionFix(actionFix, action, video, data)) {
                 return true;
@@ -1241,14 +1298,30 @@
                 video.pause();
                 return true;
             } else if (action === EVENTS.SEEK) {
-                seekVideo(video, data.targetTime, data.delta);
-                return true;
+                return seekVideo(video, data.targetTime, data.delta);
             }
             return false;
         } catch (e) {
             reportLog(`Media Action Error: ${e.message}`, 'error');
             return false;
         }
+    }
+
+    function applyServerMediaAction(action, payload, message) {
+        Promise.resolve(tryMediaAction(action, payload)).then(applied => {
+            if (!applied) {
+                reportLog(`Remote ${action} was not applied`, 'warn');
+                return;
+            }
+            runtimeMessage({
+                type: 'CMD_ACK',
+                actionTimestamp: message.actionTimestamp,
+                commandSenderId: message.commandSenderId
+            }).catch(() => {});
+            scheduleProactiveHeartbeat();
+        }).catch(error => {
+            reportLog(`Remote ${action} failed: ${error.message}`, 'warn');
+        });
     }
 
     function beginCanonicalMediaApply() {
@@ -1293,21 +1366,20 @@
         if (!state || !video || destroyed || video.isConnected === false) return;
 
         if (state.playbackState === 'paused' && !video.paused) {
-            _setSuppress('paused');
-            video.pause();
+            await tryMediaAction(EVENTS.PAUSE);
         }
         if (Number.isFinite(state.currentTime)) {
             const currentTime = getSyncCurrentTime(video);
             if (currentTime === null || Math.abs(currentTime - state.currentTime) >= MIN_SEEK_DELTA) {
-                _setSuppress('seek');
-                seekVideo(video, state.currentTime);
+                await tryMediaAction(EVENTS.SEEK, { targetTime: state.currentTime });
             }
         }
         if (state.playbackState === 'playing' && video.paused) {
             _setSuppress('playing');
             const playSuppression = holdCanonicalRestorePlaySuppression();
             try {
-                await video.play();
+                const restored = await tryMediaAction(EVENTS.PLAY);
+                if (!restored) throw new Error('player rejected play');
             } catch (error) {
                 _clearSuppress('playing');
                 reportLog(`Could not restore locally superseding playback: ${error.message}`, 'warn');
@@ -1561,8 +1633,6 @@
 
         if (message.type === 'SERVER_COMMAND') {
             const { action, payload } = message;
-            let actionCompleted = false;
-
             // Host Control Mode: while watching on our own (desynced), don't apply
             // host commands. Only ACK FORCE_SYNC_PREPARE — that's the one the host's
             // force-sync flow actually waits on. Skipping CMD_ACKs for PLAY/PAUSE/SEEK
@@ -1601,17 +1671,11 @@
             }
             
             if (action === EVENTS.PLAY) {
-                tryMediaAction(EVENTS.PLAY);
-                runtimeMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp, commandSenderId: message.commandSenderId });
-                actionCompleted = true;
+                applyServerMediaAction(EVENTS.PLAY, payload, message);
             } else if (action === EVENTS.PAUSE) {
-                tryMediaAction(EVENTS.PAUSE);
-                runtimeMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp, commandSenderId: message.commandSenderId });
-                actionCompleted = true;
+                applyServerMediaAction(EVENTS.PAUSE, payload, message);
             } else if (action === EVENTS.SEEK) {
-                tryMediaAction(EVENTS.SEEK, payload);
-                runtimeMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp, commandSenderId: message.commandSenderId });
-                actionCompleted = true;
+                applyServerMediaAction(EVENTS.SEEK, payload, message);
             } else if (action === EVENTS.FORCE_SYNC_PREPARE) {
                 if (!payload || payload.targetTime === undefined) return;
                 const video = findVideo();
@@ -1620,31 +1684,21 @@
                         reportLog(`Media Action Error: Invalid force sync payload - ${JSON.stringify(payload)}`, 'error');
                         return;
                     }
-                    _setSuppress('paused');
-                    video.pause();
-                    try {
-                        seekVideo(video, payload.targetTime);
-                    } catch (e) {
-                        reportLog(`Force Sync Seek Error: ${e.message}`, 'error');
-                    }
-                    pollSeekReady(payload.targetTime).then((ready) => {
-                        runtimeMessage({ type: 'FORCE_SYNC_ACK' }).catch(() => {});
-                        if (ready) {
-                            scheduleProactiveHeartbeat();
-                        } else {
-                            reportLog('Force Sync: Seek ready timeout, proceeding anyway', 'warn');
-                        }
-                    }).catch(() => {});
+                    Promise.resolve(tryMediaAction(EVENTS.PAUSE))
+                        .then(paused => paused ? tryMediaAction(EVENTS.SEEK, payload) : false)
+                        .then(seeked => seeked ? pollSeekReady(payload.targetTime) : false)
+                        .then((ready) => {
+                            runtimeMessage({ type: 'FORCE_SYNC_ACK' }).catch(() => {});
+                            if (ready) {
+                                scheduleProactiveHeartbeat();
+                            } else {
+                                reportLog('Force Sync: player action failed or timed out, proceeding anyway', 'warn');
+                            }
+                        }).catch(() => {});
                 }
             } else if (action === EVENTS.FORCE_SYNC_EXECUTE) {
                 stopLobbyPoll();
-                tryMediaAction(EVENTS.PLAY);
-                runtimeMessage({ type: 'CMD_ACK', actionTimestamp: message.actionTimestamp, commandSenderId: message.commandSenderId });
-                actionCompleted = true;
-            }
-
-            if (actionCompleted) {
-                scheduleProactiveHeartbeat();
+                applyServerMediaAction(EVENTS.PLAY, payload, message);
             }
         }
 
@@ -1679,8 +1733,7 @@
         if (message.type === 'PAUSE_FOR_LOBBY') {
             const video = findVideo();
             if (video && !video.paused) {
-                _setSuppress('paused');
-                video.pause();
+                Promise.resolve(tryMediaAction(EVENTS.PAUSE)).catch(() => {});
             }
             // Start lobby poll now that we know the feature is enabled
             if (message.expectedTitle) {
@@ -2367,9 +2420,14 @@
         destroyed = true;
 
         try {
-            window.postMessage({ __koalaPageApiSeek: PAGE_API_SEEK_BRIDGE, kind: 'destroy' }, '*');
+            window.postMessage({ __koalaPageApiPlayer: PAGE_API_PLAYER_BRIDGE, kind: 'destroy' }, '*');
         } catch (_e) { /* page is already tearing down */ }
-        window.KOALA_PAGE_API_SEEK_ENABLED = false;
+        window.KOALA_PAGE_API_PLAYER_ENABLED = false;
+        for (const pending of pendingPageApiActions.values()) {
+            clearTimeout(pending.timeout);
+            pending.resolve(false);
+        }
+        pendingPageApiActions.clear();
 
         for (const timer of Object.values(_suppressTimers)) clearTimeout(timer);
         _suppressTimers = {};
@@ -2410,7 +2468,7 @@
         window.removeEventListener('pagehide', handlePageHide);
         window.removeEventListener('pageshow', handlePageShow);
         window.removeEventListener('resize', handleMediaFrameResize);
-        window.removeEventListener('message', handlePageApiTime);
+        window.removeEventListener('message', handlePageApiMessage);
         if (hcmBadgeDomReadyHandler) {
             document.removeEventListener('DOMContentLoaded', hcmBadgeDomReadyHandler);
             hcmBadgeDomReadyHandler = null;

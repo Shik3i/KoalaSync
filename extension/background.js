@@ -3049,14 +3049,14 @@ async function devRemoteToolsAllowed() {
     return data.username === 'KoalaDev';
 }
 
-function shouldUsePageApiSeek(url) {
+function shouldUsePageApiPlayer(url) {
     return typeof globalThis.koalaFindPageApiSeekProvider === 'function' &&
         !!globalThis.koalaFindPageApiSeekProvider(url);
 }
 
-function installPageApiSeekBridge() {
-    if (window.__koalaPageApiSeekBridge?.activate) {
-        window.__koalaPageApiSeekBridge.activate();
+function installPageApiPlayerBridge() {
+    if (window.__koalaPageApiPlayerBridge?.activate) {
+        window.__koalaPageApiPlayerBridge.activate();
         return;
     }
 
@@ -3076,36 +3076,81 @@ function installPageApiSeekBridge() {
         return el && el.mediaPlayer ? el.mediaPlayer : null;
     }
 
-    function seekWithPageApi(time) {
+    function netflixPlayer() {
+        const videoPlayer = window.netflix?.appContext?.state?.playerApp?.getAPI?.()?.videoPlayer;
+        const ids = videoPlayer?.getAllPlayerSessionIds?.();
+        if (!Array.isArray(ids) || ids.length === 0) return null;
+        // Netflix may expose preview/billboard sessions beside the actual title.
+        // Prefer the watch session, retaining the single/first-session fallback
+        // for older player builds whose identifiers used a different shape.
+        const sessionId = ids.find(id => typeof id === 'string' && /(?:^|-)watch(?:-|$)/i.test(id))
+            || ids.find(id => typeof id === 'string' && id.toLowerCase().includes('watch'))
+            || ids[0];
+        return sessionId ? videoPlayer.getVideoPlayerBySessionId?.(sessionId) : null;
+    }
+
+    async function applyPageApiAction(action, time) {
         const match = currentMatch();
-        if (!match) return;
+        if (!match || !Array.isArray(match.actions) || !match.actions.includes(action)) {
+            return { ok: false, reason: 'unsupported_action' };
+        }
 
         try {
             if (match.provider === 'netflix') {
-                const videoPlayer = window.netflix?.appContext?.state?.playerApp?.getAPI?.().videoPlayer;
-                const ids = videoPlayer?.getAllPlayerSessionIds?.();
-                const sessionId = ids ? ids[0] : null;
-                const player = sessionId ? videoPlayer.getVideoPlayerBySessionId(sessionId) : null;
-                player?.seek(Math.round(time * 1000));
+                const player = netflixPlayer();
+                if (!player) return { ok: false, reason: 'player_unavailable' };
+                if (action === 'seek') {
+                    if (!Number.isFinite(time) || typeof player.seek !== 'function') {
+                        return { ok: false, reason: 'seek_unavailable' };
+                    }
+                    await player.seek(Math.round(time * 1000));
+                } else if (action === 'play') {
+                    if (typeof player.play !== 'function') return { ok: false, reason: 'play_unavailable' };
+                    await player.play();
+                } else if (action === 'pause') {
+                    if (typeof player.pause !== 'function') return { ok: false, reason: 'pause_unavailable' };
+                    await player.pause();
+                }
             } else if (match.provider === 'disney') {
                 const mp = disneyMediaPlayer();
-                if (mp && typeof mp.seek === 'function') mp.seek(Math.round(time * 1000));
+                if (action !== 'seek' || !Number.isFinite(time) || !mp || typeof mp.seek !== 'function') {
+                    return { ok: false, reason: 'seek_unavailable' };
+                }
+                await mp.seek(Math.round(time * 1000));
+            } else {
+                return { ok: false, reason: 'provider_unavailable' };
             }
-        } catch (_e) {
-            // Player not ready or private API changed; the next sync tick can retry.
+            return { ok: true };
+        } catch (_error) {
+            return { ok: false, reason: 'player_api_error' };
         }
+    }
+
+    function postResult(requestId, action, result) {
+        window.postMessage({
+            __koalaPageApiPlayer: 1,
+            kind: 'result',
+            requestId,
+            action,
+            ok: result?.ok === true,
+            reason: result?.ok === true ? null : (result?.reason || 'player_api_error')
+        }, '*');
     }
 
     function handleBridgeMessage(event) {
         if (event.source !== window) return;
         const data = event.data;
-        if (!data || data.__koalaPageApiSeek !== 1) return;
+        if (!data || data.__koalaPageApiPlayer !== 1) return;
         if (data.kind === 'destroy') {
             destroy();
             return;
         }
-        if (!active || data.kind !== 'seek' || typeof data.time !== 'number') return;
-        seekWithPageApi(data.time);
+        if (!active || data.kind !== 'command'
+            || typeof data.requestId !== 'string'
+            || !['play', 'pause', 'seek'].includes(data.action)) return;
+        Promise.resolve(applyPageApiAction(data.action, data.time))
+            .then(result => postResult(data.requestId, data.action, result))
+            .catch(() => postResult(data.requestId, data.action, { ok: false, reason: 'player_api_error' }));
     }
 
     // Disney+'s <video> currentTime is blob-relative and its scrubber lags, so
@@ -3136,11 +3181,11 @@ function installPageApiSeekBridge() {
         active = false;
         clearInterval(timelineInterval);
         window.removeEventListener('message', handleBridgeMessage);
-        delete window.__koalaPageApiSeekBridge;
+        delete window.__koalaPageApiPlayerBridge;
     }
 
     window.addEventListener('message', handleBridgeMessage);
-    window.__koalaPageApiSeekBridge = {
+    window.__koalaPageApiPlayerBridge = {
         activate() {
             active = true;
         },
@@ -3148,8 +3193,8 @@ function installPageApiSeekBridge() {
     };
 }
 
-function setPageApiSeekEnabled(enabled) {
-    window.KOALA_PAGE_API_SEEK_ENABLED = enabled === true;
+function setPageApiPlayerEnabled(enabled) {
+    window.KOALA_PAGE_API_PLAYER_ENABLED = enabled === true;
 }
 
 async function deactivateMediaFrameMonitors(tabId) {
@@ -3391,8 +3436,8 @@ async function injectContentScript(tabId, {
     const normalizedTabId = normalizeTabId(tabId);
     if (normalizedTabId === null) throw new Error('Invalid tab ID');
     tabId = normalizedTabId;
-    let needsPageApiSeek = false;
-    let pageApiSeekReady = false;
+    let needsPageApiPlayer = false;
+    let pageApiPlayerReady = false;
     let access = null;
     let contentTarget = {
         frameId: 0,
@@ -3404,7 +3449,7 @@ async function injectContentScript(tabId, {
     try {
         access = await inspectTabHostAccess(chrome, tabId);
         const url = access.url || '';
-        needsPageApiSeek = shouldUsePageApiSeek(url);
+        needsPageApiPlayer = shouldUsePageApiPlayer(url);
         contentTarget = await resolveMediaContentTarget(chrome, tabId, {
             knownFrameIds: listKnownFrameIds(tabId)
         });
@@ -3449,21 +3494,24 @@ async function injectContentScript(tabId, {
             }
             throw createTargetActivationSupersededError();
         }
-        if (needsPageApiSeek) {
+        if (needsPageApiPlayer) {
             try {
                 await executeScriptWithTimeout({
-                    target: scriptTarget,
+                    // Netflix/Disney expose their private player on the top page.
+                    // Keep this bridge independent of iframe election so a nested
+                    // player refactor can never redirect it into the wrong realm.
+                    target: { tabId },
                     world: 'MAIN',
                     files: ['page-api-seek-overrides.js']
                 });
                 await executeScriptWithTimeout({
-                    target: scriptTarget,
+                    target: { tabId },
                     world: 'MAIN',
-                    func: installPageApiSeekBridge
+                    func: installPageApiPlayerBridge
                 });
-                pageApiSeekReady = true;
+                pageApiPlayerReady = true;
             } catch (err) {
-                addLog(`Page API seek bridge injection failed: ${err.message}`, 'warn');
+                addLog(`Page API player bridge injection failed: ${err.message}`, 'warn');
             }
         }
 
@@ -3473,8 +3521,8 @@ async function injectContentScript(tabId, {
         });
         await executeScriptWithTimeout({
             target: scriptTarget,
-            func: setPageApiSeekEnabled,
-            args: [pageApiSeekReady]
+            func: setPageApiPlayerEnabled,
+            args: [pageApiPlayerReady]
         });
         // The chat overlay is standalone page UI and carries its own runtime
         // message listener, so it is installed in the top document regardless of

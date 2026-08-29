@@ -595,7 +595,11 @@ test('newer remote pause wins after a stale restoration play settles late', asyn
                         const attempt = Number(video.dataset.koalaDelayedPlayAttempts || '0') + 1;
                         video.dataset.koalaDelayedPlayAttempts = String(attempt);
                         if (attempt === 1) {
-                            return nativePlay().then(() => new Promise(resolve => setTimeout(resolve, 200)));
+                            // Keep the fixture paused without dispatching a native
+                            // pause event that could overwrite the synthetic local
+                            // PLAY intent below. This first delayed call represents
+                            // the stale recovery attempt, not settled playback.
+                            return new Promise(resolve => setTimeout(resolve, 200));
                         }
                         return new Promise((resolve, reject) => setTimeout(() => {
                             nativePlay().then(resolve, reject);
@@ -615,11 +619,8 @@ test('newer remote pause wins after a stale restoration play settles late', asyn
     await expect.poll(() => page.locator('#player').evaluate(video =>
         Number(video.dataset.koalaDelayedPlayAttempts || '0'))).toBe(1);
 
-    // Capture a superseding play intent while leaving the fixture paused, so
+    // Capture a superseding play intent while the fixture is still paused, so
     // stale recovery has to enter its delayed restoration play path.
-    await page.locator('#player').evaluate(video => {
-        video.pause();
-    });
     await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(
         selectedTabId => chrome.tabs.sendMessage(selectedTabId, {
             type: 'CANCEL_CANONICAL_MEDIA_STATE',
