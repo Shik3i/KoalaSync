@@ -59,8 +59,17 @@ dotenv.config();
 
 function hashPassword(password) {
     if (!password) return null;
-    const salt = process.env.SERVER_SALT || 'koalasync_salt_3i';
-    return crypto.createHmac('sha256', salt).update(password).digest('hex');
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.createHmac('sha256', salt).update(password).digest('hex');
+    return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+    if (!password || !storedHash) return false;
+    const [salt, hash] = storedHash.split(':');
+    if (!salt || !hash) return false;
+    const computed = crypto.createHmac('sha256', salt).update(password).digest('hex');
+    return computed.length === hash.length && crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
 }
 
 const PORT = process.env.PORT || 3000;
@@ -74,9 +83,7 @@ if (!isAdminMetricsTokenStrong(ADMIN_METRICS_TOKEN)) {
     console.warn('[SECURITY] ADMIN_METRICS_TOKEN is set but shorter than 32 characters. Use a long random token.');
 }
 
-if (!process.env.SERVER_SALT) {
-    console.warn('[SECURITY] SERVER_SALT is not set — using the built-in default salt (public in the repo). Set a unique SERVER_SALT so room-password hashes are not computed with a known salt.');
-}
+
 
 export const app = express();
 app.set('trust proxy', 1); // For real client IP through reverse proxy
@@ -527,7 +534,7 @@ io.on('connection', (socket) => {
                 if (!socket.connected) return;
                 if (!createdByMe) {
                 if (room.passwordHash) {
-                    if (!password || hashPassword(password) !== room.passwordHash) {
+                    if (!password || !verifyPassword(password, room.passwordHash)) {
                         recordAuthFailure(ip, roomId);
                         log('AUTH', `Invalid password from ${ip} for room ${roomId.substring(0, 3)}***`);
                         socket.emit(EVENTS.ERROR, { message: "Invalid password" });
