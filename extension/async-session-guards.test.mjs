@@ -81,7 +81,8 @@ describe('async room-session guards', () => {
         for (const [start, end] of [
             ["message.type === 'CONNECT'", "message.type === 'RETRY_CONNECT'"],
             ["message.type === 'RETRY_CONNECT'", "message.type === 'GET_STATUS'"],
-            ["message.type === 'WEB_JOIN_REQUEST'", "message.type === 'REGENERATE_ID'"]
+            ["message.type === 'WEB_JOIN_REQUEST'", "message.type === 'REGENERATE_ID'"],
+            ["message.type === 'SET_TARGET_TAB'", "message.type === 'LOG'"]
         ]) {
             expect(sourceBetween(start, end)).toContain('await waitForRoomTeardown()');
         }

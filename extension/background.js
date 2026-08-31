@@ -1142,7 +1142,11 @@ function releaseUnreachableFrameTarget(tabId) {
     return true;
 }
 
-function clearTargetTabForIdle(expectedTabId = null, expectedGeneration = null) {
+async function clearTargetSelectionForLifecycle({
+    expectedTabId = null,
+    expectedGeneration = null,
+    markRoomIdle = false
+} = {}) {
     if (expectedTabId !== null && normalizeTabId(currentTabId) !== normalizeTabId(expectedTabId)) {
         return false;
     }
@@ -1150,28 +1154,50 @@ function clearTargetTabForIdle(expectedTabId = null, expectedGeneration = null) 
         return false;
     }
 
+    const previousTabId = normalizeTabId(currentTabId);
+    const previousContentTarget = currentContentTarget();
+    const clearedTabId = normalizeTabId(userSelectedTabId) ?? previousTabId;
+
     completeForceSyncBeforeTargetChange(null);
     invalidateTargetActivations();
-    clearPendingTarget().catch(() => {});
-    if (currentTabId) deactivateTargetTab(currentTabId).catch(() => {});
     currentTabId = null;
     currentTabTitle = null;
     clearCurrentContentTarget();
     lastContentHeartbeatAt = null;
-    if (currentRoom) {
+    if (markRoomIdle && currentRoom) {
         roomIdleSince = Date.now();
     }
-    chrome.storage.session.set({
+
+    resetUserSelectionState();
+    const cleanupTasks = [clearPendingTarget()];
+    if (previousTabId !== null) {
+        cleanupTasks.push(deactivateTargetTab(previousTabId, previousContentTarget));
+    }
+    await Promise.all(cleanupTasks);
+    await chrome.storage.session.set({
         currentTabId,
         currentTabTitle,
         currentTargetFrameId,
         currentTargetDocumentId,
         currentTargetHasVideo,
         roomIdleSince,
-        lastContentHeartbeatAt
-    }).catch(() => {});
+        lastContentHeartbeatAt,
+        selectedTabId: null,
+        selectedTabTitle: null,
+        selectionErrorTabId: null,
+        selectionErrorMessage: null
+    });
     updateBadgeStatus();
+    chrome.runtime.sendMessage({ type: 'TARGET_TAB_CLEARED', tabId: clearedTabId }).catch(() => {});
     return true;
+}
+
+function clearTargetTabForIdle(expectedTabId = null, expectedGeneration = null) {
+    return clearTargetSelectionForLifecycle({
+        expectedTabId,
+        expectedGeneration,
+        markRoomIdle: true
+    });
 }
 
 async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left Room' } = {}) {
@@ -1198,14 +1224,8 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
     // Notify content.js/popup BEFORE currentTabId is cleared so they can reset
     // any stale guest-side HCM state (dialog/badge/desync) — H-2.
     broadcastControlMode();
-    if (currentTabId) await deactivateTargetTab(currentTabId, currentContentTarget());
-    invalidateTargetActivations();
-    currentTabId = null;
-    currentTabTitle = null;
-    clearCurrentContentTarget();
     roomIdleSince = null;
-    lastContentHeartbeatAt = null;
-    await clearPendingTarget();
+    await clearTargetSelectionForLifecycle();
 
     isForceSyncInitiator = false;
     forceSyncAcks.clear();
@@ -3829,10 +3849,7 @@ async function clearUserSelection(expectedTabId = null) {
         && normalizeTabId(userSelectedTabId) !== normalizeTabId(expectedTabId)) {
         return false;
     }
-    userSelectedTabId = null;
-    userSelectedTabTitle = null;
-    userSelectionErrorTabId = null;
-    userSelectionErrorMessage = null;
+    resetUserSelectionState();
     await chrome.storage.session.set({
         selectedTabId: null,
         selectedTabTitle: null,
@@ -3840,6 +3857,13 @@ async function clearUserSelection(expectedTabId = null) {
         selectionErrorMessage: null
     });
     return true;
+}
+
+function resetUserSelectionState() {
+    userSelectedTabId = null;
+    userSelectedTabTitle = null;
+    userSelectionErrorTabId = null;
+    userSelectionErrorMessage = null;
 }
 
 async function activateTargetTab(tabId, tabTitle, {
@@ -4359,7 +4383,7 @@ async function _routeToContentInternal(tabId, action, payload, actionTimestamp, 
         }
         if (retries >= 3) {
             addLog(`Content Script not responding in tab ${tabId} after ${retries} retries`, 'warn');
-            clearTargetTabForIdle(tabId, targetGeneration);
+            await clearTargetTabForIdle(tabId, targetGeneration);
             return;
         }
 
@@ -4386,7 +4410,7 @@ async function _routeToContentInternal(tabId, action, payload, actionTimestamp, 
         }
 
         addLog(`Content Script not responding in tab ${tabId}`, 'warn');
-        clearTargetTabForIdle(tabId, targetGeneration);
+        await clearTargetTabForIdle(tabId, targetGeneration);
     }
 }
 
@@ -5332,31 +5356,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         });
         return true;
     } else if (message.type === 'SET_TARGET_TAB') {
+        await waitForRoomTeardown();
         if (message.tabId === null || message.tabId === undefined || message.tabId === '') {
-            const previousTabId = currentTabId;
-            const previousContentTarget = currentContentTarget();
-            completeForceSyncBeforeTargetChange(null);
-            invalidateTargetActivations();
-            currentTabId = null;
-            currentTabTitle = null;
-            clearCurrentContentTarget();
-            lastContentHeartbeatAt = null;
-            if (currentRoom) roomIdleSince = Date.now();
-            if (previousTabId) {
-                await deactivateTargetTab(previousTabId, previousContentTarget);
-            }
-            await clearUserSelection();
-            await clearPendingTarget();
-            await chrome.storage.session.set({
-                currentTabId: null,
-                currentTabTitle: null,
-                currentTargetFrameId: 0,
-                currentTargetDocumentId: null,
-                currentTargetHasVideo: false,
-                roomIdleSince,
-                lastContentHeartbeatAt: null
-            });
-            updateBadgeStatus();
+            await clearTargetSelectionForLifecycle({ markRoomIdle: true });
             sendResponse({ status: 'ok', tabId: null });
             return;
         }

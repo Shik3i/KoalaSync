@@ -7,6 +7,7 @@ const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 const backgroundSource = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
 const overlaySource = fs.readFileSync(path.join(extensionDir, 'chat-overlay.js'), 'utf8');
+const popupSource = fs.readFileSync(path.join(extensionDir, 'popup.js'), 'utf8');
 const monitorSource = fs.readFileSync(path.join(extensionDir, 'media-frame-monitor.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.base.json'), 'utf8'));
 const sharedConstantsSource = fs.readFileSync(path.join(extensionDir, '..', 'shared', 'constants.js'), 'utf8');
@@ -102,11 +103,24 @@ describe('target tab lifecycle', () => {
         const teardownStart = backgroundSource.indexOf('async function performRoomSessionTeardown');
         const teardownEnd = backgroundSource.indexOf('async function endRoomSession', teardownStart);
         const teardownSource = backgroundSource.slice(teardownStart, teardownEnd);
-        expect(teardownSource).toContain('await deactivateTargetTab(currentTabId, currentContentTarget())');
-        expect(teardownSource.indexOf('await deactivateTargetTab(currentTabId, currentContentTarget())'))
-            .toBeLessThan(teardownSource.indexOf('currentTabId = null'));
-        expect(teardownSource).toContain('await clearPendingTarget()');
+        expect(teardownSource).toContain('await clearTargetSelectionForLifecycle()');
         expect(teardownSource).toContain('forceDisconnect()');
+        expect(teardownSource.indexOf('completeForceSyncBeforeTargetChange(null)'))
+            .toBeLessThan(teardownSource.indexOf('currentRoom = null'));
+
+        const clearStart = backgroundSource.indexOf('async function clearTargetSelectionForLifecycle');
+        const clearEnd = backgroundSource.indexOf('function clearTargetTabForIdle', clearStart);
+        const clearSource = backgroundSource.slice(clearStart, clearEnd);
+        expect(clearSource).toContain('const previousTabId = normalizeTabId(currentTabId)');
+        expect(clearSource).toContain('const previousContentTarget = currentContentTarget()');
+        expect(clearSource.indexOf('const previousContentTarget = currentContentTarget()'))
+            .toBeLessThan(clearSource.indexOf('currentTabId = null'));
+        expect(clearSource).toContain('resetUserSelectionState()');
+        expect(clearSource).toContain('deactivateTargetTab(previousTabId, previousContentTarget)');
+        expect(clearSource).toContain('selectedTabId: null');
+        expect(clearSource).toContain("type: 'TARGET_TAB_CLEARED'");
+        expect(popupSource).toContain("refreshTargetAccessState({ autoSelectMatch: false })");
+        expect(popupSource).toContain('if (autoSelectMatch && matchOpt && elements.targetTab.options.length > 1)');
 
         expect(backgroundSource).toContain('await endRoomSession({ notifyServer: true, reason });');
         expect(backgroundSource).toContain("await endRoomSession({ notifyServer: true, reason: 'Left Room' });");

@@ -660,7 +660,7 @@ function selectTargetTab(tabId, tabTitle) {
     });
 }
 
-async function refreshTargetAccessState() {
+async function refreshTargetAccessState({ autoSelectMatch = true } = {}) {
     const status = await new Promise(resolve => {
         chrome.runtime.sendMessage({ type: 'GET_STATUS' }, response => {
             if (chrome.runtime.lastError) {
@@ -682,7 +682,8 @@ async function refreshTargetAccessState() {
     }
     await populateTabs(
         status.peers,
-        status.targetTabId ?? status.pendingTargetTabId ?? null
+        status.targetTabId ?? status.pendingTargetTabId ?? null,
+        autoSelectMatch
     );
 }
 
@@ -1214,7 +1215,7 @@ async function resetBlacklistDomains() {
     await populateTabs();
 }
 
-async function populateTabs(providedPeers = null, providedTargetTabId = null) {
+async function populateTabs(providedPeers = null, providedTargetTabId = null, autoSelectMatch = true) {
     const token = {};
     populateTabsToken = token;
 
@@ -1335,7 +1336,7 @@ async function populateTabs(providedPeers = null, providedTargetTabId = null) {
         elements.targetTab.value = currentTargetTabId;
     } else {
         const matchOpt = options.find(o => o.textContent.includes('⭐ MATCH:'));
-        if (matchOpt && elements.targetTab.options.length > 1) {
+        if (autoSelectMatch && matchOpt && elements.targetTab.options.length > 1) {
             elements.targetTab.value = matchOpt.value;
             const tabTitle = matchOpt.dataset.originalTitle || null;
             selectTargetTab(parseInt(matchOpt.value), tabTitle);
@@ -2545,7 +2546,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     } else if (msg.type === 'TARGET_TAB_ACCESS_REQUIRED') {
         refreshTargetAccessState().catch(() => {});
     } else if (msg.type === 'TARGET_TAB_CLEARED') {
-        refreshTargetAccessState().catch(() => {});
+        refreshTargetAccessState({ autoSelectMatch: false }).catch(() => {});
     } else if (msg.type === 'PING_UPDATE') {
         updatePingDisplay(msg.ping);
     } else if (msg.type === 'HISTORY_UPDATE') {

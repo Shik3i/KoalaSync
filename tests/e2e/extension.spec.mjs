@@ -1459,7 +1459,7 @@ test('keeps the tab selected when its activation fails', async ({ context, exten
     expect(second).toMatchObject({ targetTabId: tabId, targetActivationState: 'error' });
 });
 
-test('drops the selection only when the user clears it', async ({ context, extensionId, baseURL }) => {
+test('drops the selection when the user clears it', async ({ context, extensionId, baseURL }) => {
     const url = `${baseURL}/pages/simple-player.html`;
     const page = await context.newPage();
     await page.goto(url);
@@ -1483,6 +1483,129 @@ test('drops the selection only when the user clears it', async ({ context, exten
         targetReady: false,
         targetActivationState: 'none'
     });
+});
+
+test('clears the selected target after inactivity removal and room closure', async ({ context, extensionId, baseURL }) => {
+    test.setTimeout(45_000);
+    const relay = await import('../../server/index.js');
+    let legacy = null;
+    try {
+        await relay.startServer(0, '127.0.0.1');
+        const port = relay.httpServer.address().port;
+        const url = `${baseURL}/pages/simple-player.html`;
+        const page = await context.newPage();
+        await page.goto(url);
+        await page.waitForFunction(() => window.__fixtureReady === true);
+
+        const connectRoom = async (roomId) => {
+            await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
+                await chrome.storage.local.set(settings);
+                return chrome.runtime.sendMessage({ type: 'CONNECT' });
+            }, {
+                serverUrl: `ws://127.0.0.1:${port}`,
+                useCustomServer: true,
+                roomId,
+                password: '',
+                username: 'terminal-target-e2e'
+            }));
+            await expectConnectedRoom(context, extensionId, roomId, {
+                targetReady: true,
+                targetActivationState: 'ready'
+            });
+        };
+
+        const expectTargetCleared = async (popup) => {
+            await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+                .toMatchObject({
+                    status: 'idle',
+                    roomId: null,
+                    targetTabId: null,
+                    targetReady: false,
+                    targetActivationState: 'none'
+                });
+            await expect.poll(() => popup.locator('#targetTab').inputValue()).toBe('');
+            await expect.poll(() => page.evaluate(() => window.koalaSyncInjected === true)).toBe(false);
+            const sessionState = await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(() => (
+                chrome.storage.session.get(['currentTabId', 'selectedTabId', 'selectionErrorTabId'])
+            )));
+            expect(sessionState).toMatchObject({
+                currentTabId: null,
+                selectedTabId: null,
+                selectionErrorTabId: null
+            });
+        };
+
+        const firstSelection = await selectTargetTab(context, extensionId, url);
+        expect(firstSelection.response).toMatchObject({ status: 'ok' });
+        const timeoutRoomId = `e2e-target-timeout-${Date.now()}`;
+        await connectRoom(timeoutRoomId);
+
+        const popup = await context.newPage();
+        await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+        await expect.poll(() => popup.locator('#targetTab').inputValue())
+            .toBe(String(firstSelection.tabId));
+
+        const timeoutRoom = relay.rooms.get(timeoutRoomId);
+        expect(timeoutRoom).toBeTruthy();
+        for (const peer of timeoutRoom.peerData.values()) {
+            peer.lastSeen = Date.now() - (10 * 60 * 1000);
+        }
+        relay.cleanupInactiveRooms(Date.now());
+        await expectTargetCleared(popup);
+
+        const secondSelection = await selectTargetTab(context, extensionId, url);
+        expect(secondSelection).toMatchObject({
+            tabId: firstSelection.tabId,
+            response: { status: 'ok' }
+        });
+        const closedRoomId = `e2e-target-room-close-${Date.now()}`;
+        await connectRoom(closedRoomId);
+        await expect.poll(() => popup.locator('#targetTab').inputValue())
+            .toBe(String(firstSelection.tabId));
+
+        const closedRoom = relay.rooms.get(closedRoomId);
+        expect(closedRoom).toBeTruthy();
+        closedRoom.lastActivity = Date.now() - (3 * 60 * 60 * 1000);
+        for (const peer of closedRoom.peerData.values()) peer.lastSeen = Date.now();
+        relay.cleanupInactiveRooms(Date.now());
+        await expectTargetCleared(popup);
+
+        const thirdSelection = await selectTargetTab(context, extensionId, url);
+        expect(thirdSelection.response).toMatchObject({ status: 'ok' });
+        const manualRoomId = `e2e-target-manual-clear-${Date.now()}`;
+        await connectRoom(manualRoomId);
+        legacy = await connectLegacyRelayClient(port);
+        await joinLegacyRelayRoom(legacy, manualRoomId, 'matching-peer');
+        sendLegacyRelayEvent(legacy, 'peer_status', {
+            peerId: 'matching-peer',
+            username: 'Matching Peer',
+            tabTitle: 'Simple player',
+            status: 'heartbeat'
+        });
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' })
+            .then(state => state.peers.some(peer => peer.peerId === 'matching-peer' && peer.tabTitle === 'Simple player')))
+            .toBe(true);
+
+        const manuallyCleared = await getExtensionState(context, extensionId, {
+            type: 'SET_TARGET_TAB',
+            tabId: null
+        });
+        expect(manuallyCleared).toMatchObject({ status: 'ok', tabId: null });
+        await popup.waitForTimeout(500);
+        await expect(popup.locator('#targetTab')).toHaveValue('');
+        await expect.poll(() => getExtensionState(context, extensionId, { type: 'GET_STATUS' }))
+            .toMatchObject({
+                status: 'connected',
+                roomId: manualRoomId,
+                targetTabId: null,
+                targetActivationState: 'none'
+            });
+        await popup.close();
+        await page.close();
+    } finally {
+        try { legacy?.close(); } catch { /* already closed */ }
+        await relay.stopServerForTests();
+    }
 });
 
 /**

@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 const extensionDir = path.dirname(fileURLToPath(import.meta.url));
-const backgroundSource = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
+const backgroundSource = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8')
+    .replace(/\r\n/g, '\n');
 const contentSource = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
 const providerSource = fs.readFileSync(path.join(extensionDir, 'page-api-seek-overrides.js'), 'utf8');
 
