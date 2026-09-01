@@ -1185,11 +1185,9 @@ async function clearTargetSelectionForLifecycle({
     }
 
     resetUserSelectionState();
-    const cleanupTasks = [clearPendingTarget()];
-    if (previousTabId !== null) {
-        cleanupTasks.push(deactivateTargetTab(previousTabId, previousContentTarget));
-    }
-    await Promise.all(cleanupTasks);
+    // Persist the terminal selection state before any frame messaging or host
+    // permission cleanup can yield. A worker stop or a concurrent new target
+    // must never resurrect the selection this lifecycle transition removed.
     await chrome.storage.session.set({
         currentTabId,
         currentTabTitle,
@@ -1203,6 +1201,12 @@ async function clearTargetSelectionForLifecycle({
         selectionErrorTabId: null,
         selectionErrorMessage: null
     });
+
+    const cleanupTasks = [clearPendingTarget()];
+    if (previousTabId !== null) {
+        cleanupTasks.push(deactivateTargetTab(previousTabId, previousContentTarget));
+    }
+    await Promise.all(cleanupTasks);
     updateBadgeStatus();
     chrome.runtime.sendMessage({ type: 'TARGET_TAB_CLEARED', tabId: clearedTabId }).catch(() => {});
     return true;

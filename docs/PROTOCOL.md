@@ -558,9 +558,11 @@ non-seeking state for `EPISODE_SYNC_V2_STABILITY_MS`.
 Any timeout, failed player action, participant departure, manual media command,
 room/target change, or explicit cancellation produces `cancel`; v2 never
 executes after a timeout. Peers resume only when that transaction paused a
-previously playing player and no newer local user action superseded it. Peers
-joining after `start` are excluded from the frozen barrier and receive no v2
-frames for that transaction.
+previously playing player and no newer local or room action superseded it. A
+superseding room command defines the next state without racing a restoration.
+Peers joining after `start` are excluded from the frozen barrier and receive no
+v2 frames for that transaction. Clients revalidate the complete prepared state
+again immediately before applying `execute`.
 
 Legacy episode events remain accepted. A new relay binds their PREPARE, EXECUTE,
 and CANCEL to the accepted lobby initiator, limiting duplicate old-client wire

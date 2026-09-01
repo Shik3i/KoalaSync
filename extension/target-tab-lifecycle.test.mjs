@@ -118,6 +118,8 @@ describe('target tab lifecycle', () => {
         expect(clearSource).toContain('resetUserSelectionState()');
         expect(clearSource).toContain('deactivateTargetTab(previousTabId, previousContentTarget)');
         expect(clearSource).toContain('selectedTabId: null');
+        expect(clearSource.indexOf('selectedTabId: null'))
+            .toBeLessThan(clearSource.indexOf('await Promise.all(cleanupTasks)'));
         expect(clearSource).toContain("type: 'TARGET_TAB_CLEARED'");
         expect(popupSource).toContain("refreshTargetAccessState({ autoSelectMatch: false })");
         expect(popupSource).toContain('if (autoSelectMatch && matchOpt && elements.targetTab.options.length > 1)');

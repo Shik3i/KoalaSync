@@ -1983,20 +1983,33 @@
                 if (episodeSyncV2State?.transactionId === transaction.transactionId) {
                     const state = episodeSyncV2State;
                     const video = state.video || findVideo();
+                    const current = video ? getSyncCurrentTime(video) : null;
                     const canExecute = video
+                        && state.phase === 'prepare'
                         && video === findVideo()
-                        && sameEpisodeStrict(getMediaTitle(), state.expectedTitle);
+                        && video.isConnected !== false
+                        && sameEpisodeStrict(getMediaTitle(), state.expectedTitle)
+                        && video.paused
+                        && !video.seeking
+                        && video.readyState >= 3
+                        && current !== null
+                        && Math.abs(current) < 1;
                     clearEpisodeSyncV2Content({ resume: false }).catch(() => {});
                     if (canExecute) {
                         Promise.resolve(tryMediaAction(EVENTS.PLAY)).then(applied => {
                             if (applied) scheduleProactiveHeartbeat();
                             else reportLog('Episode Sync v2 execute could not start playback', 'warn');
                         }).catch(() => {});
+                    } else {
+                        reportLog('Episode Sync v2 execute ignored: prepared player state changed', 'warn');
                     }
                 }
             } else if (transaction.phase === 'cancel') {
                 if (episodeSyncV2State?.transactionId === transaction.transactionId) {
-                    clearEpisodeSyncV2Content({ resume: true }).catch(() => {});
+                    // A superseding room command follows this cancellation on
+                    // the same ordered socket. Do not race it with restoration
+                    // of the pre-transaction play state.
+                    clearEpisodeSyncV2Content({ resume: transaction.reason !== 'superseded' }).catch(() => {});
                 }
             }
             sendResponse({ status: 'ok' });

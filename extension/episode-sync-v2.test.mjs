@@ -98,6 +98,30 @@ describe('Episode Sync v2 extension contract', () => {
         expect(contentSource).toContain('failEpisodeSyncV2ForManualAction(action)');
     });
 
+    it('does not restore playback ahead of a superseding room command', () => {
+        const handler = between(
+            contentSource,
+            "message.type === 'EPISODE_SYNC_V2'",
+            '// Episode Auto-Sync: Legacy lobby notification from background'
+        );
+        expect(handler).toContain("resume: transaction.reason !== 'superseded'");
+    });
+
+    it('revalidates the complete prepared state immediately before execute', () => {
+        const handler = between(
+            contentSource,
+            "transaction.phase === 'execute'",
+            "transaction.phase === 'cancel'"
+        );
+        expect(handler).toContain("state.phase === 'prepare'");
+        expect(handler).toContain('video === findVideo()');
+        expect(handler).toContain('video.isConnected !== false');
+        expect(handler).toContain('video.paused');
+        expect(handler).toContain('!video.seeking');
+        expect(handler).toContain('video.readyState >= 3');
+        expect(handler).toContain('Math.abs(current) < 1');
+    });
+
     it('injects the shared stability window into packaged content scripts', () => {
         expect(buildSource).toContain('EPISODE_SYNC_V2_STABILITY_MS');
         expect(buildSource).toContain('episodeSyncStabilityVal');
