@@ -147,8 +147,39 @@ async function waitForLegacyRelayEvent(socket, event, timeoutMs = 10_000) {
     return JSON.parse(socket.messages.splice(index, 1)[0].substring(2))[1];
 }
 
-async function joinLegacyRelayRoom(socket, roomId, peerId) {
-    sendLegacyRelayEvent(socket, 'join_room', { roomId, peerId, protocolVersion: PROTOCOL_VERSION });
+async function waitForLegacyRelayPhase(socket, event, phase, transactionId, timeoutMs = 10_000) {
+    await expect.poll(() => socket.messages.some(message => {
+        if (!message.startsWith('42')) return false;
+        try {
+            const [candidateEvent, payload] = JSON.parse(message.substring(2));
+            return candidateEvent === event
+                && payload?.phase === phase
+                && payload?.transactionId === transactionId;
+        } catch {
+            return false;
+        }
+    }), { timeout: timeoutMs }).toBe(true);
+    const index = socket.messages.findIndex(message => {
+        if (!message.startsWith('42')) return false;
+        try {
+            const [candidateEvent, payload] = JSON.parse(message.substring(2));
+            return candidateEvent === event
+                && payload?.phase === phase
+                && payload?.transactionId === transactionId;
+        } catch {
+            return false;
+        }
+    });
+    return JSON.parse(socket.messages.splice(index, 1)[0].substring(2))[1];
+}
+
+async function joinLegacyRelayRoom(socket, roomId, peerId, clientCapabilities = undefined) {
+    sendLegacyRelayEvent(socket, 'join_room', {
+        roomId,
+        peerId,
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities
+    });
     return waitForLegacyRelayEvent(socket, 'room_data');
 }
 
@@ -1483,6 +1514,106 @@ test('drops the selection when the user clears it', async ({ context, extensionI
         targetReady: false,
         targetActivationState: 'none'
     });
+});
+
+test('completes Episode Sync v2 only after the packed player is stably prepared', async ({ context, extensionId, baseURL }) => {
+    test.setTimeout(45_000);
+    const relay = await import('../../server/index.js');
+    let coordinator = null;
+    try {
+        await relay.startServer(0, '127.0.0.1');
+        const port = relay.httpServer.address().port;
+        const roomId = `e2e-episode-v2-${Date.now()}`;
+        const url = `${baseURL}/pages/simple-player.html`;
+        const page = await context.newPage();
+        await page.goto(url);
+        await page.waitForFunction(() => window.__fixtureReady === true);
+        await page.evaluate(async () => {
+            navigator.mediaSession.metadata = new window.MediaMetadata({ title: 'S1:E6 - Visiting Ours' });
+            const video = document.querySelector('#player');
+            video.muted = true;
+            video.currentTime = 3;
+            await video.play();
+        });
+        const { tabId } = await selectTargetTab(context, extensionId, url);
+
+        coordinator = await connectLegacyRelayClient(port);
+        const episodeCaps = ['chat-v1', 'media-state-v1', 'episode-sync-v2'];
+        const coordinatorPeerId = 'episode-coord';
+        await joinLegacyRelayRoom(coordinator, roomId, coordinatorPeerId, episodeCaps);
+        coordinator.messages.length = 0;
+
+        await withExtensionPage(context, extensionId, extensionPage => extensionPage.evaluate(async settings => {
+            await chrome.storage.local.set(settings);
+            return chrome.runtime.sendMessage({ type: 'CONNECT' });
+        }, {
+            serverUrl: `ws://127.0.0.1:${port}`,
+            useCustomServer: true,
+            roomId,
+            password: '',
+            username: 'episode-player',
+            autoSyncNextEpisode: true
+        }));
+        await expectConnectedRoom(context, extensionId, roomId);
+        await expect.poll(() => relay.rooms.get(roomId)?.peers.size).toBe(2);
+
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'start',
+            expectedTitle: 'S1:E6 - Visiting Ours'
+        });
+        const lobby = await waitForLegacyRelayEvent(coordinator, 'episode_sync_v2');
+        expect(lobby).toMatchObject({ phase: 'lobby', loadedPeers: [], preparedPeers: [] });
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'loaded',
+            transactionId: lobby.transactionId
+        });
+
+        const prepare = await waitForLegacyRelayPhase(
+            coordinator,
+            'episode_sync_v2',
+            'prepare',
+            lobby.transactionId
+        );
+        expect(prepare.loadedPeers).toEqual(expect.arrayContaining([coordinatorPeerId]));
+        const extensionPeerId = prepare.participants.find(peerId => peerId !== coordinatorPeerId);
+        expect(extensionPeerId).toBeTruthy();
+        await expect.poll(() => page.locator('#player').evaluate(video => ({
+            paused: video.paused,
+            currentTime: video.currentTime,
+            readyState: video.readyState,
+            seeking: video.seeking
+        }))).toMatchObject({ paused: true, readyState: 4, seeking: false });
+        await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeLessThan(1);
+        await expect.poll(() => relay.rooms.get(roomId)?.episodeSyncV2?.preparedPeers || [])
+            .toContain(extensionPeerId);
+
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'prepared',
+            transactionId: lobby.transactionId
+        });
+        const execute = await waitForLegacyRelayPhase(
+            coordinator,
+            'episode_sync_v2',
+            'execute',
+            lobby.transactionId
+        );
+        expect(execute).toMatchObject({ phase: 'execute', transactionId: lobby.transactionId, targetTime: 0 });
+        await expect.poll(() => relay.rooms.get(roomId)?.episodeSyncV2).toBeNull();
+        await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(false);
+        await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeLessThan(3);
+
+        const legacyForceFrames = coordinator.messages.filter(message => message.startsWith('42') && (() => {
+            try { return JSON.parse(message.substring(2))[0].startsWith('force_sync_'); } catch { return false; }
+        })());
+        expect(legacyForceFrames).toEqual([]);
+
+        const state = await getExtensionState(context, extensionId, { type: 'GET_STATUS' });
+        expect(state.episodeLobby).toBeNull();
+        expect(state.targetTabId).toBe(tabId);
+    } finally {
+        try { coordinator?.close(); } catch { /* already closed */ }
+        await relay.stopServerForTests();
+    }
 });
 
 test('clears the selected target after inactivity removal and room closure', async ({ context, extensionId, baseURL }) => {

@@ -81,7 +81,7 @@ describe('canonical ROOM_DATA recovery contract', () => {
         const apply = functionBody(backgroundSource, 'performPendingCanonicalMediaStateApply', 'tryApplyPendingCanonicalMediaState');
         const roomData = functionBody(backgroundSource, 'handleCanonicalRoomData', 'handleServerEvent');
         expect(apply).toContain('if (hcmDesynced)');
-        expect(apply).toContain('if (episodeLobby)');
+        expect(apply).toContain('if (episodeLobby || episodeSyncV2)');
         expect(roomData).toContain('if (hasPendingLocalIntent)');
         expect(backgroundSource).toContain('awaitingRoomData = true');
         expect(backgroundSource).toContain('await handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent)');

@@ -56,6 +56,7 @@ export const EVENTS = {
     EPISODE_LOBBY: "episode_lobby",     // Broadcast: waiting for everyone on this episode
     EPISODE_READY: "episode_ready",      // Response: loaded the episode and paused at 0:00
     EPISODE_LOBBY_CANCEL: "episode_lobby_cancel", // Broadcast: cancel active lobby and resume
+    EPISODE_SYNC_V2: "episode_sync_v2", // Capability-gated, relay-authoritative episode transaction
 
     // Ephemeral end-to-end encrypted chat
     CHAT_MESSAGE: "chat_message", // Ciphertext relay; no server history
@@ -91,7 +92,8 @@ export const CAPABILITIES = {
     CO_HOST: 'co-host',  // owner promotes guests to additional controllers
     CHAT: 'chat',        // legacy server capability used by the first chat beta
     CHAT_V1: 'chat-v1',  // versioned client/server chat wire contract
-    MEDIA_STATE_V1: 'media-state-v1' // server-authoritative room playback recovery snapshot
+    MEDIA_STATE_V1: 'media-state-v1', // server-authoritative room playback recovery snapshot
+    EPISODE_SYNC_V2: 'episode-sync-v2' // transaction IDs + relay-owned load/prepare/execute phases
 };
 
 // Relay and extension media-time validation must use the same upper bound.
@@ -103,3 +105,5 @@ export const FORCE_SYNC_TIMEOUT = 8500; // 8.5s timeout for force sync ACKs (mus
 // transport grace. The target remains valid until newer room playback replaces it.
 export const FORCE_SYNC_TARGET_DELAY_WARNING = FORCE_SYNC_TIMEOUT + 2000;
 export const EPISODE_LOBBY_TIMEOUT = 60000; // 60s timeout for episode lobby
+export const EPISODE_SYNC_V2_PREPARE_TIMEOUT = 15000; // pause, seek, buffer and 1s stable verification
+export const EPISODE_SYNC_V2_STABILITY_MS = 1000;

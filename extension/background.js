@@ -1,7 +1,7 @@
 import { EVENTS, ERROR_CODES, CONTROL_MODES, CAPABILITIES, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, EPISODE_LOBBY_TIMEOUT, FORCE_SYNC_TIMEOUT, HEARTBEAT_INTERVAL } from './shared/constants.js';
 import { generateUsername } from './shared/names.js';
 import { loadLocale, getMessage, getSystemLanguage } from './i18n.js';
-import { sameEpisode, extractEpisodeId } from './episode-utils.js';
+import { sameEpisode, sameEpisodeStrict, extractEpisodeId } from './episode-utils.js';
 import { applyTitlePrivacyToPayload, sanitizeSharedTitle, sanitizeTabTitle, normalizeSendTabTitle, normalizeTitlePrivacyMode } from './title-privacy.js';
 import { initTabManager } from './modules/tab-manager.js';
 import { clearChatKeyCache, decryptChatMessage, encryptChatMessage, generateChatSecret, validateChatSecret } from './chat-crypto.js';
@@ -290,7 +290,8 @@ function serverSupportsChat() {
 }
 const CLIENT_CAPABILITIES = Object.freeze([
     CAPABILITIES.CHAT_V1,
-    CAPABILITIES.MEDIA_STATE_V1
+    CAPABILITIES.MEDIA_STATE_V1,
+    CAPABILITIES.EPISODE_SYNC_V2
 ]);
 
 function persistCanonicalMediaRecovery() {
@@ -462,7 +463,7 @@ function ensureState() {
                 'forceSyncDeadline', 'reconnectFailed', 'reconnectStartTime', 'reconnectAttempts', 'currentTabId', 'currentTabTitle',
                 'currentTargetFrameId', 'currentTargetDocumentId', 'currentTargetHasVideo',
                 'selectedTabId', 'selectedTabTitle', 'selectionErrorTabId', 'selectionErrorMessage',
-                'episodeLobby', 'localSeq', 'lastSeqBySender', 'expectedAcksCount', 'roomIdleSince', 'lastContentHeartbeatAt',
+                'episodeLobby', 'episodeSyncV2', 'localSeq', 'lastSeqBySender', 'expectedAcksCount', 'roomIdleSince', 'lastContentHeartbeatAt',
                 'hcmDesynced', 'chatActivityTimeline', 'canonicalMediaRecovery'
             ], (data) => {
                 // A late callback must not resurrect a room, queue or canonical
@@ -583,6 +584,20 @@ function ensureState() {
                     }
                 }
 
+                const restoredEpisodeSyncV2 = currentRoom
+                    ? normalizeEpisodeSyncV2(
+                        data.episodeSyncV2 || currentRoom.episodeSyncV2,
+                        new Set(currentRoom.peers.map(candidate => candidate.peerId))
+                    )
+                    : null;
+                if (restoredEpisodeSyncV2) {
+                    episodeSyncV2 = restoredEpisodeSyncV2;
+                    if (episodeLobbyTimeout) clearTimeout(episodeLobbyTimeout);
+                    episodeLobbyTimeout = null;
+                    episodeLobby = null;
+                    currentRoom.activeLobby = null;
+                }
+
                 if (Number.isSafeInteger(data.localSeq) && data.localSeq >= 0) localSeq = data.localSeq;
                 eventQueue = normalizePersistedEventQueue(
                     [...eventQueue, ...(Array.isArray(data.eventQueue) ? data.eventQueue : [])],
@@ -661,6 +676,7 @@ let forceSyncTimeout = null;
 // Episode Auto-Sync Lobby
 let episodeLobby = null; // { expectedTitle, initiatorPeerId, readyPeers: [], createdAt }
 let episodeLobbyTimeout = null;
+let episodeSyncV2 = null;
 
 // --- Storage Utils ---
 
@@ -1192,6 +1208,46 @@ async function clearTargetSelectionForLifecycle({
     return true;
 }
 
+function normalizeEpisodeSyncV2(value, allowedPeerIds = null) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const transactionId = typeof value.transactionId === 'string'
+        ? value.transactionId.substring(0, 64)
+        : '';
+    const phase = value.phase === 'lobby' || value.phase === 'prepare' ? value.phase : '';
+    const expectedTitle = typeof value.expectedTitle === 'string'
+        ? value.expectedTitle.substring(0, 100)
+        : '';
+    const initiatorPeerId = typeof value.initiatorPeerId === 'string'
+        ? value.initiatorPeerId.substring(0, 16)
+        : '';
+    if (!transactionId || !phase || !expectedTitle || !initiatorPeerId
+        || !Array.isArray(value.participants)
+        || !Array.isArray(value.loadedPeers)
+        || !Array.isArray(value.preparedPeers)) return null;
+    const normalizePeers = peers => [...new Set(peers
+        .filter(candidate => typeof candidate === 'string' && candidate)
+        .map(candidate => candidate.substring(0, 16)))];
+    const participants = normalizePeers(value.participants);
+    const participantSet = new Set(participants);
+    const loadedPeers = normalizePeers(value.loadedPeers).filter(candidate => participantSet.has(candidate));
+    const preparedPeers = normalizePeers(value.preparedPeers).filter(candidate => participantSet.has(candidate));
+    if (participants.length < 2
+        || !participantSet.has(initiatorPeerId)
+        || (allowedPeerIds && participants.some(candidate => !allowedPeerIds.has(candidate)))) return null;
+    return {
+        transactionId,
+        phase,
+        expectedTitle,
+        initiatorPeerId,
+        participants,
+        loadedPeers,
+        preparedPeers,
+        createdAt: Number.isFinite(value.createdAt) ? value.createdAt : Date.now(),
+        deadlineAt: Number.isFinite(value.deadlineAt) ? value.deadlineAt : null,
+        revision: Number.isSafeInteger(value.revision) && value.revision > 0 ? value.revision : 1
+    };
+}
+
 function clearTargetTabForIdle(expectedTabId = null, expectedGeneration = null) {
     return clearTargetSelectionForLifecycle({
         expectedTabId,
@@ -1212,6 +1268,8 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
     // Stop room-specific polling before the content script itself is removed.
     // Every terminal room exit must pass through the exact target identity while
     // it is still available, regardless of who initiated the exit.
+    if (notifyServer) cancelEpisodeSyncV2('room_exit');
+    else clearEpisodeSyncV2State({ reason: 'room_exit' });
     clearEpisodeLobbyState();
     currentRoom = null;
     clearCanonicalMediaRecovery();
@@ -1249,6 +1307,7 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
         forceSyncDeadline: null,
         expectedAcksCount: 0,
         episodeLobby: null,
+        episodeSyncV2: null,
         hcmDesynced: false,
         reconnectFailed: false,
         reconnectAttempts: 0,
@@ -1845,7 +1904,7 @@ async function flushEventQueue(replaySettingsOverride = undefined) {
         }
         applyQueuedRoomPolicy(flushRoomId, {
             canControl: !(controlMode === CONTROL_MODES.HOST_ONLY && hostPeerId && !amController()),
-            activeLobby: !!episodeLobby,
+            activeLobby: !!(episodeLobby || episodeSyncV2),
             desynced: hcmDesynced,
             authoritativeLobby: !!currentRoom?.activeLobby
         }, 'Queue replay authority changed');
@@ -2020,9 +2079,9 @@ async function performPendingCanonicalMediaStateApply() {
         addLog(`Canonical media state r${mediaState.revision} skipped: local guest is desynced`, 'info');
         return { status: 'ignored_desynced' };
     }
-    if (episodeLobby) {
+    if (episodeLobby || episodeSyncV2) {
         markCanonicalMediaStateHandled(roomId, mediaState.revision);
-        addLog(`Canonical media state r${mediaState.revision} skipped: episode lobby is active`, 'info');
+        addLog(`Canonical media state r${mediaState.revision} skipped: episode sync is active`, 'info');
         return { status: 'ignored_episode_lobby' };
     }
 
@@ -2193,6 +2252,29 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 currentRoom.peers = [];
             }
 
+            const roomPeerIds = new Set(currentRoom.peers.map(candidate => candidate.peerId));
+            const authoritativeEpisodeSyncV2 = serverSupports(CAPABILITIES.EPISODE_SYNC_V2)
+                ? normalizeEpisodeSyncV2(data.episodeSyncV2, roomPeerIds)
+                : null;
+            if (data.episodeSyncV2 && !authoritativeEpisodeSyncV2) {
+                addLog('Ignored malformed Episode Sync v2 transaction in ROOM_DATA', 'warn');
+            }
+            if (authoritativeEpisodeSyncV2) {
+                const shouldNotifyContent = !episodeSyncV2
+                    || episodeSyncV2.transactionId !== authoritativeEpisodeSyncV2.transactionId
+                    || episodeSyncV2.phase !== authoritativeEpisodeSyncV2.phase;
+                if (episodeLobby) clearEpisodeLobbyState();
+                episodeSyncV2 = authoritativeEpisodeSyncV2;
+                currentRoom.episodeSyncV2 = authoritativeEpisodeSyncV2;
+                persistEpisodeSyncV2();
+                broadcastLobbyUpdate();
+                if (shouldNotifyContent) sendEpisodeSyncV2ToContent().catch(() => {});
+            } else if (episodeSyncV2) {
+                clearEpisodeSyncV2State({ reason: 'relay_state_ended' });
+            } else {
+                currentRoom.episodeSyncV2 = null;
+            }
+
             // ROOM_DATA is authoritative for an already-active server lobby,
             // but a locally-created offline lobby has not reached the relay
             // yet and must remain owned by its initiator until queued replay.
@@ -2200,7 +2282,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 entry?.event === EVENTS.EPISODE_LOBBY
                 && (!entry.roomId || entry.roomId === data.roomId)
             );
-            const authoritativeLobby = normalizeEpisodeLobby(
+            const authoritativeLobby = authoritativeEpisodeSyncV2 ? null : normalizeEpisodeLobby(
                 data.activeLobby,
                 Date.now(),
                 new Set(currentRoom.peers.map(candidate => candidate.peerId))
@@ -2274,12 +2356,12 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 && !amController();
             const queuePolicy = applyQueuedRoomPolicy(data.roomId, {
                 canControl: !lostRoomAuthority,
-                activeLobby: !!episodeLobby,
+                activeLobby: !!(episodeLobby || episodeSyncV2),
                 desynced: hcmDesynced,
-                authoritativeLobby: !!authoritativeLobby
+                authoritativeLobby: !!(authoritativeLobby || authoritativeEpisodeSyncV2)
             }, lostRoomAuthority
                 ? 'Host Control role changed while offline'
-                : (episodeLobby ? 'Active Episode Lobby takes precedence' : 'Reconnect queue policy'));
+                : ((episodeLobby || episodeSyncV2) ? 'Active Episode Sync takes precedence' : 'Reconnect queue policy'));
 
             await handleCanonicalRoomData(data, queuePolicy.hasPendingLocalIntent);
             await flushEventQueue(replaySettings);
@@ -2608,6 +2690,76 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 }
             }
             break;
+        case EVENTS.EPISODE_SYNC_V2: {
+            if (!serverSupports(CAPABILITIES.EPISODE_SYNC_V2)) {
+                addLog('Ignored Episode Sync v2 event from relay without advertised capability', 'warn');
+                break;
+            }
+            const phase = data.phase;
+            if (phase === 'cancel' && !data.transactionId) {
+                addLog(`Episode Sync v2 unavailable: ${data.reason || 'rejected'}`, 'warn');
+                break;
+            }
+            if (phase === 'lobby' || phase === 'prepare') {
+                const activePeerIds = new Set((currentRoom?.peers || []).map(candidate =>
+                    typeof candidate === 'object' ? candidate.peerId : candidate
+                ));
+                const incoming = normalizeEpisodeSyncV2(data, activePeerIds);
+                if (!incoming
+                    || !incoming.participants.includes(peerId)
+                    || data.senderId !== incoming.initiatorPeerId) {
+                    addLog('Ignored malformed Episode Sync v2 state', 'warn');
+                    break;
+                }
+                if (episodeSyncV2
+                    && episodeSyncV2.transactionId === incoming.transactionId
+                    && incoming.revision < episodeSyncV2.revision) {
+                    addLog(`Ignored stale Episode Sync v2 revision ${incoming.revision}`, 'warn');
+                    break;
+                }
+                const shouldNotifyContent = !episodeSyncV2
+                    || episodeSyncV2.transactionId !== incoming.transactionId
+                    || episodeSyncV2.phase !== incoming.phase;
+                if (episodeSyncV2 && episodeSyncV2.transactionId !== incoming.transactionId) {
+                    clearEpisodeSyncV2State({ reason: 'transaction_replaced' });
+                }
+                if (episodeLobby) clearEpisodeLobbyState();
+                episodeSyncV2 = incoming;
+                if (currentRoom) currentRoom.episodeSyncV2 = incoming;
+                persistEpisodeSyncV2();
+                broadcastLobbyUpdate();
+                if (shouldNotifyContent) sendEpisodeSyncV2ToContent().catch(() => {});
+                addLog(`Episode Sync v2 ${incoming.phase}: "${incoming.expectedTitle}" (${incoming.transactionId.substring(0, 8)})`, 'info');
+                break;
+            }
+            if ((phase === 'execute' || phase === 'cancel')
+                && episodeSyncV2
+                && data.transactionId === episodeSyncV2.transactionId) {
+                const completed = episodeSyncV2;
+                if (phase === 'execute') {
+                    sendMessageToCurrentContent({
+                        type: 'EPISODE_SYNC_V2',
+                        transaction: { ...completed, phase: 'execute', targetTime: 0 }
+                    }).catch(() => {});
+                    if (currentRoom && Array.isArray(currentRoom.peers)) {
+                        currentRoom.peers.forEach(candidate => {
+                            if (candidate && typeof candidate === 'object') {
+                                candidate.playbackState = 'playing';
+                                candidate.currentTime = 0;
+                                candidate.lastReactiveUpdate = Date.now();
+                            }
+                        });
+                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                    }
+                    clearEpisodeSyncV2State({ notifyContent: false, reason: 'executed' });
+                    addLog(`Episode Sync v2 executed for "${completed.expectedTitle}"`, 'success');
+                } else {
+                    clearEpisodeSyncV2State({ reason: data.reason || 'cancelled' });
+                    addLog(`Episode Sync v2 cancelled: ${data.reason || 'cancelled'}`, 'warn');
+                }
+            }
+            break;
+        }
         case EVENTS.EPISODE_LOBBY:
             if (typeof data.senderId === 'string'
                 && typeof data.expectedTitle === 'string'
@@ -2768,10 +2920,12 @@ function executeForceSync() {
 }
 
 function completeForceSyncBeforeTargetChange(nextTabId) {
-    if (!isForceSyncInitiator) return;
     const selectedTabId = normalizeTabId(currentTabId);
     const normalizedNextTabId = normalizeTabId(nextTabId);
     if (selectedTabId !== null && selectedTabId === normalizedNextTabId) return;
+
+    if (episodeSyncV2) cancelEpisodeSyncV2('target_changed');
+    if (!isForceSyncInitiator) return;
 
     addLog('Finishing Force Sync before target change', 'info');
     executeForceSync();
@@ -2782,8 +2936,66 @@ function persistEpisodeLobby() {
     if (storageInitialized) chrome.storage.session.set({ episodeLobby });
 }
 
+function episodeLobbyForUi() {
+    if (!episodeSyncV2) return episodeLobby;
+    return {
+        expectedTitle: episodeSyncV2.expectedTitle,
+        initiatorPeerId: episodeSyncV2.initiatorPeerId,
+        readyPeers: episodeSyncV2.phase === 'prepare'
+            ? [...episodeSyncV2.preparedPeers]
+            : [...episodeSyncV2.loadedPeers],
+        createdAt: episodeSyncV2.createdAt,
+        mode: 'v2',
+        phase: episodeSyncV2.phase,
+        transactionId: episodeSyncV2.transactionId
+    };
+}
+
 function broadcastLobbyUpdate() {
-    chrome.runtime.sendMessage({ type: 'LOBBY_UPDATE', lobby: episodeLobby }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'LOBBY_UPDATE', lobby: episodeLobbyForUi() }).catch(() => {});
+}
+
+function persistEpisodeSyncV2() {
+    if (!storageInitialized) return;
+    chrome.storage.session.set({ episodeSyncV2, currentRoom }).catch(() => {});
+}
+
+function sendEpisodeSyncV2ToContent(transaction = episodeSyncV2) {
+    if (!transaction || !currentTabId) return Promise.resolve();
+    return sendMessageToCurrentContent({
+        type: 'EPISODE_SYNC_V2',
+        transaction: { ...transaction }
+    });
+}
+
+function clearEpisodeSyncV2State({ notifyContent = true, reason = 'cancelled' } = {}) {
+    const previous = episodeSyncV2;
+    episodeSyncV2 = null;
+    if (currentRoom) currentRoom.episodeSyncV2 = null;
+    persistEpisodeSyncV2();
+    broadcastLobbyUpdate();
+    if (notifyContent && previous && currentTabId) {
+        sendMessageToCurrentContent({
+            type: 'EPISODE_SYNC_V2',
+            transaction: {
+                ...previous,
+                phase: 'cancel',
+                reason
+            }
+        }).catch(() => {});
+    }
+}
+
+function cancelEpisodeSyncV2(reason = 'cancelled') {
+    if (!episodeSyncV2) return false;
+    const transaction = episodeSyncV2;
+    emitLive(EVENTS.EPISODE_SYNC_V2, {
+        phase: 'cancel',
+        transactionId: transaction.transactionId,
+        reason
+    });
+    clearEpisodeSyncV2State({ reason });
+    return true;
 }
 
 function clearEpisodeLobbyState() {
@@ -2808,7 +3020,7 @@ function cancelEpisodeLobby(reason) {
     supersedeCanonicalMediaRecovery('local episode_lobby_cancel');
     
     // Broadcast cancellation to room
-    emit(EVENTS.EPISODE_LOBBY_CANCEL, { peerId });
+    emitLive(EVENTS.EPISODE_LOBBY_CANCEL, { peerId });
 
     clearEpisodeLobbyState();
     addLog(`Episode lobby cancelled: ${reason} for "${title}"`, 'warn');
@@ -2869,7 +3081,7 @@ function executeEpisodeLobby() {
         expectedAcksCount: expectedAcksCount
     });
 
-    const syncPayload = { targetTime: 0.0 };
+    const syncPayload = { targetTime: 0.0, mediaTitle: title };
     localSeq++;
     chrome.storage.session.set({ localSeq });
     emit(EVENTS.FORCE_SYNC_PREPARE, { ...syncPayload, peerId, actionTimestamp: timestamp, seq: localSeq });
@@ -2885,6 +3097,7 @@ function executeEpisodeLobby() {
 
 function checkEpisodeLobbyCompletion() {
     if (!episodeLobby || !currentRoom) return;
+    if (episodeLobby.initiatorPeerId !== peerId) return;
     const peers = Array.isArray(currentRoom.peers) ? currentRoom.peers : [];
     // M-3: desynced peers (watching on their own) sit out the lobby — their content
     // script ignores EPISODE_LOBBY and never reports ready. Don't let them block
@@ -2895,7 +3108,7 @@ function checkEpisodeLobbyCompletion() {
         .filter(Boolean));
     const readyParticipatingCount = episodeLobby.readyPeers
         .filter(candidate => participatingPeerIds.has(candidate)).length;
-    if (readyParticipatingCount >= participatingPeerIds.size) {
+    if (participatingPeerIds.size > 0 && readyParticipatingCount >= participatingPeerIds.size) {
         executeEpisodeLobby();
     }
 }
@@ -4456,6 +4669,7 @@ function leaveOldRoomIfSwitching(newRoomId) {
     if (currentRoom && currentRoom.roomId !== newRoomId) {
         if (currentTabId) sendMessageToChatOverlay({ type: 'CHAT_RESET' }).catch(() => {});
         addLog(`Switching rooms: leaving ${currentRoom.roomId} to join ${newRoomId}`, 'info');
+        cancelEpisodeSyncV2('room_switch');
         forceDisconnect();
         currentRoom = null;
         clearCanonicalMediaRecovery();
@@ -4680,7 +4894,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             pendingTargetHost: pendingTarget?.host ?? null,
             pendingTargetOriginPattern: pendingTarget?.originPattern ?? null,
             pendingTargetRequestId: pendingTarget?.requestId ?? null,
-            episodeLobby: episodeLobby,
+            episodeLobby: episodeLobbyForUi(),
             reconnectAttempts,
             reconnectSlowMode: reconnectFailed,
             queuedLogicalEvents: eventQueue.length,
@@ -4913,6 +5127,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             } else {
                 checkEpisodeLobbyCompletion();
             }
+        }
+        if (hcmDesynced && episodeSyncV2?.participants.includes(peerId)) {
+            cancelEpisodeSyncV2('desynced');
         }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'LEAVE_ROOM') {
@@ -5254,7 +5471,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         } else {
             localSeq++;
             chrome.storage.session.set({ localSeq });
-            emit(EVENTS.FORCE_SYNC_ACK, { peerId, seq: localSeq });
+            emitLive(EVENTS.FORCE_SYNC_ACK, { peerId, seq: localSeq });
         }
         sendResponse({ status: 'ok' });
     } else if (message.type === 'CMD_ACK') {
@@ -5441,12 +5658,8 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             return;
         }
 
-        // Host Control Mode: a gated guest must NOT initiate an episode lobby — the
-        // server drops the guest's EPISODE_LOBBY, so the lobby would never complete
-        // and the guest would self-pause (PAUSE_FOR_LOBBY) into a 60s freeze. In
-        // host-only the controllers (owner + co-hosts) drive episode sync; a plain
-        // guest just follows / snaps back. Use amController() for parity with the
-        // CONTENT_EVENT gate and the server's controllers-based check.
+        // Host Control Mode: only controllers may initiate the relay-owned
+        // transaction. Plain guests wait for the controller's accepted lobby.
         if (controlMode === CONTROL_MODES.HOST_ONLY && !amController()) {
             addLog(`Episode change ("${lobbyTitle}") — host-only guest, not creating a lobby (controller drives).`, 'info');
             sendResponse({ status: 'host_only_guest_skip' });
@@ -5463,57 +5676,27 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             return;
         }
 
-        // If lobby already exists for this title, just mark self ready
-        if (episodeLobby && sameEpisode(episodeLobby.expectedTitle, lobbyTitle)) {
-            if (!episodeLobby.readyPeers.includes(peerId)) {
-                episodeLobby.readyPeers.push(peerId);
-                persistEpisodeLobby();
-                broadcastLobbyUpdate();
-                emit(EVENTS.EPISODE_READY, {
-                    peerId,
-                    title: lobbyTitle,
-                    expectedTitle: episodeLobby.expectedTitle
-                });
-                checkEpisodeLobbyCompletion();
-            }
-            sendResponse({ status: 'ready_sent' });
+        // Automatic episode sync v2 is relay-owned. Never self-pause or fall
+        // back to the legacy client-owned lobby: on an old/mixed relay that path
+        // can create multiple Force Sync initiators. Manual Force Sync remains
+        // available and unchanged.
+        if (!serverSupports(CAPABILITIES.EPISODE_SYNC_V2)) {
+            addLog(`Episode change ("${lobbyTitle}") — relay lacks Episode Sync v2; automatic sync skipped safely.`, 'warn');
+            sendResponse({ status: 'episode_sync_v2_unsupported' });
             return;
         }
-
-        // Cancel any existing lobby for a different episode
-        if (episodeLobby) clearEpisodeLobbyState();
-
-        // Create new lobby
-        supersedeCanonicalMediaRecovery('local episode_lobby', EVENTS.PAUSE);
-        episodeLobby = {
-            expectedTitle: lobbyTitle,
-            initiatorPeerId: peerId,
-            readyPeers: [peerId], // We are already ready
-            createdAt: Date.now()
-        };
-        persistEpisodeLobby();
-        broadcastLobbyUpdate();
-        addLog(`Episode lobby created: "${lobbyTitle}"`, 'info');
-
-        // Tell content script to pause the video and start polling
-        // (This is the only place we pause — after confirming the feature is enabled)
-        if (sender.tab && sender.tab.id) {
-            sendMessageToFrame(sender.tab.id, sender.frameId, {
-                type: 'PAUSE_FOR_LOBBY',
-                expectedTitle: lobbyTitle
-            }, null, sender.documentId).catch(() => {});
+        if (episodeSyncV2 && sameEpisode(episodeSyncV2.expectedTitle, lobbyTitle)) {
+            sendResponse({ status: 'transaction_active', transactionId: episodeSyncV2.transactionId });
+            return;
         }
-
-        // Broadcast to room
-        emit(EVENTS.EPISODE_LOBBY, { peerId, expectedTitle: lobbyTitle });
-
-        // Start timeout (Q1: Option B — cancel on timeout)
-        episodeLobbyTimeout = setTimeout(() => cancelEpisodeLobby('Timeout — not all peers loaded the episode'), EPISODE_LOBBY_TIMEOUT);
-
-        // Immediate check — maybe we're the only one in the room
-        checkEpisodeLobbyCompletion();
-
-        sendResponse({ status: 'lobby_created' });
+        if (episodeSyncV2) cancelEpisodeSyncV2('new_episode');
+        if (!emitLive(EVENTS.EPISODE_SYNC_V2, { phase: 'start', expectedTitle: lobbyTitle })) {
+            addLog(`Episode change ("${lobbyTitle}") — not connected; automatic sync was not queued.`, 'warn');
+            sendResponse({ status: 'episode_sync_v2_offline' });
+            return;
+        }
+        addLog(`Episode Sync v2 requested: "${lobbyTitle}"`, 'info');
+        sendResponse({ status: 'episode_sync_v2_requested' });
     } else if (message.type === 'EPISODE_READY_LOCAL') {
         if (sender.tab) {
             if (!isCurrentContentSender(sender)) {
@@ -5542,7 +5725,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 lobby.readyPeers.push(peerId);
                 persistEpisodeLobby();
                 broadcastLobbyUpdate();
-                emit(EVENTS.EPISODE_READY, {
+                emitLive(EVENTS.EPISODE_READY, {
                     peerId,
                     title: readyTitle,
                     expectedTitle: lobby.expectedTitle
@@ -5552,6 +5735,35 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
         }
         sendResponse({ status: 'ok' });
+    } else if (message.type === 'EPISODE_SYNC_V2_LOCAL') {
+        if (sender.tab && !isCurrentContentSender(sender)) {
+            sendResponse({ status: 'ignored_stale_target' });
+            return;
+        }
+        const transaction = episodeSyncV2;
+        const localPhase = message.phase;
+        const expectedLocalPhase = localPhase === 'loaded'
+            ? 'lobby'
+            : (localPhase === 'prepared' ? 'prepare' : null);
+        if (!transaction
+            || message.transactionId !== transaction.transactionId
+            || (expectedLocalPhase && transaction.phase !== expectedLocalPhase)
+            || !['loaded', 'prepared', 'failed'].includes(localPhase)) {
+            sendResponse({ status: 'ignored_stale_transaction' });
+            return;
+        }
+        const localTitle = message.payload?.title;
+        if (localPhase !== 'failed'
+            && (typeof localTitle !== 'string' || !sameEpisodeStrict(localTitle, transaction.expectedTitle))) {
+            sendResponse({ status: 'ignored_episode_mismatch' });
+            return;
+        }
+        const sent = emitLive(EVENTS.EPISODE_SYNC_V2, {
+            phase: localPhase,
+            transactionId: transaction.transactionId,
+            reason: typeof message.reason === 'string' ? message.reason.substring(0, 32) : undefined
+        });
+        sendResponse({ status: sent ? 'sent' : 'offline' });
     } else if (message.type === 'TITLE_PRIVACY_CHANGED') {
         const privacyRoomId = currentRoom?.roomId || null;
         const privacyLobby = episodeLobby;
@@ -5566,6 +5778,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 cancelEpisodeLobby('Title privacy changed');
             }
         }
+        if (episodeSyncV2) cancelEpisodeSyncV2('title_privacy_changed');
         if (currentRoom) {
             const sharedTitles = getSharedTitleFields(settings);
             emit(EVENTS.PEER_STATUS, {
@@ -5650,13 +5863,18 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         requestCanonicalMediaRecoveryAttempt();
         // Content script re-injected, check if there's an active lobby
-        if (episodeLobby) {
+        if (episodeSyncV2) {
+            sendResponse({ episodeSyncV2: { ...episodeSyncV2 }, lobbyActive: false });
+        } else if (episodeLobby) {
             sendResponse({ lobbyActive: true, expectedTitle: episodeLobby.expectedTitle });
         } else {
             sendResponse({ lobbyActive: false });
         }
     } else if (message.type === 'CANCEL_EPISODE_LOBBY') {
-        if (episodeLobby) {
+        if (episodeSyncV2) {
+            cancelEpisodeSyncV2('cancelled_by_user');
+            sendResponse({ status: 'ok' });
+        } else if (episodeLobby) {
             cancelEpisodeLobby('Cancelled by user');
             sendResponse({ status: 'ok' });
         } else {

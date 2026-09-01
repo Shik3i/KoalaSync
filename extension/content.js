@@ -84,6 +84,7 @@
         EPISODE_READY: "episode_ready"
     };
     const MAX_MEDIA_TIME = 86400;
+    const EPISODE_SYNC_V2_STABILITY_MS = 1000;
     // --- SHARED_EVENTS_INJECT_END ---
 
     // Suppresses native event reporting after a programmatic action.
@@ -334,6 +335,9 @@
     let episodeTransitionDebounce = null;
     let _pendingLobbyTitle = null; // Title we're waiting to match (from remote lobby)
     let lobbyPollTimer = null;
+    let episodeSyncV2State = null;
+    let episodeSyncV2PollTimer = null;
+    let episodeSyncV2Generation = 0;
     let _autoSyncEnabled = true; // Cached setting, updated via storage.onChanged
     let _audioSettings = null;
     let _audioProcessingAllowed = true;
@@ -1104,6 +1108,28 @@
         if (idA || idB) return false;
         return titleA === titleB;
     }
+
+    function episodeContext(title) {
+        if (!title || typeof title !== 'string') return '';
+        return title
+            .replace(/S(?:eason\s*)?\d+[^a-zA-Z0-9]*E(?:pisode\s*)?\d+/ig, ' ')
+            .replace(/(?:Episode|Folge|Ep\.?)\s*\d+|#\s*\d+/ig, ' ')
+            .normalize('NFKC')
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}]+/gu, ' ')
+            .trim();
+    }
+
+    // Transactional episode sync is deliberately stricter than ordinary playback
+    // filtering: if both peers expose contextual text (episode/show name), require
+    // it to agree so two unrelated S01E06 videos cannot cross-sync. Privacy-reduced
+    // S/E-only titles still fall back to the canonical episode ID.
+    function sameEpisodeStrict(titleA, titleB) {
+        if (!sameEpisode(titleA, titleB)) return false;
+        const contextA = episodeContext(titleA);
+        const contextB = episodeContext(titleB);
+        return !contextA || !contextB || contextA === contextB;
+    }
     // --- SHARED_EPISODE_UTILS_INJECT_END ---
 
     // Returns true only when we are CERTAIN the episodes differ.
@@ -1213,6 +1239,244 @@
             clearInterval(lobbyPollTimer);
             lobbyPollTimer = null;
         }
+    }
+
+    function isEpisodeSyncV2Current(state) {
+        return !destroyed
+            && episodeSyncV2State === state
+            && state.generation === episodeSyncV2Generation;
+    }
+
+    function stopEpisodeSyncV2Poll() {
+        if (episodeSyncV2PollTimer) {
+            clearInterval(episodeSyncV2PollTimer);
+            episodeSyncV2PollTimer = null;
+        }
+    }
+
+    async function reportEpisodeSyncV2Local(state, phase, reason = null) {
+        if (!isEpisodeSyncV2Current(state) || state.reportInFlight) return false;
+        state.reportInFlight = true;
+        try {
+            const response = await runtimeMessage({
+                type: 'EPISODE_SYNC_V2_LOCAL',
+                transactionId: state.transactionId,
+                phase,
+                reason,
+                payload: { title: getMediaTitle() }
+            });
+            if (!isEpisodeSyncV2Current(state)) return false;
+            if (response?.status === 'sent') {
+                if (phase === 'loaded') state.loadedReported = true;
+                if (phase === 'prepared') state.preparedReported = true;
+                return true;
+            }
+            return false;
+        } finally {
+            if (isEpisodeSyncV2Current(state)) state.reportInFlight = false;
+        }
+    }
+
+    function retryEpisodeSyncV2Report(state, phase, reason = null) {
+        if (!isEpisodeSyncV2Current(state) || state.reportRetryScheduled) return;
+        if (Number.isFinite(state.deadlineAt) && Date.now() >= state.deadlineAt) return;
+        state.reportRetryScheduled = true;
+        scheduleLifecycleTimeout(async () => {
+            if (!isEpisodeSyncV2Current(state)) return;
+            state.reportRetryScheduled = false;
+            const sent = await reportEpisodeSyncV2Local(state, phase, reason);
+            if (!sent) retryEpisodeSyncV2Report(state, phase, reason);
+        }, 750);
+    }
+
+    async function clearEpisodeSyncV2Content({ resume = false, manualAction = false } = {}) {
+        const state = episodeSyncV2State;
+        if (!state) return;
+        episodeSyncV2Generation++;
+        episodeSyncV2State = null;
+        stopEpisodeSyncV2Poll();
+        state.manualAction = state.manualAction || manualAction;
+        const video = state.video;
+        const mayResume = resume
+            && state.pausedByTransaction
+            && state.wasPlayingBeforePrepare
+            && !state.manualAction
+            && video
+            && video === findVideo()
+            && video.isConnected !== false
+            && sameEpisodeStrict(getMediaTitle(), state.expectedTitle)
+            && video.paused;
+        if (mayResume) {
+            const resumed = await tryMediaAction(EVENTS.PLAY);
+            if (!resumed) reportLog('Episode Sync v2: could not restore pre-transaction playback', 'warn');
+        }
+    }
+
+    function checkEpisodeSyncV2Loaded(state) {
+        if (!isEpisodeSyncV2Current(state) || state.phase !== 'lobby' || state.loadedReported) return;
+        const video = findVideo();
+        const title = getMediaTitle();
+        const matches = video
+            && title
+            && sameEpisodeStrict(title, state.expectedTitle)
+            && video.readyState >= 1
+            && getSyncCurrentTime(video) !== null;
+        if (!matches) {
+            state.loadCandidateVideo = null;
+            state.loadCandidateAt = 0;
+            return;
+        }
+        if (state.loadCandidateVideo !== video) {
+            state.loadCandidateVideo = video;
+            state.loadCandidateAt = Date.now();
+            return;
+        }
+        if (Date.now() - state.loadCandidateAt < 500) return;
+        reportEpisodeSyncV2Local(state, 'loaded').then(sent => {
+            if (sent) reportLog(`Episode Sync v2: loaded "${title}"`, 'success');
+        }).catch(() => {});
+    }
+
+    function startEpisodeSyncV2Lobby(transaction) {
+        if (!transaction?.transactionId || !transaction.expectedTitle) return;
+        if (episodeSyncV2State?.transactionId === transaction.transactionId) {
+            episodeSyncV2State.phase = 'lobby';
+            episodeSyncV2State.deadlineAt = Number.isFinite(transaction.deadlineAt)
+                ? transaction.deadlineAt
+                : episodeSyncV2State.deadlineAt;
+            return;
+        }
+        clearEpisodeSyncV2Content({ resume: true }).catch(() => {});
+        episodeSyncV2Generation++;
+        episodeSyncV2State = {
+            transactionId: transaction.transactionId,
+            expectedTitle: transaction.expectedTitle,
+            phase: 'lobby',
+            generation: episodeSyncV2Generation,
+            loadedReported: false,
+            preparedReported: false,
+            reportInFlight: false,
+            reportRetryScheduled: false,
+            deadlineAt: Number.isFinite(transaction.deadlineAt) ? transaction.deadlineAt : null,
+            loadCandidateVideo: null,
+            loadCandidateAt: 0,
+            video: null,
+            wasPlayingBeforePrepare: false,
+            pausedByTransaction: false,
+            manualAction: false,
+            programmaticPausePending: false,
+            prepareStarted: false
+        };
+        stopEpisodeSyncV2Poll();
+        checkEpisodeSyncV2Loaded(episodeSyncV2State);
+        episodeSyncV2PollTimer = setInterval(() => {
+            if (episodeSyncV2State) checkEpisodeSyncV2Loaded(episodeSyncV2State);
+        }, 500);
+    }
+
+    function waitForEpisodeSyncV2Stable(state, video, targetTime = 0, timeoutMs = 12000) {
+        return new Promise(resolve => {
+            const startedAt = Date.now();
+            let stableSince = 0;
+            const timer = setInterval(() => {
+                const current = getSyncCurrentTime(video);
+                const ready = isEpisodeSyncV2Current(state)
+                    && state.phase === 'prepare'
+                    && video === findVideo()
+                    && video.isConnected !== false
+                    && sameEpisodeStrict(getMediaTitle(), state.expectedTitle)
+                    && video.paused
+                    && !video.seeking
+                    && video.readyState >= 3
+                    && current !== null
+                    && Math.abs(current - targetTime) < 1;
+                if (ready) {
+                    if (!stableSince) stableSince = Date.now();
+                    if (Date.now() - stableSince >= EPISODE_SYNC_V2_STABILITY_MS) {
+                        clearInterval(timer);
+                        seekPollTimers.delete(timer);
+                        resolve(true);
+                    }
+                } else {
+                    stableSince = 0;
+                }
+                if (!isEpisodeSyncV2Current(state) || Date.now() - startedAt >= timeoutMs) {
+                    clearInterval(timer);
+                    seekPollTimers.delete(timer);
+                    resolve(false);
+                }
+            }, 100);
+            seekPollTimers.add(timer);
+        });
+    }
+
+    async function prepareEpisodeSyncV2(transaction) {
+        if (!transaction?.transactionId || !transaction.expectedTitle) return;
+        if (!episodeSyncV2State || episodeSyncV2State.transactionId !== transaction.transactionId) {
+            startEpisodeSyncV2Lobby({ ...transaction, phase: 'lobby' });
+        }
+        const state = episodeSyncV2State;
+        if (!state || state.transactionId !== transaction.transactionId) return;
+        state.deadlineAt = Number.isFinite(transaction.deadlineAt) ? transaction.deadlineAt : state.deadlineAt;
+        if (state.prepareStarted) return;
+        stopEpisodeSyncV2Poll();
+        state.phase = 'prepare';
+        state.prepareStarted = true;
+        const video = findVideo();
+        const currentTitle = getMediaTitle();
+        if (!video || !currentTitle || !sameEpisodeStrict(currentTitle, state.expectedTitle)) {
+            if (!await reportEpisodeSyncV2Local(state, 'failed', 'episode_mismatch')) {
+                retryEpisodeSyncV2Report(state, 'failed', 'episode_mismatch');
+            }
+            return;
+        }
+        state.video = video;
+        state.wasPlayingBeforePrepare = !video.paused;
+        if (!video.paused) {
+            state.programmaticPausePending = true;
+            const paused = await tryMediaAction(EVENTS.PAUSE);
+            if (!isEpisodeSyncV2Current(state)) return;
+            state.pausedByTransaction = paused === true;
+            if (!paused) {
+                state.programmaticPausePending = false;
+                if (!await reportEpisodeSyncV2Local(state, 'failed', 'pause_failed')) {
+                    retryEpisodeSyncV2Report(state, 'failed', 'pause_failed');
+                }
+                return;
+            }
+        }
+        const current = getSyncCurrentTime(video);
+        if (current === null || Math.abs(current) >= 0.25) {
+            const sought = await tryMediaAction(EVENTS.SEEK, { targetTime: 0 });
+            if (!isEpisodeSyncV2Current(state)) return;
+            if (!sought) {
+                if (!await reportEpisodeSyncV2Local(state, 'failed', 'seek_failed')) {
+                    retryEpisodeSyncV2Report(state, 'failed', 'seek_failed');
+                }
+                return;
+            }
+        }
+        const stable = await waitForEpisodeSyncV2Stable(state, video, 0);
+        if (!isEpisodeSyncV2Current(state)) return;
+        if (!stable) {
+            if (!await reportEpisodeSyncV2Local(state, 'failed', 'stability_timeout')) {
+                retryEpisodeSyncV2Report(state, 'failed', 'stability_timeout');
+            }
+            return;
+        }
+        if (await reportEpisodeSyncV2Local(state, 'prepared')) {
+            reportLog(`Episode Sync v2: prepared "${currentTitle}"`, 'success');
+        } else {
+            retryEpisodeSyncV2Report(state, 'prepared');
+        }
+    }
+
+    function failEpisodeSyncV2ForManualAction(action) {
+        const state = episodeSyncV2State;
+        if (!state || state.phase !== 'prepare') return;
+        state.manualAction = true;
+        reportEpisodeSyncV2Local(state, 'failed', `user_${action}`).catch(() => {});
+        clearEpisodeSyncV2Content({ manualAction: true }).catch(() => {});
     }
 
     function getPlayerActionFixes() {
@@ -1702,7 +1966,44 @@
             }
         }
 
-        // Episode Auto-Sync: Lobby notification from background
+        if (message.type === 'EPISODE_SYNC_V2') {
+            const transaction = message.transaction;
+            if (!transaction?.transactionId || !transaction.phase) {
+                sendResponse({ status: 'invalid_transaction' });
+                return true;
+            }
+            if (transaction.phase === 'lobby') {
+                reportLog(`Episode Sync v2 lobby: waiting for "${transaction.expectedTitle}"`, 'info');
+                startEpisodeSyncV2Lobby(transaction);
+            } else if (transaction.phase === 'prepare') {
+                prepareEpisodeSyncV2(transaction).catch(error => {
+                    reportLog(`Episode Sync v2 prepare failed: ${error.message}`, 'warn');
+                });
+            } else if (transaction.phase === 'execute') {
+                if (episodeSyncV2State?.transactionId === transaction.transactionId) {
+                    const state = episodeSyncV2State;
+                    const video = state.video || findVideo();
+                    const canExecute = video
+                        && video === findVideo()
+                        && sameEpisodeStrict(getMediaTitle(), state.expectedTitle);
+                    clearEpisodeSyncV2Content({ resume: false }).catch(() => {});
+                    if (canExecute) {
+                        Promise.resolve(tryMediaAction(EVENTS.PLAY)).then(applied => {
+                            if (applied) scheduleProactiveHeartbeat();
+                            else reportLog('Episode Sync v2 execute could not start playback', 'warn');
+                        }).catch(() => {});
+                    }
+                }
+            } else if (transaction.phase === 'cancel') {
+                if (episodeSyncV2State?.transactionId === transaction.transactionId) {
+                    clearEpisodeSyncV2Content({ resume: true }).catch(() => {});
+                }
+            }
+            sendResponse({ status: 'ok' });
+            return true;
+        }
+
+        // Episode Auto-Sync: Legacy lobby notification from background
         if (message.type === 'EPISODE_LOBBY') {
             // Host Control Mode: a desynced guest is watching on their own and must
             // not join the lobby flow. Otherwise they'd pause on title match, report
@@ -1962,6 +2263,19 @@
             return;
         }
         if (action === EVENTS.PLAY && consumeCanonicalRestorePlaySuppression()) return;
+        if (episodeSyncV2State?.phase === 'prepare'
+            && action === EVENTS.PAUSE
+            && episodeSyncV2State.programmaticPausePending
+            && video === episodeSyncV2State.video
+            && video.paused) {
+            episodeSyncV2State.programmaticPausePending = false;
+            return;
+        }
+
+        // An unsuppressed native action during PREPARE is a newer user intent.
+        // Fail the automation before relaying that action; the relay broadcasts
+        // CANCEL first and then applies this manual PLAY/PAUSE/SEEK normally.
+        failEpisodeSyncV2ForManualAction(action);
 
         if (action === EVENTS.PLAY || action === EVENTS.PAUSE) {
             cancelCanonicalMediaApply(action, video);
@@ -2037,6 +2351,7 @@
         closeAudioContext();
         if (keepAlivePort) { try { keepAlivePort.disconnect(); } catch (_e) { /* ignore */ } keepAlivePort = null; }
         if (lobbyPollTimer) { clearInterval(lobbyPollTimer); lobbyPollTimer = null; }
+        stopEpisodeSyncV2Poll();
         if (heartbeatTimeout) { clearTimeout(heartbeatTimeout); heartbeatTimeout = null; }
         if (proactiveHeartbeatTimeout) { clearTimeout(proactiveHeartbeatTimeout); proactiveHeartbeatTimeout = null; }
         // Drop any pending coalesced play/pause: we are tearing down and will
@@ -2064,6 +2379,12 @@
         connectKeepAlivePort();
         schedulePeriodicHeartbeat();
         scheduleProactiveHeartbeat();
+        if (episodeSyncV2State?.phase === 'lobby') {
+            checkEpisodeSyncV2Loaded(episodeSyncV2State);
+            episodeSyncV2PollTimer = setInterval(() => {
+                if (episodeSyncV2State) checkEpisodeSyncV2Loaded(episodeSyncV2State);
+            }, 500);
+        }
         reportLog(`Page restored from cache — suppressing seeks for ${VISIBILITY_GRACE_MS / 1000}s`, 'warn');
     }
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -2445,6 +2766,9 @@
         if (heartbeatTimeout) { clearTimeout(heartbeatTimeout); heartbeatTimeout = null; }
         if (proactiveHeartbeatTimeout) { clearTimeout(proactiveHeartbeatTimeout); proactiveHeartbeatTimeout = null; }
         stopLobbyPoll();
+        stopEpisodeSyncV2Poll();
+        episodeSyncV2Generation++;
+        episodeSyncV2State = null;
         hcmDeferredSnapPending = false;
 
         observer.disconnect();
@@ -2501,7 +2825,13 @@
     // Episode Auto-Sync: Boot recovery — check if background has an active lobby
     runtimeMessage({ type: 'CONTENT_BOOT' }, (res) => {
         if (destroyed || chrome.runtime.lastError) return;
-        if (res && res.lobbyActive && res.expectedTitle) {
+        if (res?.episodeSyncV2) {
+            if (res.episodeSyncV2.phase === 'prepare') {
+                prepareEpisodeSyncV2(res.episodeSyncV2).catch(() => {});
+            } else {
+                startEpisodeSyncV2Lobby(res.episodeSyncV2);
+            }
+        } else if (res && res.lobbyActive && res.expectedTitle) {
             reportLog(`Boot: Active lobby detected for "${res.expectedTitle}"`, 'info');
             startLobbyPoll(res.expectedTitle);
         }

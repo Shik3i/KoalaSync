@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TARGET_DELAY_WARNING, MAX_MEDIA_TIME } from '../shared/constants.js';
+import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TARGET_DELAY_WARNING, MAX_MEDIA_TIME, EPISODE_LOBBY_TIMEOUT, EPISODE_SYNC_V2_PREPARE_TIMEOUT } from '../shared/constants.js';
 import { createChatEnvelope } from './chat.js';
 import {
     commitForceSyncMediaState,
@@ -173,7 +173,8 @@ const HOST_ONLY_GATED_EVENTS = new Set([
     EVENTS.FORCE_SYNC_PREPARE,
     EVENTS.FORCE_SYNC_EXECUTE,
     EVENTS.EPISODE_LOBBY,
-    EVENTS.EPISODE_LOBBY_CANCEL
+    EVENTS.EPISODE_LOBBY_CANCEL,
+    EVENTS.EPISODE_SYNC_V2
 ]);
 
 // Current clients sequence room-moving media commands. The relay mirrors the
@@ -188,6 +189,15 @@ const SEQUENCED_ROOM_EVENTS = new Set([
     EVENTS.FORCE_SYNC_EXECUTE
 ]);
 
+const EPISODE_SYNC_V2_SUPERSEDING_EVENTS = new Set([
+    EVENTS.PLAY,
+    EVENTS.PAUSE,
+    EVENTS.SEEK,
+    EVENTS.FORCE_SYNC_PREPARE,
+    EVENTS.FORCE_SYNC_EXECUTE,
+    EVENTS.EPISODE_LOBBY
+]);
+
 // Features this relay supports, advertised to clients in ROOM_DATA so they can
 // enable matching UI/behavior only when the server actually backs it. Append a
 // flag here when a new server-gated feature ships (e.g. co-host promotion).
@@ -196,7 +206,8 @@ const SERVER_CAPABILITIES = [
     CAPABILITIES.CO_HOST,
     CAPABILITIES.CHAT,
     CAPABILITIES.CHAT_V1,
-    CAPABILITIES.MEDIA_STATE_V1
+    CAPABILITIES.MEDIA_STATE_V1,
+    CAPABILITIES.EPISODE_SYNC_V2
 ];
 
 function normalizeClientCapabilities(value) {
@@ -205,7 +216,8 @@ function normalizeClientCapabilities(value) {
         .filter(capability => typeof capability === 'string')
         .map(capability => capability.substring(0, 32))
         .filter(capability => capability === CAPABILITIES.CHAT_V1
-            || capability === CAPABILITIES.MEDIA_STATE_V1)
+            || capability === CAPABILITIES.MEDIA_STATE_V1
+            || capability === CAPABILITIES.EPISODE_SYNC_V2)
     )];
 }
 
@@ -217,6 +229,86 @@ function clientSupportsChat(socket) {
 function clientSupportsMediaState(socket) {
     return Array.isArray(socket?.data?.clientCapabilities)
         && socket.data.clientCapabilities.includes(CAPABILITIES.MEDIA_STATE_V1);
+}
+
+function clientSupportsEpisodeSyncV2(socket) {
+    return Array.isArray(socket?.data?.clientCapabilities)
+        && socket.data.clientCapabilities.includes(CAPABILITIES.EPISODE_SYNC_V2);
+}
+
+function publicEpisodeSyncV2(transaction, phase = null) {
+    if (!transaction) return null;
+    const publicPhase = phase || (transaction.phase === 'loading' ? 'lobby' : 'prepare');
+    return {
+        transactionId: transaction.transactionId,
+        phase: publicPhase,
+        expectedTitle: transaction.expectedTitle,
+        initiatorPeerId: transaction.initiatorPeerId,
+        participants: [...transaction.participants],
+        loadedPeers: [...transaction.loadedPeers],
+        preparedPeers: [...transaction.preparedPeers],
+        createdAt: transaction.createdAt,
+        deadlineAt: transaction.deadlineAt,
+        revision: transaction.revision
+    };
+}
+
+function emitEpisodeSyncV2ToParticipants(roomId, room, transaction, payload) {
+    const participantIds = new Set(transaction.participants);
+    for (const socketId of room.peers) {
+        const participant = room.peerData.get(socketId);
+        const participantSocket = io.sockets.sockets.get(socketId);
+        if (!participantIds.has(participant?.peerId) || !clientSupportsEpisodeSyncV2(participantSocket)) continue;
+        participantSocket.emit(EVENTS.EPISODE_SYNC_V2, payload);
+    }
+}
+
+function clearEpisodeSyncV2Timer(transaction) {
+    if (!transaction?.timeout) return;
+    clearTimeout(transaction.timeout);
+    transaction.timeout = null;
+}
+
+function cancelEpisodeSyncV2(roomId, room, reason, failedPeerId = null) {
+    const transaction = room?.episodeSyncV2;
+    if (!transaction) return false;
+    clearEpisodeSyncV2Timer(transaction);
+    room.episodeSyncV2 = null;
+    room.lastEpisodeSyncV2Id = transaction.transactionId;
+    emitEpisodeSyncV2ToParticipants(roomId, room, transaction, {
+        ...publicEpisodeSyncV2(transaction, 'cancel'),
+        senderId: transaction.initiatorPeerId,
+        reason: typeof reason === 'string' ? reason.substring(0, 32) : 'cancelled',
+        failedPeerId: typeof failedPeerId === 'string' ? failedPeerId.substring(0, 16) : undefined
+    });
+    return true;
+}
+
+function scheduleEpisodeSyncV2Deadline(roomId, room, transaction, timeoutMs) {
+    clearEpisodeSyncV2Timer(transaction);
+    transaction.deadlineAt = Date.now() + timeoutMs;
+    transaction.timeout = setTimeout(() => {
+        if (room.episodeSyncV2 !== transaction) return;
+        cancelEpisodeSyncV2(roomId, room, transaction.phase === 'loading' ? 'load_timeout' : 'prepare_timeout');
+    }, timeoutMs);
+    transaction.timeout.unref?.();
+}
+
+function roomFullySupportsEpisodeSyncV2(room) {
+    if (!room || room.peers.size === 0) return false;
+    for (const socketId of room.peers) {
+        if (!clientSupportsEpisodeSyncV2(io.sockets.sockets.get(socketId))) return false;
+    }
+    return true;
+}
+
+export function expireEpisodeSyncV2Transactions(now = Date.now()) {
+    for (const [roomId, room] of rooms) {
+        const transaction = room.episodeSyncV2;
+        if (transaction && Number.isFinite(transaction.deadlineAt) && transaction.deadlineAt <= now) {
+            cancelEpisodeSyncV2(roomId, room, transaction.phase === 'loading' ? 'load_timeout' : 'prepare_timeout');
+        }
+    }
 }
 
 // M-4: minimum interval between CONTROL_MODE changes per room. Stops a rapidly
@@ -262,6 +354,13 @@ function removePeerFromRoom(socketId, roomId, reason, { notifyRemainingPeers = t
 
     const { peerId } = peerData;
 
+    // V2 freezes its participant set. Losing any participant invalidates the
+    // barrier; continuing with a smaller set could execute before a reconnecting
+    // player has actually prepared.
+    if (room.episodeSyncV2?.participants.includes(peerId) && !peerJoinLocks.has(peerId)) {
+        cancelEpisodeSyncV2(roomId, room, 'participant_left', peerId);
+    }
+
     // 1. Remove from room data structures
     room.peers.delete(socketId);
     room.peerIds.delete(socketId);
@@ -286,8 +385,10 @@ function removePeerFromRoom(socketId, roomId, reason, { notifyRemainingPeers = t
         room.activeLobby.readyPeers = room.activeLobby.readyPeers.filter(id => id !== peerId);
         if (room.peers.size <= 1 || room.activeLobby.initiatorPeerId === peerId) {
             room.activeLobby = null; // Dissolve lobby
+            room.legacyEpisodeSyncOwner = null;
         }
     }
+    if (room.legacyEpisodeSyncOwner === peerId) room.legacyEpisodeSyncOwner = null;
 
     // 3.6. Host Control Mode: if the host left (and isn't still connected via another
     //      socket), fall back to 'everyone' so the room never gets stuck locked, and
@@ -338,6 +439,7 @@ function removePeerFromRoom(socketId, roomId, reason, { notifyRemainingPeers = t
 
     // 4. Delete empty room
     if (room.peers.size === 0) {
+        clearEpisodeSyncV2Timer(room.episodeSyncV2);
         rooms.delete(roomId);
         log('ROOM', `Deleted empty room after ${reason}: ${roomId.substring(0, 3)}***`);
     }
@@ -493,7 +595,11 @@ io.on('connection', (socket) => {
                             forceSyncTarget: null,
                             // Distinguishes an unknown target after relay restart from a
                             // transaction explicitly replaced by newer room playback.
-                            forceSyncSuperseded: false
+                            forceSyncSuperseded: false,
+                            activeLobby: null,
+                            legacyEpisodeSyncOwner: null,
+                            episodeSyncV2: null,
+                            lastEpisodeSyncV2Id: null
                         };
                         rooms.set(roomId, room);
                         createdByMe = true;
@@ -587,6 +693,10 @@ io.on('connection', (socket) => {
                 controlMode: room.controlMode || CONTROL_MODES.EVERYONE,
                 controllers: room.controllers ? Array.from(room.controllers) : [],
                 mediaState: snapshotMediaState(room.mediaState, snapshotAt),
+                episodeSyncV2: room.episodeSyncV2?.participants.includes(peerId)
+                    && clientSupportsEpisodeSyncV2(socket)
+                    ? publicEpisodeSyncV2(room.episodeSyncV2)
+                    : null,
                 capabilities: SERVER_CAPABILITIES
             });
             log('ROOM', `Peer ${peerId} joined: ${roomId.substring(0, 3)}***`);
@@ -714,6 +824,13 @@ io.on('connection', (socket) => {
                     // Strip undefined keys for clean wire format
                     Object.keys(relayPayload).forEach(k => relayPayload[k] === undefined && delete relayPayload[k]);
 
+                    if (room.episodeSyncV2
+                        && eventName === EVENTS.PEER_STATUS
+                        && relayPayload.desynced === true
+                        && room.episodeSyncV2.participants.includes(mapping.peerId)) {
+                        cancelEpisodeSyncV2(mapping.roomId, room, 'participant_desynced', mapping.peerId);
+                    }
+
                     // The first live lobby owns the room until completion or
                     // cancellation. Drop concurrent lobby starts and stale ready
                     // frames instead of letting clients build divergent lobbies.
@@ -743,6 +860,29 @@ io.on('connection', (socket) => {
                             return;
                         }
                     }
+                    if (eventName === EVENTS.EPISODE_LOBBY_CANCEL && !room.activeLobby) {
+                        log('ROOM', `Dropped stale episode lobby cancel from ${mapping.peerId}`);
+                        return;
+                    }
+
+                    // A user/manual legacy command wins over automation. Cancel
+                    // the v2 barrier first so prepared peers can restore safely,
+                    // then relay the newer command normally.
+                    if (room.episodeSyncV2 && EPISODE_SYNC_V2_SUPERSEDING_EVENTS.has(eventName)) {
+                        cancelEpisodeSyncV2(mapping.roomId, room, 'superseded', mapping.peerId);
+                    }
+
+                    // Legacy clients all used to self-promote after lobby ready.
+                    // Preserve their wire contract, but bind the room-wide PREPARE,
+                    // EXECUTE and CANCEL to the accepted lobby owner.
+                    if (room.legacyEpisodeSyncOwner
+                        && (eventName === EVENTS.FORCE_SYNC_PREPARE
+                            || eventName === EVENTS.FORCE_SYNC_EXECUTE
+                            || eventName === EVENTS.EPISODE_LOBBY_CANCEL)
+                        && mapping.peerId !== room.legacyEpisodeSyncOwner) {
+                        log('ROOM', `Dropped legacy episode ${eventName} from non-owner ${mapping.peerId}`);
+                        return;
+                    }
 
                     const mediaStateNow = Date.now();
 
@@ -771,6 +911,16 @@ io.on('connection', (socket) => {
                         room.forceSyncSuperseded = true;
                         room.forceSyncInitiator = null;
                         room.forceSyncTarget = null;
+                        if (canonicalStateUpdated) room.legacyEpisodeSyncOwner = null;
+                    }
+                    if (canonicalStateUpdated && room.activeLobby) {
+                        room.activeLobby = null;
+                        room.legacyEpisodeSyncOwner = null;
+                        io.to(mapping.roomId).emit(EVENTS.EPISODE_LOBBY_CANCEL, {
+                            senderId: mapping.peerId,
+                            peerId: mapping.peerId,
+                            reason: 'superseded'
+                        });
                     }
                     if (eventName === EVENTS.FORCE_SYNC_PREPARE) {
                         // A malformed PREPARE must neither pause peers nor grant
@@ -821,6 +971,7 @@ io.on('connection', (socket) => {
                         room.forceSyncInitiator = null;
                         room.forceSyncTarget = null;
                         room.forceSyncSuperseded = false;
+                        room.legacyEpisodeSyncOwner = null;
                     }
 
                     socket.to(mapping.roomId).emit(eventName, relayPayload);
@@ -832,12 +983,14 @@ io.on('connection', (socket) => {
                             initiatorPeerId: mapping.peerId,
                             readyPeers: [mapping.peerId]
                         };
+                        room.legacyEpisodeSyncOwner = mapping.peerId;
                     } else if (eventName === EVENTS.EPISODE_READY && room.activeLobby) {
                         if (!room.activeLobby.readyPeers.includes(mapping.peerId)) {
                             room.activeLobby.readyPeers.push(mapping.peerId);
                         }
                     } else if ((eventName === EVENTS.FORCE_SYNC_PREPARE || eventName === EVENTS.FORCE_SYNC_EXECUTE || eventName === EVENTS.EPISODE_LOBBY_CANCEL) && room.activeLobby) {
                         room.activeLobby = null;
+                        if (eventName === EVENTS.EPISODE_LOBBY_CANCEL) room.legacyEpisodeSyncOwner = null;
                     }
                     }
                 }
@@ -845,6 +998,159 @@ io.on('connection', (socket) => {
                 log('ERROR', `Relay handler error for ${eventName}: ${err.message}`);
             }
         });
+    });
+
+    socket.on(EVENTS.EPISODE_SYNC_V2, (data) => {
+        try {
+            if (!checkEventRate(socket.id)) {
+                log('SECURITY', `Event rate limit exceeded for socket: ${socket.id}`);
+                socket.disconnect(true);
+                return;
+            }
+            if (!data || typeof data !== 'object') return;
+            const mapping = socketToRoom.get(socket.id);
+            const room = mapping ? rooms.get(mapping.roomId) : null;
+            if (!mapping || !room || !clientSupportsEpisodeSyncV2(socket)) return;
+
+            const phase = typeof data.phase === 'string' ? data.phase.substring(0, 16) : '';
+            const transactionId = typeof data.transactionId === 'string'
+                ? data.transactionId.substring(0, 64)
+                : '';
+            room.lastActivity = Date.now();
+
+            if (phase === 'start') {
+                const expectedTitle = typeof data.expectedTitle === 'string'
+                    ? data.expectedTitle.substring(0, 100)
+                    : '';
+                const isController = room.controlMode !== CONTROL_MODES.HOST_ONLY
+                    || (room.controllers && room.controllers.has(mapping.peerId));
+                const senderData = room.peerData.get(socket.id);
+                const rejectStart = (reason) => socket.emit(EVENTS.EPISODE_SYNC_V2, {
+                    phase: 'cancel',
+                    transactionId: null,
+                    senderId: mapping.peerId,
+                    expectedTitle,
+                    reason
+                });
+                if (!expectedTitle) return rejectStart('invalid_title');
+                if (!isController) return rejectStart('not_controller');
+                if (senderData?.desynced) return rejectStart('desynced');
+                if (!roomFullySupportsEpisodeSyncV2(room)) return rejectStart('capability_mismatch');
+                if (room.activeLobby || room.forceSyncTarget) return rejectStart('legacy_sync_active');
+                if (room.episodeSyncV2) {
+                    if (room.episodeSyncV2.participants.includes(mapping.peerId)) {
+                        socket.emit(EVENTS.EPISODE_SYNC_V2, {
+                            ...publicEpisodeSyncV2(room.episodeSyncV2),
+                            senderId: room.episodeSyncV2.initiatorPeerId
+                        });
+                    } else {
+                        rejectStart('transaction_busy');
+                    }
+                    return;
+                }
+
+                const participants = [...new Set([...room.peerData.values()]
+                    .filter(candidate => candidate && !candidate.desynced)
+                    .map(candidate => candidate.peerId)
+                    .filter(Boolean))];
+                if (participants.length < 2 || !participants.includes(mapping.peerId)) {
+                    return rejectStart('not_enough_participants');
+                }
+
+                const now = Date.now();
+                const transaction = {
+                    transactionId: crypto.randomUUID(),
+                    phase: 'loading',
+                    expectedTitle,
+                    initiatorPeerId: mapping.peerId,
+                    participants,
+                    loadedPeers: [],
+                    preparedPeers: [],
+                    createdAt: now,
+                    deadlineAt: now + EPISODE_LOBBY_TIMEOUT,
+                    revision: 1,
+                    timeout: null
+                };
+                room.episodeSyncV2 = transaction;
+                scheduleEpisodeSyncV2Deadline(mapping.roomId, room, transaction, EPISODE_LOBBY_TIMEOUT);
+                emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
+                    ...publicEpisodeSyncV2(transaction, 'lobby'),
+                    senderId: transaction.initiatorPeerId
+                });
+                return;
+            }
+
+            const transaction = room.episodeSyncV2;
+            if (!transaction
+                || !transactionId
+                || transaction.transactionId !== transactionId
+                || !transaction.participants.includes(mapping.peerId)) {
+                return;
+            }
+
+            if (phase === 'cancel' || phase === 'failed') {
+                cancelEpisodeSyncV2(mapping.roomId, room, phase === 'failed' ? 'peer_failed' : 'peer_cancelled', mapping.peerId);
+                return;
+            }
+
+            if (phase === 'loaded' && transaction.phase === 'loading') {
+                if (transaction.loadedPeers.includes(mapping.peerId)) return;
+                transaction.loadedPeers.push(mapping.peerId);
+                transaction.revision++;
+                if (transaction.loadedPeers.length < transaction.participants.length) {
+                    emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
+                        ...publicEpisodeSyncV2(transaction, 'lobby'),
+                        senderId: transaction.initiatorPeerId
+                    });
+                    return;
+                }
+
+                transaction.phase = 'preparing';
+                transaction.revision++;
+                scheduleEpisodeSyncV2Deadline(mapping.roomId, room, transaction, EPISODE_SYNC_V2_PREPARE_TIMEOUT);
+                emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
+                    ...publicEpisodeSyncV2(transaction, 'prepare'),
+                    senderId: transaction.initiatorPeerId,
+                    targetTime: 0
+                });
+                return;
+            }
+
+            if (phase === 'prepared' && transaction.phase === 'preparing') {
+                if (transaction.preparedPeers.includes(mapping.peerId)) return;
+                transaction.preparedPeers.push(mapping.peerId);
+                transaction.revision++;
+                if (transaction.preparedPeers.length < transaction.participants.length) {
+                    emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
+                        ...publicEpisodeSyncV2(transaction, 'prepare'),
+                        senderId: transaction.initiatorPeerId,
+                        targetTime: 0
+                    });
+                    return;
+                }
+
+                clearEpisodeSyncV2Timer(transaction);
+                room.episodeSyncV2 = null;
+                room.lastEpisodeSyncV2Id = transaction.transactionId;
+                room.forceSyncInitiator = null;
+                room.forceSyncTarget = null;
+                room.forceSyncSuperseded = false;
+                commitForceSyncMediaState(
+                    room,
+                    0,
+                    transaction.initiatorPeerId,
+                    Date.now(),
+                    transaction.expectedTitle
+                );
+                emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
+                    ...publicEpisodeSyncV2(transaction, 'execute'),
+                    senderId: transaction.initiatorPeerId,
+                    targetTime: 0
+                });
+            }
+        } catch (err) {
+            log('ERROR', `EPISODE_SYNC_V2 handler error: ${err.message}`);
+        }
     });
 
     socket.on(EVENTS.GET_ROOMS, () => {
@@ -1101,6 +1407,7 @@ io.on('connection', (socket) => {
 
 // Active Room & Dead Peer Cleanup (Every 2m)
 export function cleanupInactiveRooms(now = Date.now()) {
+    expireEpisodeSyncV2Transactions(now);
     const roomCutoff = now - (2 * 60 * 60 * 1000); // 2 hours
     const peerCutoff = now - (5 * 60 * 1000);      // 5 minutes
     
@@ -1137,6 +1444,7 @@ export function cleanupInactiveRooms(now = Date.now()) {
         // 2. Prune empty or inactive rooms
         const currentRoom = rooms.get(roomId);
         if (currentRoom && (currentRoom.peers.size === 0 || currentRoom.lastActivity < roomCutoff)) {
+            clearEpisodeSyncV2Timer(currentRoom.episodeSyncV2);
             io.to(roomId).emit(EVENTS.ERROR, {
                 code: ERROR_CODES.ROOM_CLOSED,
                 message: 'Room closed'

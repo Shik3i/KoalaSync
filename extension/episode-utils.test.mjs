@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractEpisodeId, sameEpisode } from './episode-utils.js';
+import { extractEpisodeId, sameEpisode, sameEpisodeStrict } from './episode-utils.js';
 
 describe('episode title matching', () => {
     it.each([
@@ -52,5 +52,11 @@ describe('episode title matching', () => {
         ['S01E01', 'EP001']
     ])('rejects different titles %j and %j', (left, right) => {
         expect(sameEpisode(left, right)).toBe(false);
+    });
+
+    it('keeps transactional matching strict when both titles expose context', () => {
+        expect(sameEpisodeStrict('S1:E6 - Visiting Ours', 'S01E06 - Visiting Ours')).toBe(true);
+        expect(sameEpisodeStrict('S1:E6 - Visiting Ours', 'S1:E6 - Another Show')).toBe(false);
+        expect(sameEpisodeStrict('S1:E6', 'S01E06 - Visiting Ours')).toBe(true);
     });
 });

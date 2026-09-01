@@ -53,7 +53,7 @@ describe('episode lobby completion races', () => {
     it('validates restored and authoritative lobby state before using readyPeers', () => {
         expect(backgroundSource).toContain('function normalizeEpisodeLobby(value, fallbackCreatedAt = Date.now(), allowedPeerIds = null)');
         expect(backgroundSource).toContain('data.currentRoom.activeLobby,');
-        expect(backgroundSource).toContain('const authoritativeLobby = normalizeEpisodeLobby(');
+        expect(backgroundSource).toContain('const authoritativeLobby = authoritativeEpisodeSyncV2 ? null : normalizeEpisodeLobby(');
         expect(backgroundSource).toContain('new Set(currentRoom.peers.map(candidate => candidate.peerId))');
     });
 
@@ -74,9 +74,10 @@ describe('episode lobby completion races', () => {
 
     it('counts only ready peers who still participate in lobby completion', () => {
         const completion = sourceBetween('function checkEpisodeLobbyCompletion()', 'function checkEpisodeLobbyPeerDeparture()');
+        expect(completion).toContain('episodeLobby.initiatorPeerId !== peerId');
         expect(completion).toContain('const participatingPeerIds = new Set(peers');
         expect(completion).toContain('participatingPeerIds.has(candidate)');
-        expect(completion).toContain('readyParticipatingCount >= participatingPeerIds.size');
+        expect(completion).toContain('participatingPeerIds.size > 0 && readyParticipatingCount >= participatingPeerIds.size');
     });
 
     it('re-evaluates or cancels a lobby when the local peer enters solo mode', () => {

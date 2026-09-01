@@ -108,6 +108,7 @@ function copyExtensionFiles(targetDir, browserName) {
   const eventsMatch = constantsContent.match(/export const EVENTS\s*=\s*({[\s\S]+?});/);
   const heartbeatMatch = constantsContent.match(/export const HEARTBEAT_INTERVAL\s*=\s*(\d+);/);
   const maxMediaTimeMatch = constantsContent.match(/export const MAX_MEDIA_TIME\s*=\s*(\d+);/);
+  const episodeSyncStabilityMatch = constantsContent.match(/export const EPISODE_SYNC_V2_STABILITY_MS\s*=\s*(\d+);/);
 
   if (!eventsMatch) {
     throw new Error('CRITICAL: Could not find EVENTS object in shared/constants.js');
@@ -118,10 +119,14 @@ function copyExtensionFiles(targetDir, browserName) {
   if (!maxMediaTimeMatch) {
     throw new Error('CRITICAL: Could not find MAX_MEDIA_TIME in shared/constants.js');
   }
+  if (!episodeSyncStabilityMatch) {
+    throw new Error('CRITICAL: Could not find EPISODE_SYNC_V2_STABILITY_MS in shared/constants.js');
+  }
 
   const eventsObject = eventsMatch[1];
   const heartbeatVal = heartbeatMatch[1];
   const maxMediaTimeVal = maxMediaTimeMatch[1];
+  const episodeSyncStabilityVal = episodeSyncStabilityMatch[1];
   
   const items = fs.readdirSync(extDir);
   for (const item of items) {
@@ -141,7 +146,7 @@ function copyExtensionFiles(targetDir, browserName) {
         const eStart = '// --- SHARED_EVENTS_INJECT_START ---';
         const eEnd = '// --- SHARED_EVENTS_INJECT_END ---';
         const ePattern = new RegExp(`${eStart}[\\s\\S]+?${eEnd}`);
-        const eRep = `${eStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n    const EVENTS = ${eventsObject};\n    const MAX_MEDIA_TIME = ${maxMediaTimeVal};\n    ${eEnd}`;
+        const eRep = `${eStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n    const EVENTS = ${eventsObject};\n    const MAX_MEDIA_TIME = ${maxMediaTimeVal};\n    const EPISODE_SYNC_V2_STABILITY_MS = ${episodeSyncStabilityVal};\n    ${eEnd}`;
         
         content = replaceRequiredBlock(content, ePattern, eRep, 'Event injection');
 

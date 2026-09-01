@@ -29,7 +29,7 @@ describe('async room-session guards', () => {
     it('revalidates ROOM_DATA after every asynchronous join boundary', () => {
         const roomData = sourceBetween('case EVENTS.ROOM_DATA:', 'case EVENTS.CONTROL_MODE:');
         expect(roomData.match(/currentRoom\?\.roomId !== data\.roomId/g)?.length).toBeGreaterThanOrEqual(2);
-        expect(roomData).toContain('const authoritativeLobby = normalizeEpisodeLobby(');
+        expect(roomData).toContain('const authoritativeLobby = authoritativeEpisodeSyncV2 ? null : normalizeEpisodeLobby(');
     });
 
     it('does not return chat context after its room or target changed', () => {

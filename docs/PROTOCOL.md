@@ -54,7 +54,7 @@ Payload:
   "password": "string, max 128, optional",
   "tabTitle": "string, max 100, optional",
   "mediaTitle": "string, max 100, optional",
-  "clientCapabilities": ["chat-v1", "media-state-v1"],
+  "clientCapabilities": ["chat-v1", "media-state-v1", "episode-sync-v2"],
   "protocolVersion": "string, max 16"
 }
 ```
@@ -84,7 +84,8 @@ Payload:
   "controlMode": "everyone | host-only",
   "controllers": ["peerId"],
   "mediaState": "canonical media state object or null",
-  "capabilities": ["host-control", "co-host", "chat", "chat-v1", "media-state-v1"]
+  "episodeSyncV2": "active transaction object for a frozen participant, or null",
+  "capabilities": ["host-control", "co-host", "chat", "chat-v1", "media-state-v1", "episode-sync-v2"]
 }
 ```
 
@@ -526,5 +527,42 @@ If sender and target are still in the same room, the relay emits:
 - `co-host`
 - `chat`
 - `chat-v1`
+- `media-state-v1`
+- `episode-sync-v2`
 
 Clients should treat a missing or unknown capabilities list as unsupported.
+
+## Episode Sync v2
+
+Relays advertise `"episode-sync-v2"`. Updated clients use the additive
+`episode_sync_v2` event without changing `PROTOCOL_VERSION`; automatic episode
+sync is skipped safely when the relay omits the capability or any current room
+peer did not announce it. Manual Force Sync remains on the legacy event family.
+
+The relay creates the transaction ID, freezes non-desynced participants, owns
+deadlines, and is the only component that advances:
+
+```text
+start -> lobby/loading -> prepare -> execute
+                         \-> cancel
+```
+
+Client phases are `start`, `loaded`, `prepared`, `failed`, and `cancel`. Relay
+phases are `lobby`, `prepare`, `execute`, and `cancel`. Every post-start frame is
+correlated by `transactionId`; duplicate or stale frames are idempotently
+ignored. No participant is pre-marked loaded. `execute` is emitted exactly once
+only after every frozen participant reports `loaded`, then pauses, seeks to
+0:00, reaches `readyState >= 3`, and remains on the same player/title in paused,
+non-seeking state for `EPISODE_SYNC_V2_STABILITY_MS`.
+
+Any timeout, failed player action, participant departure, manual media command,
+room/target change, or explicit cancellation produces `cancel`; v2 never
+executes after a timeout. Peers resume only when that transaction paused a
+previously playing player and no newer local user action superseded it. Peers
+joining after `start` are excluded from the frozen barrier and receive no v2
+frames for that transaction.
+
+Legacy episode events remain accepted. A new relay binds their PREPARE, EXECUTE,
+and CANCEL to the accepted lobby initiator, limiting duplicate old-client wire
+actions; an unmodified old non-initiator can still run its own local timeout, so
+full v2 guarantees require capable extensions on every peer.

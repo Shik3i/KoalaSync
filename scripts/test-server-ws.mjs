@@ -194,8 +194,222 @@ try {
     assert.ok(capData.capabilities.includes('chat'), 'ROOM_DATA advertises the chat capability');
     assert.ok(capData.capabilities.includes('chat-v1'), 'ROOM_DATA advertises the versioned chat capability');
     assert.ok(capData.capabilities.includes('media-state-v1'), 'ROOM_DATA advertises canonical media state v1');
+    assert.ok(capData.capabilities.includes('episode-sync-v2'), 'ROOM_DATA advertises Episode Sync v2');
     assert.equal(capData.mediaState, null, 'a new room starts without invented canonical media state');
     assert.equal(capData.chatHistory, undefined, 'ROOM_DATA never contains chat history');
+    close();
+    resetConnectionRate();
+
+    // --- Episode Sync v2: relay-owned transaction, exact participants, no timeout execute ---
+    const episodeCaps = ['chat-v1', 'media-state-v1', 'episode-sync-v2'];
+    const episodeRid = 'episode-v2-'+Date.now();
+    const episodeA = await c(), episodeB = await c();
+    await j(episodeA, episodeRid, 'episode-a', null, episodeCaps);
+    await j(episodeB, episodeRid, 'episode-b', null, episodeCaps);
+    episodeA._m.length = episodeB._m.length = 0;
+
+    s(episodeA, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S01E06 - Visiting Ours' });
+    const episodeLobbyA = await w(episodeA, 'episode_sync_v2');
+    const episodeLobbyB = await w(episodeB, 'episode_sync_v2');
+    assert.equal(episodeLobbyA.phase, 'lobby');
+    assert.equal(episodeLobbyA.transactionId, episodeLobbyB.transactionId);
+    assert.deepEqual(episodeLobbyA.participants, ['episode-a', 'episode-b']);
+    assert.deepEqual(episodeLobbyA.loadedPeers, [], 'initiator is not pre-marked loaded');
+    const episodeTxId = episodeLobbyA.transactionId;
+
+    s(episodeB, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S99E99' });
+    const competingEpisodeStart = await w(episodeB, 'episode_sync_v2');
+    assert.equal(competingEpisodeStart.transactionId, episodeTxId);
+    assert.equal(competingEpisodeStart.expectedTitle, 'S01E06 - Visiting Ours');
+    let competingEpisodeBroadcast = false;
+    try { await w(episodeA, 'episode_sync_v2', 300); competingEpisodeBroadcast = true; } catch { /* expected */ }
+    assert.equal(competingEpisodeBroadcast, false, 'competing start only receives authoritative correction');
+
+    s(episodeA, 'episode_sync_v2', { phase: 'loaded', transactionId: 'stale-transaction' });
+    await delay(100);
+    assert.deepEqual(mod.rooms.get(episodeRid).episodeSyncV2.loadedPeers, [], 'stale transaction frame is ignored');
+
+    s(episodeA, 'episode_sync_v2', { phase: 'loaded', transactionId: episodeTxId });
+    const loadedA = await w(episodeA, 'episode_sync_v2');
+    await w(episodeB, 'episode_sync_v2');
+    assert.equal(loadedA.phase, 'lobby');
+    assert.deepEqual(loadedA.loadedPeers, ['episode-a']);
+    s(episodeA, 'episode_sync_v2', { phase: 'loaded', transactionId: episodeTxId });
+    let duplicateLoadedRelayed = false;
+    try { await w(episodeB, 'episode_sync_v2', 300); duplicateLoadedRelayed = true; } catch { /* expected */ }
+    assert.equal(duplicateLoadedRelayed, false, 'duplicate loaded is idempotent');
+
+    s(episodeB, 'episode_sync_v2', { phase: 'loaded', transactionId: episodeTxId });
+    const prepareA = await w(episodeA, 'episode_sync_v2');
+    const prepareB = await w(episodeB, 'episode_sync_v2');
+    assert.equal(prepareA.phase, 'prepare');
+    assert.equal(prepareB.phase, 'prepare');
+    assert.deepEqual(prepareA.loadedPeers, ['episode-a', 'episode-b']);
+    assert.deepEqual(prepareA.preparedPeers, []);
+
+    s(episodeA, 'episode_sync_v2', { phase: 'prepared', transactionId: episodeTxId });
+    const onePrepared = await w(episodeB, 'episode_sync_v2');
+    await w(episodeA, 'episode_sync_v2');
+    assert.equal(onePrepared.phase, 'prepare');
+    assert.deepEqual(onePrepared.preparedPeers, ['episode-a']);
+    s(episodeA, 'episode_sync_v2', { phase: 'prepared', transactionId: episodeTxId });
+    let duplicatePreparedRelayed = false;
+    try { await w(episodeB, 'episode_sync_v2', 300); duplicatePreparedRelayed = true; } catch { /* expected */ }
+    assert.equal(duplicatePreparedRelayed, false, 'duplicate prepared is idempotent');
+
+    s(episodeB, 'episode_sync_v2', { phase: 'prepared', transactionId: episodeTxId });
+    const executeA = await w(episodeA, 'episode_sync_v2');
+    const executeB = await w(episodeB, 'episode_sync_v2');
+    assert.equal(executeA.phase, 'execute');
+    assert.equal(executeB.phase, 'execute');
+    assert.equal(mod.rooms.get(episodeRid).episodeSyncV2, null);
+    assert.equal(mod.rooms.get(episodeRid).mediaState.playbackState, 'playing');
+    assert.equal(mod.rooms.get(episodeRid).mediaState.currentTime, 0);
+    let duplicateExecute = false;
+    try { await w(episodeB, 'episode_sync_v2', 300); duplicateExecute = true; } catch { /* expected */ }
+    assert.equal(duplicateExecute, false, 'execute is emitted exactly once');
+    close();
+    resetConnectionRate();
+
+    // Mixed rooms degrade safely: no v2 transaction and no unknown frame to legacy.
+    const mixedEpisodeRid = 'episode-mixed-'+Date.now();
+    const mixedEpisodeNew = await c(), mixedEpisodeOld = await c();
+    await j(mixedEpisodeNew, mixedEpisodeRid, 'episode-new', null, episodeCaps);
+    await j(mixedEpisodeOld, mixedEpisodeRid, 'episode-old');
+    mixedEpisodeNew._m.length = mixedEpisodeOld._m.length = 0;
+    s(mixedEpisodeNew, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S01E07' });
+    const mixedEpisodeCancel = await w(mixedEpisodeNew, 'episode_sync_v2');
+    assert.equal(mixedEpisodeCancel.phase, 'cancel');
+    assert.equal(mixedEpisodeCancel.reason, 'capability_mismatch');
+    assert.equal(mod.rooms.get(mixedEpisodeRid).episodeSyncV2, null);
+    let legacySawV2 = false;
+    try { await w(mixedEpisodeOld, 'episode_sync_v2', 300); legacySawV2 = true; } catch { /* expected */ }
+    assert.equal(legacySawV2, false, 'legacy peer receives no v2 frame');
+    close();
+    resetConnectionRate();
+
+    // Failure/manual intent cancel the barrier; host-only authorization is
+    // evaluated at START and never delegated to clients.
+    const episodeAbortRid = 'episode-abort-'+Date.now();
+    const episodeAbortA = await c(), episodeAbortB = await c();
+    await j(episodeAbortA, episodeAbortRid, 'abort-a', null, episodeCaps);
+    await j(episodeAbortB, episodeAbortRid, 'abort-b', null, episodeCaps);
+    episodeAbortA._m.length = episodeAbortB._m.length = 0;
+    s(episodeAbortA, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S02E01' });
+    const failedLobby = await w(episodeAbortA, 'episode_sync_v2');
+    await w(episodeAbortB, 'episode_sync_v2');
+    s(episodeAbortB, 'episode_sync_v2', {
+        phase: 'failed',
+        transactionId: failedLobby.transactionId,
+        reason: 'pause_failed'
+    });
+    const failedCancelA = await w(episodeAbortA, 'episode_sync_v2');
+    const failedCancelB = await w(episodeAbortB, 'episode_sync_v2');
+    assert.equal(failedCancelA.reason, 'peer_failed');
+    assert.equal(failedCancelB.failedPeerId, 'abort-b');
+
+    s(episodeAbortA, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S02E02' });
+    await w(episodeAbortA, 'episode_sync_v2'); await w(episodeAbortB, 'episode_sync_v2');
+    s(episodeAbortA, 'play', { currentTime: 2, seq: 1 });
+    const manualCancelA = await w(episodeAbortA, 'episode_sync_v2');
+    const manualCancelB = await w(episodeAbortB, 'episode_sync_v2');
+    const manualPlayB = await w(episodeAbortB, 'play');
+    assert.equal(manualCancelA.reason, 'superseded');
+    assert.equal(manualCancelB.reason, 'superseded');
+    assert.equal(manualPlayB.currentTime, 2);
+    assert.equal(mod.rooms.get(episodeAbortRid).episodeSyncV2, null);
+
+    const abortRoom = mod.rooms.get(episodeAbortRid);
+    abortRoom.controlMode = 'host-only';
+    abortRoom.controllers = new Set(['abort-a']);
+    s(episodeAbortB, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S02E03' });
+    const guestStartCancel = await w(episodeAbortB, 'episode_sync_v2');
+    assert.equal(guestStartCancel.reason, 'not_controller');
+    assert.equal(abortRoom.episodeSyncV2, null);
+    close();
+    resetConnectionRate();
+
+    // Frozen participants: a late legacy joiner is excluded and does not block completion.
+    const frozenRid = 'episode-frozen-'+Date.now();
+    const frozenA = await c(), frozenB = await c();
+    await j(frozenA, frozenRid, 'frozen-a', null, episodeCaps);
+    await j(frozenB, frozenRid, 'frozen-b', null, episodeCaps);
+    frozenA._m.length = frozenB._m.length = 0;
+    s(frozenA, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S01E08' });
+    const frozenLobbyA = await w(frozenA, 'episode_sync_v2');
+    await w(frozenB, 'episode_sync_v2');
+    const frozenLate = await c();
+    const frozenLateRoom = await j(frozenLate, frozenRid, 'frozen-late');
+    assert.equal(frozenLateRoom.episodeSyncV2, null);
+    assert.deepEqual(frozenLobbyA.participants, ['frozen-a', 'frozen-b']);
+    frozenLate._m.length = 0;
+    for (const peer of [frozenA, frozenB]) {
+        s(peer, 'episode_sync_v2', { phase: 'loaded', transactionId: frozenLobbyA.transactionId });
+        if (peer === frozenA) { await w(frozenA, 'episode_sync_v2'); await w(frozenB, 'episode_sync_v2'); }
+    }
+    await w(frozenA, 'episode_sync_v2'); await w(frozenB, 'episode_sync_v2');
+    for (const peer of [frozenA, frozenB]) {
+        s(peer, 'episode_sync_v2', { phase: 'prepared', transactionId: frozenLobbyA.transactionId });
+        if (peer === frozenA) { await w(frozenA, 'episode_sync_v2'); await w(frozenB, 'episode_sync_v2'); }
+    }
+    await w(frozenA, 'episode_sync_v2'); await w(frozenB, 'episode_sync_v2');
+    let lateReceivedV2 = false;
+    try { await w(frozenLate, 'episode_sync_v2', 300); lateReceivedV2 = true; } catch { /* expected */ }
+    assert.equal(lateReceivedV2, false);
+    close();
+    resetConnectionRate();
+
+    // Departure and deadline are cancellation-only; neither can emit execute.
+    const cancelRid = 'episode-cancel-'+Date.now();
+    const cancelA = await c(), cancelB = await c();
+    await j(cancelA, cancelRid, 'cancel-a', null, episodeCaps);
+    await j(cancelB, cancelRid, 'cancel-b', null, episodeCaps);
+    cancelA._m.length = cancelB._m.length = 0;
+    s(cancelA, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S01E09' });
+    const cancelLobby = await w(cancelA, 'episode_sync_v2');
+    await w(cancelB, 'episode_sync_v2');
+    mod.rooms.get(cancelRid).episodeSyncV2.deadlineAt = 1;
+    mod.expireEpisodeSyncV2Transactions(Date.now());
+    const timeoutCancelA = await w(cancelA, 'episode_sync_v2');
+    const timeoutCancelB = await w(cancelB, 'episode_sync_v2');
+    assert.equal(timeoutCancelA.phase, 'cancel');
+    assert.equal(timeoutCancelA.reason, 'load_timeout');
+    assert.equal(timeoutCancelB.phase, 'cancel');
+    assert.equal(mod.rooms.get(cancelRid).episodeSyncV2, null);
+
+    s(cancelA, 'episode_sync_v2', { phase: 'start', expectedTitle: 'S01E10' });
+    const departureLobby = await w(cancelA, 'episode_sync_v2'); await w(cancelB, 'episode_sync_v2');
+    assert.notEqual(cancelLobby.transactionId, departureLobby.transactionId, 'new transaction receives a fresh identity');
+    s(cancelB, 'leave_room', {});
+    const departureCancel = await w(cancelA, 'episode_sync_v2');
+    assert.equal(departureCancel.phase, 'cancel');
+    assert.equal(departureCancel.reason, 'participant_left');
+    assert.equal(departureCancel.failedPeerId, 'cancel-b');
+    assert.equal(mod.rooms.get(cancelRid).episodeSyncV2, null);
+    close();
+    resetConnectionRate();
+
+    // New relay hardening for old extensions: only the accepted lobby owner may
+    // relay legacy PREPARE/EXECUTE/CANCEL.
+    const legacyEpisodeRid = 'episode-legacy-owner-'+Date.now();
+    const legacyEpisodeA = await c(), legacyEpisodeB = await c();
+    await j(legacyEpisodeA, legacyEpisodeRid, 'legacy-a');
+    await j(legacyEpisodeB, legacyEpisodeRid, 'legacy-b');
+    legacyEpisodeA._m.length = legacyEpisodeB._m.length = 0;
+    s(legacyEpisodeA, 'episode_lobby', { expectedTitle: 'S01E11' });
+    await w(legacyEpisodeB, 'episode_lobby');
+    s(legacyEpisodeB, 'force_sync_prepare', { targetTime: 0 });
+    let nonOwnerPrepareRelayed = false;
+    try { await w(legacyEpisodeA, 'force_sync_prepare', 300); nonOwnerPrepareRelayed = true; } catch { /* expected */ }
+    assert.equal(nonOwnerPrepareRelayed, false);
+    s(legacyEpisodeA, 'force_sync_prepare', { targetTime: 0 });
+    await w(legacyEpisodeB, 'force_sync_prepare');
+    s(legacyEpisodeB, 'force_sync_execute', {});
+    let nonOwnerExecuteRelayed = false;
+    try { await w(legacyEpisodeA, 'force_sync_execute', 300); nonOwnerExecuteRelayed = true; } catch { /* expected */ }
+    assert.equal(nonOwnerExecuteRelayed, false);
+    s(legacyEpisodeA, 'force_sync_execute', {});
+    await w(legacyEpisodeB, 'force_sync_execute');
     close();
     resetConnectionRate();
 
@@ -1024,9 +1238,12 @@ try {
     mxo._m.length = mxn._m.length = 0;
     s(mxn,'force_sync_execute',{}); await w(mxo,'force_sync_execute');
     s(mxo,'episode_lobby',{expectedTitle:'S1E1'}); await w(mxn,'episode_lobby');
-    s(mxn,'pause',{currentTime:2}); await w(mxo,'pause');
+    s(mxn,'pause',{currentTime:2}); await w(mxo,'episode_lobby_cancel'); await w(mxo,'pause');
     s(mxn,'seek',{currentTime:50}); await w(mxo,'seek');
-    s(mxn,'episode_lobby_cancel',{}); await w(mxo,'episode_lobby_cancel');
+    s(mxn,'episode_lobby_cancel',{});
+    let staleMixedCancelDropped = false;
+    try { await w(mxo,'episode_lobby_cancel',300); } catch { staleMixedCancelDropped = true; }
+    assert.ok(staleMixedCancelDropped, 'stale legacy lobby cancel is dropped after manual playback supersedes it');
     close();
     resetConnectionRate();
 

@@ -44,10 +44,10 @@ describe('offline media intent background integration', () => {
         expect(flushIndex).toBeGreaterThan(-1);
         expect(policyIndex).toBeLessThan(canonicalIndex);
         expect(canonicalIndex).toBeLessThan(flushIndex);
-        expect(roomData).toContain('activeLobby: !!episodeLobby');
+        expect(roomData).toContain('activeLobby: !!(episodeLobby || episodeSyncV2)');
         expect(roomData).toContain('desynced: hcmDesynced');
         expect(roomData).toContain('if (!authoritativeLobby && episodeLobby && !hasQueuedLocalLobby)');
-        expect(roomData).toContain('authoritativeLobby: !!authoritativeLobby');
+        expect(roomData).toContain('authoritativeLobby: !!(authoritativeLobby || authoritativeEpisodeSyncV2)');
     });
 
     it('clears queued room intent on failed join, leave and room switch paths', () => {

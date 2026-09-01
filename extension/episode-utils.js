@@ -22,3 +22,25 @@ export function sameEpisode(titleA, titleB) {
     if (idA || idB) return false;
     return titleA === titleB;
 }
+
+function episodeContext(title) {
+    if (!title || typeof title !== 'string') return '';
+    return title
+        .replace(/S(?:eason\s*)?\d+[^a-zA-Z0-9]*E(?:pisode\s*)?\d+/ig, ' ')
+        .replace(/(?:Episode|Folge|Ep\.?)\s*\d+|#\s*\d+/ig, ' ')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+}
+
+// Transactional episode sync is deliberately stricter than ordinary playback
+// filtering: if both peers expose contextual text (episode/show name), require
+// it to agree so two unrelated S01E06 videos cannot cross-sync. Privacy-reduced
+// S/E-only titles still fall back to the canonical episode ID.
+export function sameEpisodeStrict(titleA, titleB) {
+    if (!sameEpisode(titleA, titleB)) return false;
+    const contextA = episodeContext(titleA);
+    const contextB = episodeContext(titleB);
+    return !contextA || !contextB || contextA === contextB;
+}
