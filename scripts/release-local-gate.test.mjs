@@ -5,7 +5,8 @@ import {
     parseGateArgs,
     parseRemoteMain,
     playwrightImageFromLock,
-    validateReleaseWorkflowContract
+    validateReleaseWorkflowContract,
+    validateWorkflowImageReferences
 } from './release-local-gate.mjs';
 
 describe('local release gate contract', () => {
@@ -58,6 +59,19 @@ describe('local release gate contract', () => {
         ))).toThrow('lowercase canonical image');
         expect(() => validateReleaseWorkflowContract(`${valid}\n${'ghcr.io/${{ github.repository }}'}`))
             .toThrow('case-preserving github.repository');
+    });
+
+    it('enforces the canonical lowercase image across every workflow', () => {
+        expect(validateWorkflowImageReferences({
+            'release.yml': 'IMAGE: ghcr.io/shik3i/koalasync',
+            'beta.yml': 'images: ghcr.io/shik3i/koalasync:beta'
+        })).toBe('ghcr.io/shik3i/koalasync');
+        expect(() => validateWorkflowImageReferences({
+            'beta.yml': 'images: ghcr.io/${{ github.repository }}'
+        })).toThrow('case-preserving github.repository');
+        expect(() => validateWorkflowImageReferences({
+            'beta.yml': 'images: ghcr.io/Shik3i/KoalaSync'
+        })).toThrow('lowercase canonical image');
     });
 
     it('enforces the automatic version commit, direct push, prepared source, and final publication contract', () => {

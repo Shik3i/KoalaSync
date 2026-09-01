@@ -4,7 +4,7 @@ name: Beta Server Image
 # feature branch can be deployed to a staging/backup server and used as a custom
 # server, without ever touching the ':latest' tag the official relay tracks.
 #
-# Tags produced (on ghcr.io/<owner>/<repo>):
+# Tags produced (on ghcr.io/shik3i/koalasync):
 #   - beta                         moving channel pointer to the newest build
 #   - <branch-slug>                e.g. feature-textchat
 #   - sha-<short-commit>           immutable, pin to an exact build
@@ -73,7 +73,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/shik3i/koalasync
           # Never publish ':latest' from a beta build.
           flavor: |
             latest=false

@@ -108,6 +108,22 @@ export function validateReleaseWorkflowContract(text) {
     return image;
 }
 
+export function validateWorkflowImageReferences(workflows) {
+    const canonicalImage = 'ghcr.io/shik3i/koalasync';
+    for (const [name, rawText] of Object.entries(workflows)) {
+        const text = String(rawText);
+        if (/ghcr\.io\/\$\{\{\s*github\.repository\s*\}\}/iu.test(text)) {
+            throw new Error(`${name} must not derive a Docker image from case-preserving github.repository`);
+        }
+        for (const reference of text.match(/ghcr\.io\/[a-zA-Z0-9._/-]+/gu) || []) {
+            if (reference !== canonicalImage) {
+                throw new Error(`${name} must use the lowercase canonical image ${canonicalImage}, found ${reference}`);
+            }
+        }
+    }
+    return canonicalImage;
+}
+
 function assertCleanTree() {
     const status = capture('git', ['status', '--porcelain=v1']);
     if (status) throw new Error(`release gate requires a clean working tree:\n${status}`);
@@ -163,6 +179,13 @@ async function smokeRelayImage(image) {
 
 export async function runReleaseGate({ version, candidate }) {
     assertCleanTree();
+    const workflowDir = path.join(repoRoot, '.github', 'workflows');
+    const workflowFiles = fs.readdirSync(workflowDir)
+        .filter(name => /\.ya?ml$/u.test(name));
+    validateWorkflowImageReferences(Object.fromEntries(workflowFiles.map(name => [
+        name,
+        fs.readFileSync(path.join(workflowDir, name), 'utf8')
+    ])));
     validateReleaseWorkflowContract(fs.readFileSync(
         path.join(repoRoot, '.github/workflows/release.yml'), 'utf8'
     ));
