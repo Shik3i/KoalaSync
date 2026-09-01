@@ -2,7 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CAPABILITIES, EVENTS, EPISODE_SYNC_V2_STABILITY_MS } from '../shared/constants.js';
+import {
+    CAPABILITIES,
+    EPISODE_LOBBY_TIMEOUT,
+    EPISODE_SYNC_V2_LOAD_TIMEOUT,
+    EPISODE_SYNC_V2_PREPARE_TIMEOUT,
+    EPISODE_SYNC_V2_EXECUTE_TIMEOUT,
+    EPISODE_SYNC_V2_STABILITY_MS,
+    EVENTS
+} from '../shared/constants.js';
 
 const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 const backgroundSource = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
@@ -26,7 +34,7 @@ describe('Episode Sync v2 extension contract', () => {
         expect(backgroundSource).toContain('EVENTS.EPISODE_SYNC_V2');
     });
 
-    it('never queues v2 coordination or auto-falls back to a client-owned legacy lobby', () => {
+    it('keeps v2 live-only and provides a session-correlated legacy fallback', () => {
         expect(offlineSource).toContain('EVENTS.EPISODE_SYNC_V2');
         const episodeChanged = between(
             backgroundSource,
@@ -34,9 +42,28 @@ describe('Episode Sync v2 extension contract', () => {
             "message.type === 'EPISODE_READY_LOCAL'"
         );
         expect(episodeChanged).toContain('serverSupports(CAPABILITIES.EPISODE_SYNC_V2)');
-        expect(episodeChanged).toContain("emitLive(EVENTS.EPISODE_SYNC_V2, { phase: 'start'");
-        expect(episodeChanged).not.toContain('PAUSE_FOR_LOBBY');
-        expect(episodeChanged).not.toContain('emit(EVENTS.EPISODE_LOBBY');
+        expect(episodeChanged).toContain("emitLive(EVENTS.EPISODE_SYNC_V2, { phase: 'start', ...episodeIdentity })");
+        expect(episodeChanged).toContain('createPendingEpisodeSyncV2Start(episodeIdentity, sender)');
+        expect(episodeChanged).toContain('startLegacyEpisodeLobbyForTransition(episodeIdentity, pending)');
+        expect(backgroundSource).toContain("data.reason === 'capability_mismatch'");
+        expect(backgroundSource).toContain('isEpisodeSyncV2StartContextCurrent(pending');
+        expect(backgroundSource).toContain("emitLive(EVENTS.EPISODE_LOBBY, { peerId, expectedTitle: lobbyTitle })");
+
+        const fallback = between(
+            backgroundSource,
+            'function startLegacyEpisodeLobbyForTransition(',
+            'function clearTargetTabForIdle('
+        );
+        expect(fallback.indexOf('if (episodeLobby && sameEpisode('))
+            .toBeLessThan(fallback.indexOf('emitLive(EVENTS.EPISODE_LOBBY'));
+        const rejectionFallback = between(
+            backgroundSource,
+            "if (phase === 'cancel' && !data.transactionId)",
+            "if (phase === 'lobby' || phase === 'prepare')"
+        );
+        expect(rejectionFallback.indexOf('if (!matchesPending)'))
+            .toBeLessThan(rejectionFallback.indexOf('episodeSyncV2PendingStart = null'));
+        expect(rejectionFallback).toContain('episodeSyncV2PendingStart = null');
     });
 
     it('correlates content reports to the current transaction, phase, target and episode', () => {
@@ -48,8 +75,24 @@ describe('Episode Sync v2 extension contract', () => {
         expect(handler).toContain('message.transactionId !== transaction.transactionId');
         expect(handler).toContain('transaction.phase !== expectedLocalPhase');
         expect(handler).toContain("!isCurrentContentSender(sender)");
-        expect(handler).toContain('!sameEpisodeStrict(localTitle, transaction.expectedTitle)');
+        expect(handler).toContain('!sameEpisodeIdentity(');
         expect(handler).toContain('emitLive(EVENTS.EPISODE_SYNC_V2');
+    });
+
+    it('separates legacy and v2 loading timeouts and converts remaining duration locally', () => {
+        expect(EPISODE_LOBBY_TIMEOUT).toBe(60_000);
+        expect(EPISODE_SYNC_V2_LOAD_TIMEOUT).toBe(120_000);
+        expect(EPISODE_SYNC_V2_PREPARE_TIMEOUT).toBe(15_000);
+        expect(EPISODE_SYNC_V2_EXECUTE_TIMEOUT).toBe(10_000);
+        const normalize = between(
+            backgroundSource,
+            'function normalizeEpisodeSyncV2(',
+            'function createPendingEpisodeSyncV2Start('
+        );
+        expect(normalize).toContain('createLocalEpisodeDeadline(value.remainingMs, phaseTimeout)');
+        expect(normalize).toContain('deadlineAt: localDeadline.deadlineAt');
+        expect(normalize).not.toContain('value.deadlineAt');
+        expect(normalize).toContain("phase === 'prepare' ? EPISODE_SYNC_V2_PREPARE_TIMEOUT : EPISODE_SYNC_V2_EXECUTE_TIMEOUT");
     });
 
     it('requires the same player and episode to remain paused, seeked, buffered and stable', () => {
@@ -59,7 +102,7 @@ describe('Episode Sync v2 extension contract', () => {
             'async function prepareEpisodeSyncV2('
         );
         expect(stable).toContain('video === findVideo()');
-        expect(stable).toContain('sameEpisodeStrict(getMediaTitle(), state.expectedTitle)');
+        expect(stable).toContain('sameEpisodeIdentity(getMediaTitle(), state.expectedTitle, state.expectedEpisodeId)');
         expect(stable).toContain('video.paused');
         expect(stable).toContain('!video.seeking');
         expect(stable).toContain('video.readyState >= 3');
@@ -94,7 +137,7 @@ describe('Episode Sync v2 extension contract', () => {
         expect(clear).toContain('state.wasPlayingBeforePrepare');
         expect(clear).toContain('!state.manualAction');
         expect(clear).toContain('video === findVideo()');
-        expect(clear).toContain('sameEpisodeStrict(getMediaTitle(), state.expectedTitle)');
+        expect(clear).toContain('sameEpisodeIdentity(getMediaTitle(), state.expectedTitle, state.expectedEpisodeId)');
         expect(contentSource).toContain('failEpisodeSyncV2ForManualAction(action)');
     });
 
@@ -104,14 +147,40 @@ describe('Episode Sync v2 extension contract', () => {
             "message.type === 'EPISODE_SYNC_V2'",
             '// Episode Auto-Sync: Legacy lobby notification from background'
         );
-        expect(handler).toContain("resume: transaction.reason !== 'superseded'");
+        expect(handler).toContain("transaction.reason !== 'superseded'");
+    });
+
+    it('distinguishes deliberate loading intent and settles execute failures paused', () => {
+        const eventSender = between(
+            contentSource,
+            'function sendContentEvent(',
+            'function cancelPlayPauseCoalesce('
+        );
+        expect(eventSender).toContain("episodeSyncIntent = episodeSyncV2State?.phase === 'lobby'");
+        expect(eventSender).toContain("? 'manual'");
+
+        const loadingClassifier = between(
+            contentSource,
+            'function v2LoadingEventIsChurn(',
+            'function queueEpisodeTransitionEvent('
+        );
+        expect(loadingClassifier).toContain("hcmClassifyIntent() === 'deliberate'");
+
+        const handler = between(
+            contentSource,
+            "message.type === 'EPISODE_SYNC_V2'",
+            '// Episode Auto-Sync: Legacy lobby notification from background'
+        );
+        expect(handler).toContain("transaction.settlePlaybackState === 'paused'");
+        expect(handler).toContain('await tryMediaAction(EVENTS.PAUSE)');
+        expect(handler).toContain('await tryMediaAction(EVENTS.SEEK, { targetTime })');
     });
 
     it('revalidates the complete prepared state immediately before execute', () => {
         const handler = between(
             contentSource,
-            "transaction.phase === 'execute'",
-            "transaction.phase === 'cancel'"
+            'function executeEpisodeSyncV2(',
+            'function getPlayerActionFixes('
         );
         expect(handler).toContain("state.phase === 'prepare'");
         expect(handler).toContain('video === findVideo()');
@@ -122,8 +191,30 @@ describe('Episode Sync v2 extension contract', () => {
         expect(handler).toContain('Math.abs(current) < 1');
     });
 
+    it('reports content execute outcome and retains state until relay completion', () => {
+        const execute = between(
+            backgroundSource,
+            'async function executeEpisodeSyncV2FromRelay(',
+            'function clearEpisodeSyncV2State('
+        );
+        expect(execute).toContain("response?.status === 'executed' ? 'executed' : 'failed_execute'");
+        expect(execute).toContain('phase: reportStatus');
+        expect(execute).not.toContain('clearEpisodeSyncV2State(');
+
+        const handler = between(
+            backgroundSource,
+            'case EVENTS.EPISODE_SYNC_V2:',
+            'case EVENTS.EPISODE_LOBBY:'
+        );
+        expect(handler).toContain("phase === 'execute' || phase === 'complete' || phase === 'cancel'");
+        expect(handler).toContain('await executeEpisodeSyncV2FromRelay(data)');
+        expect(handler).toContain("phase: 'complete'");
+        expect(handler).toContain("clearEpisodeSyncV2State({ notifyContent: false, reason: 'executed' })");
+    });
+
     it('injects the shared stability window into packaged content scripts', () => {
         expect(buildSource).toContain('EPISODE_SYNC_V2_STABILITY_MS');
         expect(buildSource).toContain('episodeSyncStabilityVal');
+        expect(buildSource).toContain(".replace(/export const /g, 'const ')");
     });
 });

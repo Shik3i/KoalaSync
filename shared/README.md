@@ -32,7 +32,7 @@ Browser extensions cannot import files outside their own root directory, so the 
 - `CAPABILITIES.HOST_CONTROL`: relay supports host-only room authority.
 - `CAPABILITIES.CO_HOST`: relay supports promoted controller peers.
 - `CAPABILITIES.MEDIA_STATE_V1`: relay exposes canonical room playback recovery snapshots.
-- `CAPABILITIES.EPISODE_SYNC_V2`: relay owns an ID-correlated load/prepare/execute episode barrier.
+- `CAPABILITIES.EPISODE_SYNC_V2`: relay owns an ID-correlated load/prepare/execute/complete episode barrier.
 
 Clients should enable capability-gated UI only when the relay advertises the matching flag in `room_data.capabilities`.
 
@@ -58,7 +58,7 @@ For the complete event list, read the `EVENTS` object in [`constants.js`](consta
 | `EPISODE_LOBBY` | Bidirectional relay | Episode transition lobby started |
 | `EPISODE_READY` | Bidirectional relay | Peer has loaded the episode and is ready |
 | `EPISODE_LOBBY_CANCEL` | Bidirectional relay | Active episode lobby cancelled |
-| `EPISODE_SYNC_V2` | Bidirectional, capability-gated | Relay-authoritative episode transaction (`start/lobby/loaded/prepare/prepared/execute/cancel`) |
+| `EPISODE_SYNC_V2` | Bidirectional, capability-gated | Relay-authoritative episode transaction (`start/lobby/loaded/prepare/prepared/execute/executed/complete/cancel`) |
 | `GET_ROOMS` / `ROOM_LIST` | Client <-> Server | Room discovery with server-side cooldown |
 | `PING` / `PONG` | Client <-> Server/Peer | Server RTT and peer latency checks |
 
@@ -68,7 +68,9 @@ For the complete event list, read the `EVENTS` object in [`constants.js`](consta
 - `FORCE_SYNC_TIMEOUT`: max wait for force-sync ACKs.
 - `FORCE_SYNC_TARGET_DELAY_WARNING`: threshold for logging delayed Force Sync execution; an unsuperseded prepared target remains executable for receiver liveness.
 - `EPISODE_LOBBY_TIMEOUT`: max wait for episode-lobby readiness.
+- `EPISODE_SYNC_V2_LOAD_TIMEOUT`: relay-owned loading window for the v2 barrier.
 - `EPISODE_SYNC_V2_PREPARE_TIMEOUT`: max wait for every frozen participant to pause, seek, buffer, and verify stable state.
+- `EPISODE_SYNC_V2_EXECUTE_TIMEOUT`: max wait for every participant to acknowledge playback execution.
 - `EPISODE_SYNC_V2_STABILITY_MS`: continuous ready-state window required before `prepared`.
 - `MAX_MEDIA_TIME`: shared relay/extension upper bound, in seconds, for synchronized media positions.
 

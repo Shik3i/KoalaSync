@@ -1,7 +1,7 @@
-import { EVENTS, ERROR_CODES, CONTROL_MODES, CAPABILITIES, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, EPISODE_LOBBY_TIMEOUT, FORCE_SYNC_TIMEOUT, HEARTBEAT_INTERVAL } from './shared/constants.js';
+import { EVENTS, ERROR_CODES, CONTROL_MODES, CAPABILITIES, PROTOCOL_VERSION, OFFICIAL_SERVER_URL, OFFICIAL_SERVER_TOKEN, EPISODE_LOBBY_TIMEOUT, EPISODE_SYNC_V2_LOAD_TIMEOUT, EPISODE_SYNC_V2_PREPARE_TIMEOUT, EPISODE_SYNC_V2_EXECUTE_TIMEOUT, FORCE_SYNC_TIMEOUT, HEARTBEAT_INTERVAL } from './shared/constants.js';
 import { generateUsername } from './shared/names.js';
 import { loadLocale, getMessage, getSystemLanguage } from './i18n.js';
-import { sameEpisode, sameEpisodeStrict, extractEpisodeId } from './episode-utils.js';
+import { createEpisodeWireIdentity, createLocalEpisodeDeadline, extractEpisodeId, isEpisodeSyncV2StartContextCurrent, matchesEpisodeSyncV2StartRejection, sameEpisode, sameEpisodeIdentity, toEpisodeWireTitle } from './episode-utils.js';
 import { applyTitlePrivacyToPayload, sanitizeSharedTitle, sanitizeTabTitle, normalizeSendTabTitle, normalizeTitlePrivacyMode } from './title-privacy.js';
 import { initTabManager } from './modules/tab-manager.js';
 import { clearChatKeyCache, decryptChatMessage, encryptChatMessage, generateChatSecret, validateChatSecret } from './chat-crypto.js';
@@ -677,6 +677,8 @@ let forceSyncTimeout = null;
 let episodeLobby = null; // { expectedTitle, initiatorPeerId, readyPeers: [], createdAt }
 let episodeLobbyTimeout = null;
 let episodeSyncV2 = null;
+let episodeSyncV2PendingStart = null;
+let episodeSyncV2PendingStartId = 0;
 
 // --- Storage Utils ---
 
@@ -818,7 +820,9 @@ function emitEpisodeLobbyForCurrentPrivacy() {
         if (episodeLobby !== lobby
             || currentRoom?.roomId !== roomId
             || settings.roomId !== roomId) return;
-        const expectedTitle = sanitizeSharedTitle(lobby.expectedTitle, settings.mediaTitlePrivacyMode);
+        const expectedTitle = toEpisodeWireTitle(
+            sanitizeSharedTitle(lobby.expectedTitle, settings.mediaTitlePrivacyMode)
+        );
         if (expectedTitle) {
             emit(EVENTS.EPISODE_LOBBY, { peerId, expectedTitle });
         }
@@ -1217,10 +1221,13 @@ function normalizeEpisodeSyncV2(value, allowedPeerIds = null) {
     const transactionId = typeof value.transactionId === 'string'
         ? value.transactionId.substring(0, 64)
         : '';
-    const phase = value.phase === 'lobby' || value.phase === 'prepare' ? value.phase : '';
-    const expectedTitle = typeof value.expectedTitle === 'string'
-        ? value.expectedTitle.substring(0, 100)
-        : '';
+    const phase = value.phase === 'lobby' || value.phase === 'prepare'
+        ? value.phase
+        : (value.phase === 'execute' || value.phase === 'executing' ? 'execute' : '');
+    const expectedTitle = toEpisodeWireTitle(value.expectedTitle) || '';
+    const expectedEpisodeId = typeof value.expectedEpisodeId === 'string'
+        ? value.expectedEpisodeId.substring(0, 16)
+        : extractEpisodeId(expectedTitle);
     const initiatorPeerId = typeof value.initiatorPeerId === 'string'
         ? value.initiatorPeerId.substring(0, 16)
         : '';
@@ -1238,18 +1245,115 @@ function normalizeEpisodeSyncV2(value, allowedPeerIds = null) {
     if (participants.length < 2
         || !participantSet.has(initiatorPeerId)
         || (allowedPeerIds && participants.some(candidate => !allowedPeerIds.has(candidate)))) return null;
+    const phaseTimeout = phase === 'lobby'
+        ? EPISODE_SYNC_V2_LOAD_TIMEOUT
+        : (phase === 'prepare' ? EPISODE_SYNC_V2_PREPARE_TIMEOUT : EPISODE_SYNC_V2_EXECUTE_TIMEOUT);
+    // The relay's wall clock is not comparable to the browser's. Convert its
+    // bounded remaining duration into a local deadline. Older v2 relays omit
+    // remainingMs; a full local phase timeout is safer than trusting clock skew.
+    const localDeadline = createLocalEpisodeDeadline(value.remainingMs, phaseTimeout);
     return {
         transactionId,
         phase,
         expectedTitle,
+        expectedEpisodeId,
         initiatorPeerId,
         participants,
         loadedPeers,
         preparedPeers,
         createdAt: Number.isFinite(value.createdAt) ? value.createdAt : Date.now(),
-        deadlineAt: Number.isFinite(value.deadlineAt) ? value.deadlineAt : null,
-        revision: Number.isSafeInteger(value.revision) && value.revision > 0 ? value.revision : 1
+        deadlineAt: localDeadline.deadlineAt,
+        remainingMs: localDeadline.remainingMs,
+        revision: Number.isSafeInteger(value.revision) && value.revision > 0 ? value.revision : 1,
+        executionReportStatus: value.executionReportStatus === 'executed'
+            || value.executionReportStatus === 'failed_execute'
+            ? value.executionReportStatus
+            : null,
+        executionReportInFlight: false
     };
+}
+
+function createPendingEpisodeSyncV2Start(identity, sender = null) {
+    return {
+        requestId: ++episodeSyncV2PendingStartId,
+        roomId: currentRoom?.roomId || null,
+        connectionGeneration,
+        targetGeneration: targetActivationGeneration,
+        tabId: normalizeTabId(sender?.tab?.id ?? currentTabId),
+        frameId: normalizeFrameId(sender?.frameId ?? currentTargetFrameId),
+        documentId: sender?.documentId || currentTargetDocumentId || null,
+        expectedTitle: identity.expectedTitle,
+        expectedEpisodeId: identity.expectedEpisodeId,
+        requestedAt: Date.now()
+    };
+}
+
+function isCurrentEpisodeSyncV2Start(pending) {
+    return episodeSyncV2PendingStart === pending
+        && isEpisodeSyncV2StartContextCurrent(pending, {
+            roomId: currentRoom?.roomId || null,
+            connectionGeneration,
+            targetGeneration: targetActivationGeneration,
+            tabId: normalizeTabId(currentTabId)
+        });
+}
+
+function startLegacyEpisodeLobbyForTransition(identity, pending = null) {
+    if (!identity?.expectedTitle || !identity.expectedEpisodeId) return 'invalid_identity';
+    if (pending && !isCurrentEpisodeSyncV2Start(pending)) return 'stale_session';
+    // Legacy has no separate expectedEpisodeId field. If the 100-code-unit
+    // title clamp removed the episode marker, use the canonical ID itself so
+    // old content scripts can still match the local full title.
+    const lobbyTitle = extractEpisodeId(identity.expectedTitle)
+        ? identity.expectedTitle
+        : identity.expectedEpisodeId;
+
+    if (episodeLobby && sameEpisode(episodeLobby.expectedTitle, lobbyTitle)) {
+        if (!episodeLobby.readyPeers.includes(peerId)) {
+            if (!emitLive(EVENTS.EPISODE_READY, {
+                peerId,
+                title: lobbyTitle,
+                expectedTitle: episodeLobby.expectedTitle
+            })) return 'offline';
+            episodeLobby.readyPeers.push(peerId);
+            persistEpisodeLobby();
+            broadcastLobbyUpdate();
+            checkEpisodeLobbyCompletion();
+        }
+        return 'ready_sent';
+    }
+
+    if (episodeLobby) clearEpisodeLobbyState();
+    if (!emitLive(EVENTS.EPISODE_LOBBY, { peerId, expectedTitle: lobbyTitle })) return 'offline';
+
+    supersedeCanonicalMediaRecovery('local episode_lobby', EVENTS.PAUSE);
+    episodeLobby = {
+        expectedTitle: lobbyTitle,
+        initiatorPeerId: peerId,
+        readyPeers: [peerId],
+        createdAt: Date.now()
+    };
+    persistEpisodeLobby();
+    broadcastLobbyUpdate();
+    addLog(`Episode lobby created via compatibility fallback: "${lobbyTitle}"`, 'info');
+
+    const targetTabId = pending?.tabId ?? normalizeTabId(currentTabId);
+    if (targetTabId !== null) {
+        sendMessageToFrame(
+            targetTabId,
+            pending?.frameId ?? currentTargetFrameId,
+            { type: 'PAUSE_FOR_LOBBY', expectedTitle: lobbyTitle },
+            null,
+            pending?.documentId ?? currentTargetDocumentId
+        ).catch(() => {});
+    }
+
+    episodeLobbyTimeout = setTimeout(
+        () => cancelEpisodeLobby('Timeout — not all peers loaded the episode'),
+        EPISODE_LOBBY_TIMEOUT
+    );
+    checkEpisodeLobbyCompletion();
+    return 'lobby_created';
 }
 
 function clearTargetTabForIdle(expectedTabId = null, expectedGeneration = null) {
@@ -1266,6 +1370,7 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
     reconnectFailed = false;
     reconnectAttempts = 0;
     reconnectStartTime = null;
+    episodeSyncV2PendingStart = null;
     completeForceSyncBeforeTargetChange(null);
     if (notifyServer) emit(EVENTS.LEAVE_ROOM, { peerId });
 
@@ -2272,7 +2377,13 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 currentRoom.episodeSyncV2 = authoritativeEpisodeSyncV2;
                 persistEpisodeSyncV2();
                 broadcastLobbyUpdate();
-                if (shouldNotifyContent) sendEpisodeSyncV2ToContent().catch(() => {});
+                if (shouldNotifyContent) {
+                    if (authoritativeEpisodeSyncV2.phase === 'execute') {
+                        executeEpisodeSyncV2FromRelay(authoritativeEpisodeSyncV2).catch(() => {});
+                    } else {
+                        sendEpisodeSyncV2ToContent().catch(() => {});
+                    }
+                }
             } else if (episodeSyncV2) {
                 clearEpisodeSyncV2State({ reason: 'relay_state_ended' });
             } else {
@@ -2701,6 +2812,28 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             }
             const phase = data.phase;
             if (phase === 'cancel' && !data.transactionId) {
+                const pending = episodeSyncV2PendingStart;
+                const matchesPending = episodeSyncV2PendingStart === pending
+                    && matchesEpisodeSyncV2StartRejection(pending, {
+                        roomId: currentRoom?.roomId || null,
+                        connectionGeneration,
+                        targetGeneration: targetActivationGeneration,
+                        tabId: normalizeTabId(currentTabId)
+                    }, data);
+                if (!matchesPending) {
+                    addLog(`Ignored stale Episode Sync v2 rejection: ${data.reason || 'rejected'}`, 'info');
+                    break;
+                }
+                if (data.reason === 'capability_mismatch') {
+                    const fallbackStatus = startLegacyEpisodeLobbyForTransition({
+                        expectedTitle: pending.expectedTitle,
+                        expectedEpisodeId: pending.expectedEpisodeId
+                    }, pending);
+                    episodeSyncV2PendingStart = null;
+                    addLog(`Episode Sync v2 unavailable; compatibility fallback: ${fallbackStatus}`, 'warn');
+                    break;
+                }
+                episodeSyncV2PendingStart = null;
                 addLog(`Episode Sync v2 unavailable: ${data.reason || 'rejected'}`, 'warn');
                 break;
             }
@@ -2728,6 +2861,11 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                     clearEpisodeSyncV2State({ reason: 'transaction_replaced' });
                 }
                 if (episodeLobby) clearEpisodeLobbyState();
+                if (episodeSyncV2PendingStart
+                    && incoming.expectedTitle === episodeSyncV2PendingStart.expectedTitle
+                    && incoming.expectedEpisodeId === episodeSyncV2PendingStart.expectedEpisodeId) {
+                    episodeSyncV2PendingStart = null;
+                }
                 episodeSyncV2 = incoming;
                 if (currentRoom) currentRoom.episodeSyncV2 = incoming;
                 persistEpisodeSyncV2();
@@ -2736,14 +2874,16 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 addLog(`Episode Sync v2 ${incoming.phase}: "${incoming.expectedTitle}" (${incoming.transactionId.substring(0, 8)})`, 'info');
                 break;
             }
-            if ((phase === 'execute' || phase === 'cancel')
+            if ((phase === 'execute' || phase === 'complete' || phase === 'cancel')
                 && episodeSyncV2
                 && data.transactionId === episodeSyncV2.transactionId) {
                 const completed = episodeSyncV2;
                 if (phase === 'execute') {
+                    await executeEpisodeSyncV2FromRelay(data);
+                } else if (phase === 'complete') {
                     sendMessageToCurrentContent({
                         type: 'EPISODE_SYNC_V2',
-                        transaction: { ...completed, phase: 'execute', targetTime: 0 }
+                        transaction: { ...completed, phase: 'complete', targetTime: 0 }
                     }).catch(() => {});
                     if (currentRoom && Array.isArray(currentRoom.peers)) {
                         currentRoom.peers.forEach(candidate => {
@@ -2758,7 +2898,10 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                     clearEpisodeSyncV2State({ notifyContent: false, reason: 'executed' });
                     addLog(`Episode Sync v2 executed for "${completed.expectedTitle}"`, 'success');
                 } else {
-                    clearEpisodeSyncV2State({ reason: data.reason || 'cancelled' });
+                    clearEpisodeSyncV2State({
+                        reason: data.reason || 'cancelled',
+                        relayState: data
+                    });
                     addLog(`Episode Sync v2 cancelled: ${data.reason || 'cancelled'}`, 'warn');
                 }
             }
@@ -2928,6 +3071,7 @@ function completeForceSyncBeforeTargetChange(nextTabId) {
     const normalizedNextTabId = normalizeTabId(nextTabId);
     if (selectedTabId !== null && selectedTabId === normalizedNextTabId) return;
 
+    episodeSyncV2PendingStart = null;
     if (episodeSyncV2) cancelEpisodeSyncV2('target_changed');
     if (!isForceSyncInitiator) return;
 
@@ -2945,7 +3089,7 @@ function episodeLobbyForUi() {
     return {
         expectedTitle: episodeSyncV2.expectedTitle,
         initiatorPeerId: episodeSyncV2.initiatorPeerId,
-        readyPeers: episodeSyncV2.phase === 'prepare'
+        readyPeers: episodeSyncV2.phase === 'prepare' || episodeSyncV2.phase === 'execute'
             ? [...episodeSyncV2.preparedPeers]
             : [...episodeSyncV2.loadedPeers],
         createdAt: episodeSyncV2.createdAt,
@@ -2972,7 +3116,60 @@ function sendEpisodeSyncV2ToContent(transaction = episodeSyncV2) {
     });
 }
 
-function clearEpisodeSyncV2State({ notifyContent = true, reason = 'cancelled' } = {}) {
+async function executeEpisodeSyncV2FromRelay(relayState) {
+    const transaction = episodeSyncV2;
+    if (!transaction
+        || !relayState
+        || relayState.transactionId !== transaction.transactionId
+        || transaction.executionReportInFlight
+        || transaction.executionReportStatus) return false;
+
+    transaction.phase = 'execute';
+    const remainingMs = Number.isFinite(relayState.remainingMs)
+        ? Math.max(0, Math.min(EPISODE_SYNC_V2_EXECUTE_TIMEOUT, relayState.remainingMs))
+        : EPISODE_SYNC_V2_EXECUTE_TIMEOUT;
+    transaction.remainingMs = remainingMs;
+    transaction.deadlineAt = Date.now() + remainingMs;
+    transaction.executionReportInFlight = true;
+    persistEpisodeSyncV2();
+    broadcastLobbyUpdate();
+
+    let response = null;
+    try {
+        response = await sendMessageToCurrentContent({
+            type: 'EPISODE_SYNC_V2',
+            transaction: {
+                ...transaction,
+                phase: 'execute',
+                targetTime: 0
+            }
+        });
+    } catch (error) {
+        addLog(`Episode Sync v2 execute content error: ${error.message}`, 'warn');
+    }
+
+    if (episodeSyncV2 !== transaction) return false;
+    const reportStatus = response?.status === 'executed' ? 'executed' : 'failed_execute';
+    transaction.executionReportInFlight = false;
+    const sent = emitLive(EVENTS.EPISODE_SYNC_V2, {
+        phase: reportStatus,
+        transactionId: transaction.transactionId,
+        reason: reportStatus === 'failed_execute'
+            ? (typeof response?.reason === 'string' ? response.reason.substring(0, 32) : 'content_execute_failed')
+            : undefined
+    });
+    transaction.executionReportStatus = sent ? reportStatus : null;
+    persistEpisodeSyncV2();
+    addLog(
+        sent
+            ? `Episode Sync v2 execute result sent: ${reportStatus}`
+            : `Episode Sync v2 execute result could not be sent: ${reportStatus}`,
+        reportStatus === 'executed' && sent ? 'info' : 'warn'
+    );
+    return sent;
+}
+
+function clearEpisodeSyncV2State({ notifyContent = true, reason = 'cancelled', relayState = null } = {}) {
     const previous = episodeSyncV2;
     episodeSyncV2 = null;
     if (currentRoom) currentRoom.episodeSyncV2 = null;
@@ -2983,6 +3180,7 @@ function clearEpisodeSyncV2State({ notifyContent = true, reason = 'cancelled' } 
             type: 'EPISODE_SYNC_V2',
             transaction: {
                 ...previous,
+                ...(relayState && typeof relayState === 'object' ? relayState : {}),
                 phase: 'cancel',
                 reason
             }
@@ -5623,7 +5821,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
 
         const newTitle = message.payload && message.payload.newTitle;
         if (newTitle && extractEpisodeId(newTitle) === null) {
-            addLog(`Episode change detected ("${newTitle}") but no episode ID was found; ignoring.`, 'info');
+            addLog(`Episode change detected ("${toEpisodeWireTitle(newTitle) || 'unknown'}") but no episode ID was found; ignoring.`, 'info');
             sendResponse({ status: 'not_an_episode' });
             return;
         }
@@ -5637,12 +5835,14 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             sendResponse({ status: 'ignored_stale_session' });
             return;
         }
-        const lobbyTitle = sanitizeSharedTitle(newTitle, settings.mediaTitlePrivacyMode);
-        if (!lobbyTitle) {
+        const sharedLobbyTitle = sanitizeSharedTitle(newTitle, settings.mediaTitlePrivacyMode);
+        const episodeIdentity = createEpisodeWireIdentity(sharedLobbyTitle);
+        if (!episodeIdentity) {
             addLog(`Episode change detected but media title sharing is ${settings.mediaTitlePrivacyMode}; not creating a lobby.`, 'info');
             sendResponse({ status: 'title_privacy_no_lobby' });
             return;
         }
+        const lobbyTitle = episodeIdentity.expectedTitle;
 
         // Check setting
         const epSettings = await chrome.storage.local.get(['autoSyncNextEpisode']);
@@ -5680,21 +5880,29 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             return;
         }
 
-        // Automatic episode sync v2 is relay-owned. Never self-pause or fall
-        // back to the legacy client-owned lobby: on an old/mixed relay that path
-        // can create multiple Force Sync initiators. Manual Force Sync remains
-        // available and unchanged.
+        // Prefer the relay-owned barrier. Old relays and mixed rooms retain the
+        // established legacy lobby, but only from this exact room/target/start
+        // context so a delayed rejection cannot resurrect stale automation.
         if (!serverSupports(CAPABILITIES.EPISODE_SYNC_V2)) {
-            addLog(`Episode change ("${lobbyTitle}") — relay lacks Episode Sync v2; automatic sync skipped safely.`, 'warn');
-            sendResponse({ status: 'episode_sync_v2_unsupported' });
+            const pending = createPendingEpisodeSyncV2Start(episodeIdentity, sender);
+            episodeSyncV2PendingStart = pending;
+            const fallbackStatus = startLegacyEpisodeLobbyForTransition(episodeIdentity, pending);
+            episodeSyncV2PendingStart = null;
+            addLog(`Episode change ("${lobbyTitle}") — legacy relay fallback: ${fallbackStatus}.`, 'warn');
+            sendResponse({ status: fallbackStatus });
             return;
         }
-        if (episodeSyncV2 && sameEpisode(episodeSyncV2.expectedTitle, lobbyTitle)) {
+        if (episodeSyncV2
+            && episodeSyncV2.expectedTitle === episodeIdentity.expectedTitle
+            && episodeSyncV2.expectedEpisodeId === episodeIdentity.expectedEpisodeId) {
             sendResponse({ status: 'transaction_active', transactionId: episodeSyncV2.transactionId });
             return;
         }
         if (episodeSyncV2) cancelEpisodeSyncV2('new_episode');
-        if (!emitLive(EVENTS.EPISODE_SYNC_V2, { phase: 'start', expectedTitle: lobbyTitle })) {
+        const pending = createPendingEpisodeSyncV2Start(episodeIdentity, sender);
+        episodeSyncV2PendingStart = pending;
+        if (!emitLive(EVENTS.EPISODE_SYNC_V2, { phase: 'start', ...episodeIdentity })) {
+            if (episodeSyncV2PendingStart === pending) episodeSyncV2PendingStart = null;
             addLog(`Episode change ("${lobbyTitle}") — not connected; automatic sync was not queued.`, 'warn');
             sendResponse({ status: 'episode_sync_v2_offline' });
             return;
@@ -5725,7 +5933,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     sendResponse({ status: 'ok' });
                     return;
                 }
-                const readyTitle = sanitizeSharedTitle(message.payload.title, settings.mediaTitlePrivacyMode);
+                const readyTitle = toEpisodeWireTitle(
+                    sanitizeSharedTitle(message.payload.title, settings.mediaTitlePrivacyMode)
+                );
                 lobby.readyPeers.push(peerId);
                 persistEpisodeLobby();
                 broadcastLobbyUpdate();
@@ -5758,7 +5968,11 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         }
         const localTitle = message.payload?.title;
         if (localPhase !== 'failed'
-            && (typeof localTitle !== 'string' || !sameEpisodeStrict(localTitle, transaction.expectedTitle))) {
+            && (typeof localTitle !== 'string' || !sameEpisodeIdentity(
+                localTitle,
+                transaction.expectedTitle,
+                transaction.expectedEpisodeId
+            ))) {
             sendResponse({ status: 'ignored_episode_mismatch' });
             return;
         }

@@ -331,8 +331,17 @@
     let pendingPlayPauseVideo = null;   // source element for rejecting a stale trailing flush
 
     // --- Episode Auto-Sync State ---
+    const EPISODE_TRANSITION_QUARANTINE_MS = 2000;
+    const EPISODE_TRANSITION_CANDIDATE_MS = 30000;
+    const EPISODE_TRANSITION_POLL_MS = 250;
+    const EPISODE_TRANSITION_END_WINDOW_SECONDS = 30;
     let lastKnownMediaTitle = null;
     let episodeTransitionDebounce = null;
+    let episodeTransitionCandidate = null;
+    let episodeTransitionPollTimer = null;
+    let episodeTransitionQuarantine = null;
+    let episodeTransitionNoiseVideo = null;
+    let episodeTransitionNoiseUntil = 0;
     let _pendingLobbyTitle = null; // Title we're waiting to match (from remote lobby)
     let lobbyPollTimer = null;
     let episodeSyncV2State = null;
@@ -354,6 +363,10 @@
         if (destroyed) return;
         if (area === 'local' && changes.autoSyncNextEpisode) {
             _autoSyncEnabled = changes.autoSyncNextEpisode.newValue !== false;
+            if (!_autoSyncEnabled) {
+                clearEpisodeTransitionCandidate({ commitCurrentTitle: true });
+                flushEpisodeTransitionQuarantine();
+            }
         }
         if (area === 'local' && changes.audioSettings) {
             _audioSettings = mergeAudioSettings(changes.audioSettings.newValue);
@@ -1090,6 +1103,13 @@
     // Returns null if no episode pattern found.
     // --- SHARED_EPISODE_UTILS_INJECT_START ---
     // This block is automatically replaced by /scripts/build-extension.cjs
+    const EPISODE_WIRE_TITLE_LENGTH = 100;
+
+    function toEpisodeWireTitle(title) {
+        if (typeof title !== 'string' || title.length === 0) return null;
+        return title.substring(0, EPISODE_WIRE_TITLE_LENGTH);
+    }
+
     function extractEpisodeId(title) {
         if (!title || typeof title !== 'string') return null;
         const se = title.match(/S(?:eason\s*)?(\d+)[^a-zA-Z0-9]*E(?:pisode\s*)?(\d+)/i);
@@ -1125,10 +1145,24 @@
     // it to agree so two unrelated S01E06 videos cannot cross-sync. Privacy-reduced
     // S/E-only titles still fall back to the canonical episode ID.
     function sameEpisodeStrict(titleA, titleB) {
-        if (!sameEpisode(titleA, titleB)) return false;
-        const contextA = episodeContext(titleA);
-        const contextB = episodeContext(titleB);
-        return !contextA || !contextB || contextA === contextB;
+        const wireTitleA = toEpisodeWireTitle(titleA);
+        const wireTitleB = toEpisodeWireTitle(titleB);
+        if (!sameEpisode(wireTitleA, wireTitleB)) return false;
+        const contextA = episodeContext(wireTitleA);
+        const contextB = episodeContext(wireTitleB);
+        if (!contextA || !contextB || contextA === contextB) return true;
+        const [shorter, longer] = contextA.length <= contextB.length
+            ? [contextA, contextB]
+            : [contextB, contextA];
+        return shorter.length >= 4 && ` ${longer} `.includes(` ${shorter} `);
+    }
+
+    function sameEpisodeIdentity(localTitle, expectedTitle, expectedEpisodeId = null) {
+        const normalizedExpectedId = typeof expectedEpisodeId === 'string'
+            ? expectedEpisodeId.trim().toUpperCase().substring(0, 16)
+            : null;
+        if (normalizedExpectedId && extractEpisodeId(localTitle) !== normalizedExpectedId) return false;
+        return sameEpisodeStrict(localTitle, expectedTitle);
     }
     // --- SHARED_EPISODE_UTILS_INJECT_END ---
 
@@ -1142,26 +1176,177 @@
         if (!idA || !idB) return false; // At least one unparseable → allow
         return idA !== idB;             // Both parseable → only block if different
     }
-    function checkEpisodeTransition() {
+    function getEpisodeSource(video) {
+        return video ? (video.currentSrc || video.src || null) : null;
+    }
 
+    function isNearEpisodeBoundary(video, current = getSyncCurrentTime(video)) {
+        if (!video || current === null) return false;
+        if (video.ended) return true;
+        const duration = getSyncDuration(video);
+        const boundaryWindow = Math.min(
+            EPISODE_TRANSITION_END_WINDOW_SECONDS,
+            Math.max(3, duration * 0.05)
+        );
+        return duration > 0 && current >= Math.max(0, duration - boundaryWindow);
+    }
+
+    function isAutomaticTerminalEvent(video, current = getSyncCurrentTime(video)) {
+        if (!video || current === null) return false;
+        if (video.ended) return true;
+        const duration = getSyncDuration(video);
+        return duration > 0
+            && duration - current <= 1.5
+            && hcmClassifyIntent() !== 'deliberate';
+    }
+
+    function clearEpisodeTransitionPoll() {
+        if (!episodeTransitionPollTimer) return;
+        clearTimeout(episodeTransitionPollTimer);
+        episodeTransitionPollTimer = null;
+    }
+
+    function clearEpisodeTransitionCandidate({ commitCurrentTitle = false } = {}) {
+        clearEpisodeTransitionPoll();
+        episodeTransitionCandidate = null;
+        if (commitCurrentTitle) {
+            const title = getMediaTitle();
+            if (title) lastKnownMediaTitle = title;
+        }
+    }
+
+    function scheduleEpisodeTransitionPoll() {
+        if (destroyed || pageSuspended || episodeTransitionPollTimer || !episodeTransitionCandidate) return;
+        episodeTransitionPollTimer = setTimeout(() => {
+            episodeTransitionPollTimer = null;
+            if (destroyed || pageSuspended || !episodeTransitionCandidate) return;
+            if (Date.now() >= episodeTransitionCandidate.deadlineAt) {
+                clearEpisodeTransitionCandidate({ commitCurrentTitle: true });
+                flushEpisodeTransitionQuarantine();
+                return;
+            }
+            checkEpisodeTransition('poll');
+            scheduleEpisodeTransitionPoll();
+        }, EPISODE_TRANSITION_POLL_MS);
+    }
+
+    function ensureEpisodeTransitionCandidate(video, reason, {
+        baselineSource = lastVideoSrc,
+        nearBoundary = false,
+        transitionLike = false,
+        quarantineEvents = false
+    } = {}) {
+        if (!_autoSyncEnabled || !video || !lastKnownMediaTitle) return null;
+        const source = getEpisodeSource(video);
+        if (!episodeTransitionCandidate || episodeTransitionCandidate.video !== video) {
+            clearEpisodeTransitionCandidate();
+            episodeTransitionCandidate = {
+                video,
+                baselineTitle: lastKnownMediaTitle,
+                baselineSource: baselineSource === undefined ? source : baselineSource,
+                startedAt: Date.now(),
+                deadlineAt: Date.now() + EPISODE_TRANSITION_CANDIDATE_MS,
+                nearBoundary: nearBoundary === true,
+                transitionLike: transitionLike === true,
+                quarantineEvents: quarantineEvents === true || transitionLike === true,
+                reason
+            };
+        } else {
+            episodeTransitionCandidate.nearBoundary ||= nearBoundary === true;
+            episodeTransitionCandidate.transitionLike ||= transitionLike === true;
+            episodeTransitionCandidate.quarantineEvents ||= quarantineEvents === true || transitionLike === true;
+            episodeTransitionCandidate.reason = reason || episodeTransitionCandidate.reason;
+        }
+        scheduleEpisodeTransitionPoll();
+        return episodeTransitionCandidate;
+    }
+
+    function discardEpisodeTransitionQuarantine() {
+        const quarantine = episodeTransitionQuarantine;
+        episodeTransitionQuarantine = null;
+        if (quarantine?.timer) clearTimeout(quarantine.timer);
+    }
+
+    function checkEpisodeTransition(reason = 'signal') {
         const currentTitle = getMediaTitle();
-
         const video = findVideo();
+        if (!video) return false;
 
-        const current = video ? getSyncCurrentTime(video) : null;
-        // Only trigger if: we had a previous title, the title changed,
-        // a video exists, and we're near the start of new content.
-        if (lastKnownMediaTitle && currentTitle
-            && !sameEpisode(currentTitle, lastKnownMediaTitle)
-            && extractEpisodeId(currentTitle) !== null
-            && video
-            && current !== null && current < 5
-            && video.readyState >= 1) {
-            onEpisodeTransition(currentTitle);
+        const current = getSyncCurrentTime(video);
+        const source = getEpisodeSource(video);
+        if (!lastKnownMediaTitle) {
+            if (currentTitle) lastKnownMediaTitle = currentTitle;
+            return false;
         }
 
-        // Always track the latest known title
-        if (currentTitle) lastKnownMediaTitle = currentTitle;
+        const candidate = episodeTransitionCandidate;
+        const baselineTitle = candidate?.video === video
+            ? candidate.baselineTitle
+            : lastKnownMediaTitle;
+        const baselineSource = candidate?.video === video
+            ? candidate.baselineSource
+            : lastVideoSrc;
+        const titleChanged = !!currentTitle && !sameEpisode(currentTitle, baselineTitle);
+        const sourceChanged = baselineSource !== undefined
+            && !!baselineSource
+            && !!source
+            && source !== baselineSource;
+        const nearBoundary = isNearEpisodeBoundary(video, current);
+        const nearNewStart = current !== null && current < 5;
+        const transitionSignal = titleChanged
+            || sourceChanged
+            || reason === 'source_changed'
+            || reason === 'loadstart'
+            || reason === 'emptied'
+            || reason === 'loadeddata'
+            || reason === 'player_changed'
+            || candidate?.nearBoundary;
+
+        if (transitionSignal) {
+            const nextCandidate = ensureEpisodeTransitionCandidate(video, reason, {
+                baselineSource,
+                nearBoundary,
+                transitionLike: titleChanged
+                    || (sourceChanged && (nearNewStart || candidate?.nearBoundary === true)),
+                quarantineEvents: titleChanged
+                    || sourceChanged
+                    || reason === 'player_changed'
+                    || candidate?.nearBoundary === true
+            });
+            if (nextCandidate && nearNewStart
+                && (sourceChanged || reason === 'loadeddata')
+                && nextCandidate.nearBoundary) {
+                nextCandidate.transitionLike = true;
+            }
+        }
+
+        // Commit the title baseline only after the replacement is actually usable.
+        // This keeps both title-before-loadeddata and loadeddata-before-title alive
+        // as pending candidates instead of consuming the only transition signal.
+        if (titleChanged
+            && extractEpisodeId(currentTitle) !== null
+            && current !== null && current < 5
+            && video.readyState >= 1) {
+            lastKnownMediaTitle = currentTitle;
+            clearEpisodeTransitionCandidate();
+            discardEpisodeTransitionQuarantine();
+            episodeTransitionNoiseVideo = video;
+            episodeTransitionNoiseUntil = Date.now() + EPISODE_TRANSITION_QUARANTINE_MS;
+            cancelPlayPauseCoalesce();
+            if (seekDebounceTimer) {
+                clearTimeout(seekDebounceTimer);
+                seekDebounceTimer = null;
+            }
+            onEpisodeTransition(currentTitle);
+            return true;
+        }
+
+        // Harmless metadata reformatting for the same canonical episode may update
+        // the baseline. A genuinely different episode stays pending until ready.
+        if (currentTitle && sameEpisode(currentTitle, baselineTitle)) {
+            lastKnownMediaTitle = currentTitle;
+        }
+        return false;
     }
 
     function onEpisodeTransition(newTitle) {
@@ -1304,7 +1489,7 @@
             && video
             && video === findVideo()
             && video.isConnected !== false
-            && sameEpisodeStrict(getMediaTitle(), state.expectedTitle)
+            && sameEpisodeIdentity(getMediaTitle(), state.expectedTitle, state.expectedEpisodeId)
             && video.paused;
         if (mayResume) {
             const resumed = await tryMediaAction(EVENTS.PLAY);
@@ -1318,8 +1503,8 @@
         const title = getMediaTitle();
         const matches = video
             && title
-            && sameEpisodeStrict(title, state.expectedTitle)
-            && video.readyState >= 1
+            && sameEpisodeIdentity(title, state.expectedTitle, state.expectedEpisodeId)
+            && video.readyState >= 3
             && getSyncCurrentTime(video) !== null;
         if (!matches) {
             state.loadCandidateVideo = null;
@@ -1339,8 +1524,19 @@
 
     function startEpisodeSyncV2Lobby(transaction) {
         if (!transaction?.transactionId || !transaction.expectedTitle) return;
+        // Any held source-swap media events predate the relay-owned transaction.
+        // They are transition noise, not a newer intent that may cancel the lobby.
+        discardEpisodeTransitionQuarantine();
+        cancelPlayPauseCoalesce();
+        if (seekDebounceTimer) {
+            clearTimeout(seekDebounceTimer);
+            seekDebounceTimer = null;
+        }
         if (episodeSyncV2State?.transactionId === transaction.transactionId) {
             episodeSyncV2State.phase = 'lobby';
+            episodeSyncV2State.expectedEpisodeId = typeof transaction.expectedEpisodeId === 'string'
+                ? transaction.expectedEpisodeId
+                : episodeSyncV2State.expectedEpisodeId;
             episodeSyncV2State.deadlineAt = Number.isFinite(transaction.deadlineAt)
                 ? transaction.deadlineAt
                 : episodeSyncV2State.deadlineAt;
@@ -1351,6 +1547,9 @@
         episodeSyncV2State = {
             transactionId: transaction.transactionId,
             expectedTitle: transaction.expectedTitle,
+            expectedEpisodeId: typeof transaction.expectedEpisodeId === 'string'
+                ? transaction.expectedEpisodeId
+                : null,
             phase: 'lobby',
             generation: episodeSyncV2Generation,
             loadedReported: false,
@@ -1365,7 +1564,9 @@
             pausedByTransaction: false,
             manualAction: false,
             programmaticPausePending: false,
-            prepareStarted: false
+            prepareStarted: false,
+            executePromise: null,
+            executeResult: null
         };
         stopEpisodeSyncV2Poll();
         checkEpisodeSyncV2Loaded(episodeSyncV2State);
@@ -1384,7 +1585,7 @@
                     && state.phase === 'prepare'
                     && video === findVideo()
                     && video.isConnected !== false
-                    && sameEpisodeStrict(getMediaTitle(), state.expectedTitle)
+                    && sameEpisodeIdentity(getMediaTitle(), state.expectedTitle, state.expectedEpisodeId)
                     && video.paused
                     && !video.seeking
                     && video.readyState >= 3
@@ -1417,6 +1618,9 @@
         }
         const state = episodeSyncV2State;
         if (!state || state.transactionId !== transaction.transactionId) return;
+        if (typeof transaction.expectedEpisodeId === 'string') {
+            state.expectedEpisodeId = transaction.expectedEpisodeId;
+        }
         state.deadlineAt = Number.isFinite(transaction.deadlineAt) ? transaction.deadlineAt : state.deadlineAt;
         if (state.prepareStarted) return;
         stopEpisodeSyncV2Poll();
@@ -1424,7 +1628,8 @@
         state.prepareStarted = true;
         const video = findVideo();
         const currentTitle = getMediaTitle();
-        if (!video || !currentTitle || !sameEpisodeStrict(currentTitle, state.expectedTitle)) {
+        if (!video || !currentTitle
+            || !sameEpisodeIdentity(currentTitle, state.expectedTitle, state.expectedEpisodeId)) {
             if (!await reportEpisodeSyncV2Local(state, 'failed', 'episode_mismatch')) {
                 retryEpisodeSyncV2Report(state, 'failed', 'episode_mismatch');
             }
@@ -1477,6 +1682,56 @@
         state.manualAction = true;
         reportEpisodeSyncV2Local(state, 'failed', `user_${action}`).catch(() => {});
         clearEpisodeSyncV2Content({ manualAction: true }).catch(() => {});
+    }
+
+    function executeEpisodeSyncV2(transaction) {
+        const state = episodeSyncV2State;
+        if (!state || state.transactionId !== transaction.transactionId) {
+            return Promise.resolve({ status: 'failed_execute', reason: 'stale_transaction' });
+        }
+        if (state.executeResult) return Promise.resolve(state.executeResult);
+        if (state.executePromise) return state.executePromise;
+
+        const video = state.video || findVideo();
+        const current = video ? getSyncCurrentTime(video) : null;
+        const canExecute = video
+            && state.phase === 'prepare'
+            && video === findVideo()
+            && video.isConnected !== false
+            && sameEpisodeIdentity(getMediaTitle(), state.expectedTitle, state.expectedEpisodeId)
+            && video.paused
+            && !video.seeking
+            && video.readyState >= 3
+            && current !== null
+            && Math.abs(current) < 1;
+        if (!canExecute) {
+            state.executeResult = { status: 'failed_execute', reason: 'prepared_state_changed' };
+            return Promise.resolve(state.executeResult);
+        }
+
+        state.executePromise = Promise.resolve(tryMediaAction(EVENTS.PLAY)).then(applied => {
+            if (!isEpisodeSyncV2Current(state)) {
+                return { status: 'failed_execute', reason: 'stale_transaction' };
+            }
+            if (!applied) {
+                reportLog('Episode Sync v2 execute could not start playback', 'warn');
+                state.executeResult = { status: 'failed_execute', reason: 'play_failed' };
+                return state.executeResult;
+            }
+            scheduleProactiveHeartbeat();
+            state.executeResult = { status: 'executed' };
+            return state.executeResult;
+        }).catch(error => {
+            reportLog(`Episode Sync v2 execute failed: ${error.message}`, 'warn');
+            if (isEpisodeSyncV2Current(state)) {
+                state.executeResult = { status: 'failed_execute', reason: 'play_failed' };
+                return state.executeResult;
+            }
+            return { status: 'failed_execute', reason: 'stale_transaction' };
+        }).finally(() => {
+            if (isEpisodeSyncV2Current(state)) state.executePromise = null;
+        });
+        return state.executePromise;
     }
 
     function getPlayerActionFixes() {
@@ -1980,36 +2235,51 @@
                     reportLog(`Episode Sync v2 prepare failed: ${error.message}`, 'warn');
                 });
             } else if (transaction.phase === 'execute') {
+                const state = episodeSyncV2State;
+                const video = state?.video || findVideo();
+                const current = video ? getSyncCurrentTime(video) : null;
+                const canExecute = state
+                    && state.transactionId === transaction.transactionId
+                    && state.phase === 'prepare'
+                    && video === findVideo()
+                    && video.isConnected !== false
+                    && sameEpisodeIdentity(getMediaTitle(), state.expectedTitle, state.expectedEpisodeId)
+                    && video.paused
+                    && !video.seeking
+                    && video.readyState >= 3
+                    && current !== null
+                    && Math.abs(current) < 1;
+                if (!canExecute) {
+                    sendResponse({ status: 'failed_execute', reason: 'prepared_state_changed' });
+                    return true;
+                }
+                executeEpisodeSyncV2(transaction).then(sendResponse).catch(() => {
+                    sendResponse({ status: 'failed_execute', reason: 'unexpected_error' });
+                });
+                return true;
+            } else if (transaction.phase === 'complete') {
                 if (episodeSyncV2State?.transactionId === transaction.transactionId) {
-                    const state = episodeSyncV2State;
-                    const video = state.video || findVideo();
-                    const current = video ? getSyncCurrentTime(video) : null;
-                    const canExecute = video
-                        && state.phase === 'prepare'
-                        && video === findVideo()
-                        && video.isConnected !== false
-                        && sameEpisodeStrict(getMediaTitle(), state.expectedTitle)
-                        && video.paused
-                        && !video.seeking
-                        && video.readyState >= 3
-                        && current !== null
-                        && Math.abs(current) < 1;
                     clearEpisodeSyncV2Content({ resume: false }).catch(() => {});
-                    if (canExecute) {
-                        Promise.resolve(tryMediaAction(EVENTS.PLAY)).then(applied => {
-                            if (applied) scheduleProactiveHeartbeat();
-                            else reportLog('Episode Sync v2 execute could not start playback', 'warn');
-                        }).catch(() => {});
-                    } else {
-                        reportLog('Episode Sync v2 execute ignored: prepared player state changed', 'warn');
-                    }
                 }
             } else if (transaction.phase === 'cancel') {
                 if (episodeSyncV2State?.transactionId === transaction.transactionId) {
+                    const settlePaused = transaction.settlePlaybackState === 'paused';
                     // A superseding room command follows this cancellation on
                     // the same ordered socket. Do not race it with restoration
                     // of the pre-transaction play state.
-                    clearEpisodeSyncV2Content({ resume: transaction.reason !== 'superseded' }).catch(() => {});
+                    clearEpisodeSyncV2Content({
+                        resume: !settlePaused && transaction.reason !== 'superseded'
+                    }).then(async () => {
+                        if (!settlePaused) return;
+                        const video = findVideo();
+                        if (!video || video.isConnected === false) return;
+                        const paused = video.paused || await tryMediaAction(EVENTS.PAUSE);
+                        const targetTime = Number.isFinite(transaction.targetTime)
+                            ? transaction.targetTime
+                            : 0;
+                        if (paused) await tryMediaAction(EVENTS.SEEK, { targetTime });
+                        scheduleProactiveHeartbeat();
+                    }).catch(() => {});
                 }
             }
             sendResponse({ status: 'ok' });
@@ -2215,6 +2485,10 @@
 
         const mediaTitle = (navigator.mediaSession && navigator.mediaSession.metadata) ? navigator.mediaSession.metadata.title : null;
 
+        const episodeSyncIntent = episodeSyncV2State?.phase === 'lobby'
+            && hcmClassifyIntent() === 'deliberate'
+            ? 'manual'
+            : undefined;
         runtimeMessage({
             type: 'CONTENT_EVENT',
             action,
@@ -2222,12 +2496,121 @@
                 currentTime: current,
                 targetTime: current,
                 mediaTitle: mediaTitle,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                episodeSyncIntent
             }
         }).catch(() => {});
 
         // Trigger proactive heartbeat to push stabilized state
         scheduleProactiveHeartbeat();
+    }
+
+    function cancelPlayPauseCoalesce() {
+        if (playPauseCoalesceTimer) clearTimeout(playPauseCoalesceTimer);
+        playPauseCoalesceTimer = null;
+        pendingPlayPauseAction = null;
+        pendingPlayPauseVideo = null;
+    }
+
+    function v2LoadingEventIsChurn(video) {
+        const state = episodeSyncV2State;
+        if (!state || state.phase !== 'lobby') return false;
+        if (hcmClassifyIntent() === 'deliberate') return false;
+        // Before this player has stably reported the expected episode, native
+        // media events are part of loading by definition. Once loaded, require a
+        // fresh real input gesture before allowing a command to supersede v2.
+        if (!state.loadedReported) return true;
+        if (video !== findVideo() || video.readyState < 3 || video.seeking) return true;
+        return hcmClassifyIntent() !== 'deliberate';
+    }
+
+    function queueEpisodeTransitionEvent(action, video) {
+        let quarantine = episodeTransitionQuarantine;
+        if (!quarantine || quarantine.video !== video) {
+            discardEpisodeTransitionQuarantine();
+            quarantine = {
+                video,
+                sawPlayback: false,
+                seekPending: false,
+                timer: null
+            };
+            episodeTransitionQuarantine = quarantine;
+            quarantine.timer = setTimeout(flushEpisodeTransitionQuarantine, EPISODE_TRANSITION_QUARANTINE_MS);
+        }
+        if (action === EVENTS.PLAY || action === EVENTS.PAUSE) quarantine.sawPlayback = true;
+        if (action === EVENTS.SEEK) quarantine.seekPending = true;
+    }
+
+    function flushEpisodeTransitionQuarantine() {
+        const quarantine = episodeTransitionQuarantine;
+        if (!quarantine) return;
+        episodeTransitionQuarantine = null;
+        if (quarantine.timer) clearTimeout(quarantine.timer);
+
+        const video = quarantine.video;
+        if (destroyed || pageSuspended || !video || video !== activeVideo || video !== findVideo()
+            || video.isConnected === false) return;
+
+        // Give a late MediaSession update one final synchronous chance to turn
+        // this candidate into a confirmed episode transition.
+        if (checkEpisodeTransition('quarantine_timeout')) return;
+        if (v2LoadingEventIsChurn(video)) return;
+        if (episodeTransitionNoiseVideo === video && Date.now() < episodeTransitionNoiseUntil) return;
+        if (episodeTransitionCandidate?.video === video
+            && episodeTransitionCandidate.transitionLike) return;
+        if (episodeTransitionCandidate?.video === video) {
+            clearEpisodeTransitionCandidate({ commitCurrentTitle: true });
+        }
+
+        // No transition materialized within the bounded window: preserve the
+        // user's final settled intent with fresh time/title rather than replaying
+        // the stale first edge that opened the quarantine.
+        if (quarantine.seekPending) sendContentEvent(EVENTS.SEEK, video);
+        if (quarantine.sawPlayback) {
+            sendContentEvent(video.paused ? EVENTS.PAUSE : EVENTS.PLAY, video);
+        }
+    }
+
+    function shouldQuarantineEpisodeEvent(action, video, current) {
+        if (!_autoSyncEnabled) return 'relay';
+        if (v2LoadingEventIsChurn(video)) return 'quarantine';
+        // A fresh pointer/keyboard gesture is explicit user intent, including
+        // near an episode boundary. Never add transition latency to it.
+        if (hcmClassifyIntent() === 'deliberate') return 'relay';
+        if (episodeTransitionNoiseVideo === video && Date.now() < episodeTransitionNoiseUntil) {
+            return 'quarantine';
+        }
+
+        const title = getMediaTitle();
+        const source = getEpisodeSource(video);
+        const candidate = episodeTransitionCandidate?.video === video
+            ? episodeTransitionCandidate
+            : null;
+        const baselineTitle = candidate?.baselineTitle || lastKnownMediaTitle;
+        const baselineSource = candidate?.baselineSource !== undefined
+            ? candidate.baselineSource
+            : lastVideoSrc;
+        const titleChanged = !!baselineTitle && !!title && !sameEpisode(title, baselineTitle);
+        const sourceChanged = baselineSource !== undefined
+            && !!baselineSource
+            && !!source
+            && source !== baselineSource;
+        const nearBoundary = isNearEpisodeBoundary(video, current);
+        const automaticTerminal = isAutomaticTerminalEvent(video, current);
+
+        if (!candidate?.quarantineEvents && !titleChanged && !sourceChanged && !nearBoundary) return 'relay';
+        const pending = ensureEpisodeTransitionCandidate(video, `media_${action}`, {
+            baselineSource,
+            nearBoundary,
+            transitionLike: automaticTerminal
+                || titleChanged
+                || (sourceChanged && (current < 5 || candidate?.nearBoundary === true)),
+            quarantineEvents: true
+        });
+        if (pending && sourceChanged && current < 5 && pending.nearBoundary) {
+            pending.transitionLike = true;
+        }
+        return checkEpisodeTransition(`media_${action}`) ? 'discard' : 'quarantine';
     }
 
     // Trailing-edge flush of a coalesced play/pause burst: emit the final settled
@@ -2297,6 +2680,13 @@
         // Suppress only SEEK during visibility grace period (tab re-focus ghost jump).
         // Play/Pause pass through — user may want to immediately pause after tabbing back.
         if (Date.now() < visibilityGraceUntil && action === EVENTS.SEEK) return;
+
+        const transitionDisposition = shouldQuarantineEpisodeEvent(action, video, current);
+        if (transitionDisposition === 'discard') return;
+        if (transitionDisposition === 'quarantine') {
+            queueEpisodeTransitionEvent(action, video);
+            return;
+        }
 
         // Coalesce play/pause bursts (source swaps, ABR, ads, teardown). The
         // synchronous gates above have already run; only the network emit is
@@ -2493,9 +2883,31 @@
 
     let lastVideoSrc = undefined;
 
-    // Episode detection handler for loadeddata event
+    // Episode detection signals deliberately keep polling after either side of
+    // the common metadata race. Some players update MediaSession before media is
+    // ready; others fire loadeddata before updating the title.
     const handleLoadedData = event => {
-        if (isCurrentVideoEvent(event)) checkEpisodeTransition();
+        if (isCurrentVideoEvent(event)) checkEpisodeTransition('loadeddata');
+    };
+    const handleLoadStart = event => {
+        if (!isCurrentVideoEvent(event)) return;
+        cancelPlayPauseCoalesce();
+        checkEpisodeTransition('loadstart');
+    };
+    const handleEmptied = event => {
+        if (!isCurrentVideoEvent(event)) return;
+        cancelPlayPauseCoalesce();
+        checkEpisodeTransition('emptied');
+    };
+    const handleEnded = event => {
+        if (!isCurrentVideoEvent(event) || !_autoSyncEnabled) return;
+        const video = event.currentTarget;
+        ensureEpisodeTransitionCandidate(video, 'ended', {
+            baselineSource: getEpisodeSource(video),
+            nearBoundary: true,
+            transitionLike: true,
+            quarantineEvents: true
+        });
     };
 
     function detachVideoListeners(video) {
@@ -2507,6 +2919,9 @@
             if (handlers.seeking) video.removeEventListener('seeking', handlers.seeking);
             video.removeEventListener('seeked', handlers.seeked);
             video.removeEventListener('loadeddata', handlers.loadeddata);
+            if (handlers.loadstart) video.removeEventListener('loadstart', handlers.loadstart);
+            if (handlers.emptied) video.removeEventListener('emptied', handlers.emptied);
+            if (handlers.ended) video.removeEventListener('ended', handlers.ended);
             if (handlers.waiting) video.removeEventListener('waiting', handlers.waiting);
             delete video._koalaHandlers;
         }
@@ -2517,14 +2932,18 @@
 
     function cancelPendingVideoEvents() {
         if (seekDebounceTimer) { clearTimeout(seekDebounceTimer); seekDebounceTimer = null; }
-        if (playPauseCoalesceTimer) { clearTimeout(playPauseCoalesceTimer); playPauseCoalesceTimer = null; }
-        pendingPlayPauseAction = null;
-        pendingPlayPauseVideo = null;
+        cancelPlayPauseCoalesce();
+        discardEpisodeTransitionQuarantine();
+        clearEpisodeTransitionCandidate();
+        episodeTransitionNoiseVideo = null;
+        episodeTransitionNoiseUntil = 0;
     }
 
     function setupListeners() {
         if (destroyed) return;
         const video = findVideo();
+        const previousVideo = activeVideo;
+        const playerChanged = !!previousVideo && previousVideo !== video;
         if (activeVideo !== video) cancelPendingVideoEvents();
         for (const attached of [...attachedVideos]) {
             if (attached !== video) detachVideoListeners(attached);
@@ -2543,6 +2962,9 @@
                 seeking: handleSeeking,
                 seeked: handleSeeked,
                 loadeddata: handleLoadedData,
+                loadstart: handleLoadStart,
+                emptied: handleEmptied,
+                ended: handleEnded,
                 waiting: handleWaiting
             };
             video.addEventListener('play', handlePlay);
@@ -2550,9 +2972,13 @@
             video.addEventListener('seeking', handleSeeking);
             video.addEventListener('seeked', handleSeeked);
             video.addEventListener('loadeddata', handleLoadedData);
+            video.addEventListener('loadstart', handleLoadStart);
+            video.addEventListener('emptied', handleEmptied);
+            video.addEventListener('ended', handleEnded);
             video.addEventListener('waiting', handleWaiting);
             attachedVideos.add(video);
             video.dataset.koalaAttached = 'true';
+            if (playerChanged) checkEpisodeTransition('player_changed');
             lastVideoSrc = video.currentSrc || video.src || null;
 
             if (!lastKnownMediaTitle) {
@@ -2594,7 +3020,8 @@
 
         if (!video.dataset.koalaAttached || (lastVideoSrc !== undefined && currentSrc && lastVideoSrc !== currentSrc)) {
             if (lastVideoSrc !== undefined && currentSrc && lastVideoSrc !== currentSrc) {
-                checkEpisodeTransition();
+                cancelPlayPauseCoalesce();
+                checkEpisodeTransition('source_changed');
             }
             setupListeners();
         }

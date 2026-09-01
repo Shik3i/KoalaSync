@@ -364,6 +364,9 @@ Otherwise, even a delayed execute is relayed to release paused receivers.
 
 Episode lobby coordination is implemented primarily in the extension. The relay
 tracks enough state to include `activeLobby` in `room_data` for later joiners.
+For compatibility with released extensions, ordinary legacy `play`, `pause`, and
+`seek` events do not cancel an active lobby. Only the existing lobby/Force Sync
+choreography or an explicit `episode_lobby_cancel` ends it.
 
 ### `episode_lobby`
 
@@ -535,36 +538,58 @@ Clients should treat a missing or unknown capabilities list as unsupported.
 ## Episode Sync v2
 
 Relays advertise `"episode-sync-v2"`. Updated clients use the additive
-`episode_sync_v2` event without changing `PROTOCOL_VERSION`; automatic episode
-sync is skipped safely when the relay omits the capability or any current room
-peer did not announce it. Manual Force Sync remains on the legacy event family.
+`episode_sync_v2` event without changing `PROTOCOL_VERSION`. When the relay
+omits the capability, or rejects START because a current peer is legacy, updated
+clients fall back to the released legacy lobby wire. Manual Force Sync remains
+on the legacy event family.
 
 The relay creates the transaction ID, freezes non-desynced participants, owns
 deadlines, and is the only component that advances:
 
 ```text
-start -> lobby/loading -> prepare -> execute
-                         \-> cancel
+start -> lobby/loading -> prepare -> execute/executing -> complete
+          |                  |              |
+          +------------------+--------------+-> cancel
 ```
 
-Client phases are `start`, `loaded`, `prepared`, `failed`, and `cancel`. Relay
-phases are `lobby`, `prepare`, `execute`, and `cancel`. Every post-start frame is
-correlated by `transactionId`; duplicate or stale frames are idempotently
-ignored. No participant is pre-marked loaded. `execute` is emitted exactly once
-only after every frozen participant reports `loaded`, then pauses, seeks to
-0:00, reaches `readyState >= 3`, and remains on the same player/title in paused,
-non-seeking state for `EPISODE_SYNC_V2_STABILITY_MS`.
+`start` carries bounded `expectedTitle` and may carry a sanitized
+`expectedEpisodeId` (`S01E06` or `EP006`). Relay state includes `remainingMs`,
+not an absolute relay wall-clock deadline. Client phases are `start`, `loaded`,
+`prepared`, `executed`, `failed`, `failed_execute`, and `cancel`. Relay phases
+are `lobby`, `prepare`, `execute`, `complete`, and `cancel`. Every post-start
+frame is correlated by `transactionId`; duplicate or stale frames are
+idempotently ignored.
 
-Any timeout, failed player action, participant departure, manual media command,
-room/target change, or explicit cancellation produces `cancel`; v2 never
-executes after a timeout. Peers resume only when that transaction paused a
-previously playing player and no newer local or room action superseded it. A
-superseding room command defines the next state without racing a restoration.
-Peers joining after `start` are excluded from the frozen barrier and receive no
-v2 frames for that transaction. Clients revalidate the complete prepared state
-again immediately before applying `execute`.
+No participant is pre-marked loaded. `execute` is emitted exactly once only
+after every frozen participant reports `loaded`, then pauses, seeks to 0:00,
+reaches `readyState >= 3`, and remains on the same player/episode in paused,
+non-seeking state for `EPISODE_SYNC_V2_STABILITY_MS`. The transaction remains
+in the relay's internal `executing` phase until every participant reports
+`executed`. Only then does the relay commit canonical `playing` at 0:00 and emit
+terminal `complete`.
 
-Legacy episode events remain accepted. A new relay binds their PREPARE, EXECUTE,
-and CANCEL to the accepted lobby initiator, limiting duplicate old-client wire
-actions; an unmodified old non-initiator can still run its own local timeout, so
-full v2 guarantees require capable extensions on every peer.
+Raw `play`, `pause`, and `seek` churn is tolerated during `lobby/loading`, where
+players commonly replace sources. A current client can classify a fresh local
+gesture as `episodeSyncIntent: "manual"`; that command supersedes loading before
+the sanitized media command is relayed. During `prepare`, every such media
+command supersedes the barrier and releases prepared peers. Explicit
+`failed`/`cancel`, Force Sync,
+participant desync/departure, any successful join or reconnect, and every phase
+timeout cancel the transaction. A join always cancels rather than extending the
+frozen participant set or reusing ACKs from an earlier socket. v2 never advances
+to a later phase after a timeout.
+
+If `failed_execute` or the execute-ACK deadline ends `executing`, the relay emits
+`cancel` with `settlePlaybackState: "paused"` and `targetTime: 0`, and commits
+canonical paused state. Clients retain transaction state until `complete` or
+`cancel`, allowing that terminal settlement to reach peers that already started
+playback.
+
+The independent deadlines are 120 seconds for v2 loading, 15 seconds for
+prepare, and 10 seconds for execute acknowledgements. The released legacy lobby
+keeps its 60-second client-side deadline for old/new compatibility.
+
+Legacy episode events remain accepted with their released origin/main wire
+semantics. The relay does not globally bind legacy PREPARE, EXECUTE, or CANCEL
+to one lobby owner because old clients provide no field that distinguishes an
+automatic duplicate from an intentional manual Force Sync.

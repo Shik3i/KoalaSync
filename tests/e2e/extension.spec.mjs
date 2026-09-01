@@ -1598,9 +1598,101 @@ test('completes Episode Sync v2 only after the packed player is stably prepared'
             lobby.transactionId
         );
         expect(execute).toMatchObject({ phase: 'execute', transactionId: lobby.transactionId, targetTime: 0 });
+        await expect.poll(() => relay.rooms.get(roomId)?.episodeSyncV2?.executedPeers || [])
+            .toContain(extensionPeerId);
+        expect(relay.rooms.get(roomId)?.mediaState).toBeNull();
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'executed',
+            transactionId: lobby.transactionId
+        });
+        const complete = await waitForLegacyRelayPhase(
+            coordinator,
+            'episode_sync_v2',
+            'complete',
+            lobby.transactionId
+        );
+        expect(complete.executedPeers).toEqual(expect.arrayContaining([coordinatorPeerId, extensionPeerId]));
         await expect.poll(() => relay.rooms.get(roomId)?.episodeSyncV2).toBeNull();
         await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(false);
         await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeLessThan(3);
+
+        // A peer can fail after this packed player has already started. The
+        // terminal cancel must actively settle it back to paused at 0:00.
+        coordinator.messages.length = 0;
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'start',
+            expectedTitle: 'S1:E6 - Visiting Ours',
+            expectedEpisodeId: 'S01E06'
+        });
+        const rollbackLobby = await waitForLegacyRelayEvent(coordinator, 'episode_sync_v2');
+        expect(rollbackLobby.phase).toBe('lobby');
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'loaded',
+            transactionId: rollbackLobby.transactionId
+        });
+        const rollbackPrepare = await waitForLegacyRelayPhase(
+            coordinator,
+            'episode_sync_v2',
+            'prepare',
+            rollbackLobby.transactionId
+        );
+        expect(rollbackPrepare.loadedPeers).toEqual(expect.arrayContaining([coordinatorPeerId, extensionPeerId]));
+        try {
+            await expect.poll(() => relay.rooms.get(roomId)?.episodeSyncV2?.preparedPeers || [])
+                .toContain(extensionPeerId);
+        } catch (error) {
+            const [logs, playerState] = await Promise.all([
+                getExtensionState(context, extensionId, { type: 'GET_LOGS' }).catch(() => []),
+                page.locator('#player').evaluate(video => ({
+                    paused: video.paused,
+                    currentTime: video.currentTime,
+                    readyState: video.readyState,
+                    seeking: video.seeking
+                }))
+            ]);
+            const transaction = relay.rooms.get(roomId)?.episodeSyncV2;
+            console.error(`Episode v2 rollback prepare diagnostics: ${JSON.stringify({
+                transaction: transaction ? {
+                    transactionId: transaction.transactionId,
+                    phase: transaction.phase,
+                    loadedPeers: transaction.loadedPeers,
+                    preparedPeers: transaction.preparedPeers,
+                    deadlineAt: transaction.deadlineAt
+                } : null,
+                playerState,
+                logs: logs.slice(-20)
+            })}`);
+            throw error;
+        }
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'prepared',
+            transactionId: rollbackLobby.transactionId
+        });
+        await waitForLegacyRelayPhase(
+            coordinator,
+            'episode_sync_v2',
+            'execute',
+            rollbackLobby.transactionId
+        );
+        await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(false);
+        sendLegacyRelayEvent(coordinator, 'episode_sync_v2', {
+            phase: 'failed_execute',
+            transactionId: rollbackLobby.transactionId,
+            reason: 'fixture_failure'
+        });
+        const rollbackCancel = await waitForLegacyRelayPhase(
+            coordinator,
+            'episode_sync_v2',
+            'cancel',
+            rollbackLobby.transactionId
+        );
+        expect(rollbackCancel).toMatchObject({
+            reason: 'execute_failed',
+            settlePlaybackState: 'paused',
+            targetTime: 0
+        });
+        await expect.poll(() => page.locator('#player').evaluate(video => video.paused)).toBe(true);
+        await expect.poll(() => page.locator('#player').evaluate(video => video.currentTime)).toBeLessThan(1);
 
         const legacyForceFrames = coordinator.messages.filter(message => message.startsWith('42') && (() => {
             try { return JSON.parse(message.substring(2))[0].startsWith('force_sync_'); } catch { return false; }

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TARGET_DELAY_WARNING, MAX_MEDIA_TIME, EPISODE_LOBBY_TIMEOUT, EPISODE_SYNC_V2_PREPARE_TIMEOUT } from '../shared/constants.js';
+import { EVENTS, ERROR_CODES, OFFICIAL_SERVER_TOKEN, PROTOCOL_VERSION, CONTROL_MODES, CAPABILITIES, FORCE_SYNC_TARGET_DELAY_WARNING, MAX_MEDIA_TIME, EPISODE_SYNC_V2_LOAD_TIMEOUT, EPISODE_SYNC_V2_PREPARE_TIMEOUT, EPISODE_SYNC_V2_EXECUTE_TIMEOUT } from '../shared/constants.js';
 import { createChatEnvelope } from './chat.js';
 import {
     commitForceSyncMediaState,
@@ -189,13 +189,16 @@ const SEQUENCED_ROOM_EVENTS = new Set([
     EVENTS.FORCE_SYNC_EXECUTE
 ]);
 
-const EPISODE_SYNC_V2_SUPERSEDING_EVENTS = new Set([
-    EVENTS.PLAY,
-    EVENTS.PAUSE,
-    EVENTS.SEEK,
+const EPISODE_SYNC_V2_HARD_SUPERSEDING_EVENTS = new Set([
     EVENTS.FORCE_SYNC_PREPARE,
     EVENTS.FORCE_SYNC_EXECUTE,
     EVENTS.EPISODE_LOBBY
+]);
+
+const EPISODE_SYNC_V2_PREPARE_SUPERSEDING_EVENTS = new Set([
+    EVENTS.PLAY,
+    EVENTS.PAUSE,
+    EVENTS.SEEK
 ]);
 
 // Features this relay supports, advertised to clients in ROOM_DATA so they can
@@ -236,19 +239,33 @@ function clientSupportsEpisodeSyncV2(socket) {
         && socket.data.clientCapabilities.includes(CAPABILITIES.EPISODE_SYNC_V2);
 }
 
+function normalizeExpectedEpisodeId(value) {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toUpperCase().substring(0, 16);
+    return /^(?:S\d{1,4}E\d{1,4}|EP\d{1,6})$/.test(normalized)
+        ? normalized
+        : null;
+}
+
 function publicEpisodeSyncV2(transaction, phase = null) {
     if (!transaction) return null;
-    const publicPhase = phase || (transaction.phase === 'loading' ? 'lobby' : 'prepare');
+    const publicPhase = phase || (transaction.phase === 'loading'
+        ? 'lobby'
+        : (transaction.phase === 'preparing' ? 'prepare' : 'execute'));
     return {
         transactionId: transaction.transactionId,
         phase: publicPhase,
         expectedTitle: transaction.expectedTitle,
+        expectedEpisodeId: transaction.expectedEpisodeId || null,
         initiatorPeerId: transaction.initiatorPeerId,
         participants: [...transaction.participants],
         loadedPeers: [...transaction.loadedPeers],
         preparedPeers: [...transaction.preparedPeers],
+        executedPeers: [...(transaction.executedPeers || [])],
         createdAt: transaction.createdAt,
-        deadlineAt: transaction.deadlineAt,
+        remainingMs: Number.isFinite(transaction.deadlineAt)
+            ? Math.max(0, transaction.deadlineAt - Date.now())
+            : 0,
         revision: transaction.revision
     };
 }
@@ -269,17 +286,30 @@ function clearEpisodeSyncV2Timer(transaction) {
     transaction.timeout = null;
 }
 
-function cancelEpisodeSyncV2(roomId, room, reason, failedPeerId = null) {
+function cancelEpisodeSyncV2(roomId, room, reason, failedPeerId = null, { settlePaused = false } = {}) {
     const transaction = room?.episodeSyncV2;
     if (!transaction) return false;
     clearEpisodeSyncV2Timer(transaction);
+    const shouldSettlePaused = settlePaused || transaction.phase === 'executing';
+    if (shouldSettlePaused) {
+        updateMediaStateFromControl(
+            room,
+            EVENTS.PAUSE,
+            { currentTime: 0, mediaTitle: transaction.expectedTitle },
+            transaction.initiatorPeerId,
+            { now: Date.now(), senderPlaybackState: 'paused', senderMediaTitle: transaction.expectedTitle }
+        );
+    }
     room.episodeSyncV2 = null;
     room.lastEpisodeSyncV2Id = transaction.transactionId;
     emitEpisodeSyncV2ToParticipants(roomId, room, transaction, {
         ...publicEpisodeSyncV2(transaction, 'cancel'),
         senderId: transaction.initiatorPeerId,
         reason: typeof reason === 'string' ? reason.substring(0, 32) : 'cancelled',
-        failedPeerId: typeof failedPeerId === 'string' ? failedPeerId.substring(0, 16) : undefined
+        failedPeerId: typeof failedPeerId === 'string' ? failedPeerId.substring(0, 16) : undefined,
+        settlePlaybackState: shouldSettlePaused ? 'paused' : undefined,
+        targetTime: shouldSettlePaused ? 0 : undefined,
+        remainingMs: 0
     });
     return true;
 }
@@ -289,7 +319,12 @@ function scheduleEpisodeSyncV2Deadline(roomId, room, transaction, timeoutMs) {
     transaction.deadlineAt = Date.now() + timeoutMs;
     transaction.timeout = setTimeout(() => {
         if (room.episodeSyncV2 !== transaction) return;
-        cancelEpisodeSyncV2(roomId, room, transaction.phase === 'loading' ? 'load_timeout' : 'prepare_timeout');
+        const timeoutReason = transaction.phase === 'loading'
+            ? 'load_timeout'
+            : (transaction.phase === 'preparing' ? 'prepare_timeout' : 'execute_timeout');
+        cancelEpisodeSyncV2(roomId, room, timeoutReason, null, {
+            settlePaused: transaction.phase === 'executing'
+        });
     }, timeoutMs);
     transaction.timeout.unref?.();
 }
@@ -306,7 +341,12 @@ export function expireEpisodeSyncV2Transactions(now = Date.now()) {
     for (const [roomId, room] of rooms) {
         const transaction = room.episodeSyncV2;
         if (transaction && Number.isFinite(transaction.deadlineAt) && transaction.deadlineAt <= now) {
-            cancelEpisodeSyncV2(roomId, room, transaction.phase === 'loading' ? 'load_timeout' : 'prepare_timeout');
+            const timeoutReason = transaction.phase === 'loading'
+                ? 'load_timeout'
+                : (transaction.phase === 'preparing' ? 'prepare_timeout' : 'execute_timeout');
+            cancelEpisodeSyncV2(roomId, room, timeoutReason, null, {
+                settlePaused: transaction.phase === 'executing'
+            });
         }
     }
 }
@@ -357,7 +397,7 @@ function removePeerFromRoom(socketId, roomId, reason, { notifyRemainingPeers = t
     // V2 freezes its participant set. Losing any participant invalidates the
     // barrier; continuing with a smaller set could execute before a reconnecting
     // player has actually prepared.
-    if (room.episodeSyncV2?.participants.includes(peerId) && !peerJoinLocks.has(peerId)) {
+    if (room.episodeSyncV2?.participants.includes(peerId)) {
         cancelEpisodeSyncV2(roomId, room, 'participant_left', peerId);
     }
 
@@ -385,10 +425,8 @@ function removePeerFromRoom(socketId, roomId, reason, { notifyRemainingPeers = t
         room.activeLobby.readyPeers = room.activeLobby.readyPeers.filter(id => id !== peerId);
         if (room.peers.size <= 1 || room.activeLobby.initiatorPeerId === peerId) {
             room.activeLobby = null; // Dissolve lobby
-            room.legacyEpisodeSyncOwner = null;
         }
     }
-    if (room.legacyEpisodeSyncOwner === peerId) room.legacyEpisodeSyncOwner = null;
 
     // 3.6. Host Control Mode: if the host left (and isn't still connected via another
     //      socket), fall back to 'everyone' so the room never gets stuck locked, and
@@ -530,6 +568,9 @@ io.on('connection', (socket) => {
             // Cleanup old room if re-joining
             const oldMapping = socketToRoom.get(socket.id);
             if (oldMapping && oldMapping.roomId === roomId && oldMapping.peerId === peerId) {
+                if (rooms.get(roomId)?.episodeSyncV2) {
+                    cancelEpisodeSyncV2(roomId, rooms.get(roomId), 'membership_changed', peerId);
+                }
                 socket.data.clientCapabilities = clientCapabilities;
                 return; // Already in this room with same peerId, ignore to prevent spam
             }
@@ -597,7 +638,6 @@ io.on('connection', (socket) => {
                             // transaction explicitly replaced by newer room playback.
                             forceSyncSuperseded: false,
                             activeLobby: null,
-                            legacyEpisodeSyncOwner: null,
                             episodeSyncV2: null,
                             lastEpisodeSyncV2Id: null
                         };
@@ -644,6 +684,14 @@ io.on('connection', (socket) => {
                     log('ROOM', `Room full (${room.peers.size}/${MAX_PEERS_PER_ROOM}): ${roomId.substring(0, 3)}***`);
                     socket.emit(EVENTS.ERROR, { message: "Room full" });
                     return;
+                }
+
+                // A v2 barrier freezes the exact socket membership at START.
+                // Any successful late join or reconnect invalidates that
+                // snapshot; cancel before dedupe/add so no prepared/executed ACK
+                // from the previous membership can complete the transaction.
+                if (room.episodeSyncV2) {
+                    cancelEpisodeSyncV2(roomId, room, 'membership_changed', peerId);
                 }
 
                 // Peer Deduplication: Remove existing socket for the same peerId
@@ -865,23 +913,20 @@ io.on('connection', (socket) => {
                         return;
                     }
 
-                    // A user/manual legacy command wins over automation. Cancel
-                    // the v2 barrier first so prepared peers can restore safely,
-                    // then relay the newer command normally.
-                    if (room.episodeSyncV2 && EPISODE_SYNC_V2_SUPERSEDING_EVENTS.has(eventName)) {
-                        cancelEpisodeSyncV2(mapping.roomId, room, 'superseded', mapping.peerId);
-                    }
-
-                    // Legacy clients all used to self-promote after lobby ready.
-                    // Preserve their wire contract, but bind the room-wide PREPARE,
-                    // EXECUTE and CANCEL to the accepted lobby owner.
-                    if (room.legacyEpisodeSyncOwner
-                        && (eventName === EVENTS.FORCE_SYNC_PREPARE
-                            || eventName === EVENTS.FORCE_SYNC_EXECUTE
-                            || eventName === EVENTS.EPISODE_LOBBY_CANCEL)
-                        && mapping.peerId !== room.legacyEpisodeSyncOwner) {
-                        log('ROOM', `Dropped legacy episode ${eventName} from non-owner ${mapping.peerId}`);
-                        return;
+                    // Loading deliberately tolerates raw player PLAY/PAUSE/SEEK
+                    // churn from source swaps. During PREPARE those commands are
+                    // newer room intent and release already-paused peers. Force
+                    // Sync and an explicit legacy lobby supersede every phase.
+                    if (room.episodeSyncV2) {
+                        const hardSupersede = EPISODE_SYNC_V2_HARD_SUPERSEDING_EVENTS.has(eventName);
+                        const deliberateLoadingSupersede = room.episodeSyncV2.phase === 'loading'
+                            && data?.episodeSyncIntent === 'manual'
+                            && EPISODE_SYNC_V2_PREPARE_SUPERSEDING_EVENTS.has(eventName);
+                        const prepareSupersede = room.episodeSyncV2.phase === 'preparing'
+                            && EPISODE_SYNC_V2_PREPARE_SUPERSEDING_EVENTS.has(eventName);
+                        if (hardSupersede || deliberateLoadingSupersede || prepareSupersede) {
+                            cancelEpisodeSyncV2(mapping.roomId, room, 'superseded', mapping.peerId);
+                        }
                     }
 
                     const mediaStateNow = Date.now();
@@ -911,16 +956,6 @@ io.on('connection', (socket) => {
                         room.forceSyncSuperseded = true;
                         room.forceSyncInitiator = null;
                         room.forceSyncTarget = null;
-                        if (canonicalStateUpdated) room.legacyEpisodeSyncOwner = null;
-                    }
-                    if (canonicalStateUpdated && room.activeLobby) {
-                        room.activeLobby = null;
-                        room.legacyEpisodeSyncOwner = null;
-                        io.to(mapping.roomId).emit(EVENTS.EPISODE_LOBBY_CANCEL, {
-                            senderId: mapping.peerId,
-                            peerId: mapping.peerId,
-                            reason: 'superseded'
-                        });
                     }
                     if (eventName === EVENTS.FORCE_SYNC_PREPARE) {
                         // A malformed PREPARE must neither pause peers nor grant
@@ -971,7 +1006,6 @@ io.on('connection', (socket) => {
                         room.forceSyncInitiator = null;
                         room.forceSyncTarget = null;
                         room.forceSyncSuperseded = false;
-                        room.legacyEpisodeSyncOwner = null;
                     }
 
                     socket.to(mapping.roomId).emit(eventName, relayPayload);
@@ -983,14 +1017,12 @@ io.on('connection', (socket) => {
                             initiatorPeerId: mapping.peerId,
                             readyPeers: [mapping.peerId]
                         };
-                        room.legacyEpisodeSyncOwner = mapping.peerId;
                     } else if (eventName === EVENTS.EPISODE_READY && room.activeLobby) {
                         if (!room.activeLobby.readyPeers.includes(mapping.peerId)) {
                             room.activeLobby.readyPeers.push(mapping.peerId);
                         }
                     } else if ((eventName === EVENTS.FORCE_SYNC_PREPARE || eventName === EVENTS.FORCE_SYNC_EXECUTE || eventName === EVENTS.EPISODE_LOBBY_CANCEL) && room.activeLobby) {
                         room.activeLobby = null;
-                        if (eventName === EVENTS.EPISODE_LOBBY_CANCEL) room.legacyEpisodeSyncOwner = null;
                     }
                     }
                 }
@@ -1022,6 +1054,7 @@ io.on('connection', (socket) => {
                 const expectedTitle = typeof data.expectedTitle === 'string'
                     ? data.expectedTitle.substring(0, 100)
                     : '';
+                const expectedEpisodeId = normalizeExpectedEpisodeId(data.expectedEpisodeId);
                 const isController = room.controlMode !== CONTROL_MODES.HOST_ONLY
                     || (room.controllers && room.controllers.has(mapping.peerId));
                 const senderData = room.peerData.get(socket.id);
@@ -1030,6 +1063,7 @@ io.on('connection', (socket) => {
                     transactionId: null,
                     senderId: mapping.peerId,
                     expectedTitle,
+                    expectedEpisodeId,
                     reason
                 });
                 if (!expectedTitle) return rejectStart('invalid_title');
@@ -1062,17 +1096,19 @@ io.on('connection', (socket) => {
                     transactionId: crypto.randomUUID(),
                     phase: 'loading',
                     expectedTitle,
+                    expectedEpisodeId,
                     initiatorPeerId: mapping.peerId,
                     participants,
                     loadedPeers: [],
                     preparedPeers: [],
+                    executedPeers: [],
                     createdAt: now,
-                    deadlineAt: now + EPISODE_LOBBY_TIMEOUT,
+                    deadlineAt: now + EPISODE_SYNC_V2_LOAD_TIMEOUT,
                     revision: 1,
                     timeout: null
                 };
                 room.episodeSyncV2 = transaction;
-                scheduleEpisodeSyncV2Deadline(mapping.roomId, room, transaction, EPISODE_LOBBY_TIMEOUT);
+                scheduleEpisodeSyncV2Deadline(mapping.roomId, room, transaction, EPISODE_SYNC_V2_LOAD_TIMEOUT);
                 emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
                     ...publicEpisodeSyncV2(transaction, 'lobby'),
                     senderId: transaction.initiatorPeerId
@@ -1089,7 +1125,19 @@ io.on('connection', (socket) => {
             }
 
             if (phase === 'cancel' || phase === 'failed') {
-                cancelEpisodeSyncV2(mapping.roomId, room, phase === 'failed' ? 'peer_failed' : 'peer_cancelled', mapping.peerId);
+                cancelEpisodeSyncV2(
+                    mapping.roomId,
+                    room,
+                    phase === 'failed' ? 'peer_failed' : 'peer_cancelled',
+                    mapping.peerId
+                );
+                return;
+            }
+
+            if (phase === 'failed_execute' && transaction.phase === 'executing') {
+                cancelEpisodeSyncV2(mapping.roomId, room, 'execute_failed', mapping.peerId, {
+                    settlePaused: true
+                });
                 return;
             }
 
@@ -1129,6 +1177,28 @@ io.on('connection', (socket) => {
                     return;
                 }
 
+                transaction.phase = 'executing';
+                transaction.revision++;
+                scheduleEpisodeSyncV2Deadline(
+                    mapping.roomId,
+                    room,
+                    transaction,
+                    EPISODE_SYNC_V2_EXECUTE_TIMEOUT
+                );
+                emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
+                    ...publicEpisodeSyncV2(transaction, 'execute'),
+                    senderId: transaction.initiatorPeerId,
+                    targetTime: 0
+                });
+                return;
+            }
+
+            if (phase === 'executed' && transaction.phase === 'executing') {
+                if (transaction.executedPeers.includes(mapping.peerId)) return;
+                transaction.executedPeers.push(mapping.peerId);
+                transaction.revision++;
+                if (transaction.executedPeers.length < transaction.participants.length) return;
+
                 clearEpisodeSyncV2Timer(transaction);
                 room.episodeSyncV2 = null;
                 room.lastEpisodeSyncV2Id = transaction.transactionId;
@@ -1143,9 +1213,10 @@ io.on('connection', (socket) => {
                     transaction.expectedTitle
                 );
                 emitEpisodeSyncV2ToParticipants(mapping.roomId, room, transaction, {
-                    ...publicEpisodeSyncV2(transaction, 'execute'),
+                    ...publicEpisodeSyncV2(transaction, 'complete'),
                     senderId: transaction.initiatorPeerId,
-                    targetTime: 0
+                    targetTime: 0,
+                    remainingMs: 0
                 });
             }
         } catch (err) {

@@ -5,6 +5,19 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
+## [v3.2.0] — 2026-09-01
+
+This release makes episode transitions relay-authoritative and safe across mixed
+extension and relay versions.
+
+### Changed
+- **Reliable next-episode sync** — Quarantines automatic source-swap playback noise, waits up to 120 seconds for every participant to load, and commits playback only after every prepared player confirms execution.
+- **Rolling compatibility** — Preserves the released legacy lobby contract for older extensions and relays while keeping new transactions correlated, bounded, and reconnect-safe.
+
+### Fixed
+- **Episode transition races** — Handles title/load event reordering, long metadata titles, clock skew, disconnects, execute failures, and deliberate user controls without freezing or prematurely pausing peers.
+- **Room-exit target cleanup** — Clears stale selected tabs after manual leaves, inactivity removal, and room closure so reinjection works on the next selection.
+
 ## [v3.1.5] — 2026-08-25
 
 This patch fixes room-exit cleanup and excessive popup width.

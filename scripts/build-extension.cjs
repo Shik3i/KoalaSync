@@ -170,6 +170,7 @@ function copyExtensionFiles(targetDir, browserName) {
         const stripped = euContent
           .replace(/^\/\*\*[\s\S]*?\*\/\s*/m, '')
           .replace(/export function /g, 'function ')
+          .replace(/export const /g, 'const ')
           .trim();
         const euRep = `${euStart}\n    // This block is automatically updated by /scripts/build-extension.cjs\n${stripped.split('\n').map(l => '    ' + l).join('\n')}\n    ${euEnd}`;
         content = replaceRequiredBlock(content, euPattern, euRep, 'Episode utils injection');
