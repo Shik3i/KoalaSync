@@ -87,7 +87,7 @@ Compatibility depends on each website's player implementation and can change whe
 
 ## Technical information
 
-- Current website release: 3.1.5
+- Current website release: 3.2.0
 - License: MIT
 - Extension runtime: dependency-free browser extension code
 - Relay: Node.js with Socket.IO-compatible WebSocket messaging
