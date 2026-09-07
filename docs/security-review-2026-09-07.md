@@ -8,7 +8,7 @@ repository review, not evidence of a production deployment.
 
 | Finding | Assessment | Remediation |
 | --- | --- | --- |
-| Dependabot #19, #20, #22, #23: `fast-uri` host normalization | The pinned `3.1.5` is affected. Dependency path: development-only `addons-linter -> ajv -> fast-uri`; not a relay runtime dependency. No application SSRF path was identified. | Update the existing override and lockfile to `3.1.6`, within AJV's `^3.0.1` range. |
+| Dependabot #19, #20, #22, #23: `fast-uri` host normalization | The pinned `3.1.5` is affected. Dependency path: development-only `addons-linter -> ajv -> fast-uri`; not a relay runtime dependency. No application SSRF path was identified. | Update the existing override and lockfile to `3.1.7`, within AJV's `^3.0.1` range. |
 | Dependabot #21: `qs` array-limit bypass | `6.15.3` is affected. The advisory requires comma parsing; KoalaSync does not configure `comma: true`, an extended query parser, or URL-encoded body middleware. Express defaults to its simple query parser. | PR #43 updates the server lockfile to `6.16.0`; merged as `7bac8d48acd695a25efb867312081670a7896e9c`. GitHub subsequently marked #21 fixed. |
 | Additional npm advisory: `qs` attacker-controlled `isBuffer` | A second advisory affects the old server dependency, even though it was absent from the five open GitHub alerts. | Also fixed by `qs@6.16.0`. |
 | Dependabot #16/#17: `image-size` parser loops | Existing GitHub auto-dismissals, not fixed packages. `npm audit` still reports ICNS and JXL/HEIF loop advisories through the development-only `addons-linter`. Current extension icons are repository PNG assets; this is not a production image-upload service. Untrusted build assets remain a relevant boundary. | No patched npm version was available: latest `image-size` was `2.0.2`; latest `addons-linter@10.10.0` still required it. Keep the residual finding explicit. Do not downgrade the AMO validator to `2.21.0` merely to satisfy `npm audit fix --force`. |
@@ -19,10 +19,19 @@ Advisories:
 - [fast-uri repeated decoding](https://github.com/advisories/GHSA-fph4-wmhf-6fwf)
 - [fast-uri IPv6 normalization](https://github.com/advisories/GHSA-f65p-4m7j-42xc)
 - [fast-uri scheme normalization](https://github.com/advisories/GHSA-jqff-g426-hqxp)
+- [fast-uri unclosed authority bracket](https://github.com/fastify/fast-uri/security/advisories/GHSA-58mr-gqgx-xq4g)
+- [fast-uri unvalidated serialized port](https://github.com/fastify/fast-uri/security/advisories/GHSA-qw65-cvwx-89v3)
 - [qs array limits](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx)
 - [qs isBuffer](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g)
 - [image-size ICNS](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr)
 - [image-size JXL/HEIF](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq)
+
+The final pin is `3.1.7`, not the initial `3.1.6` candidate. PR #44's review
+identified two additional maintainer advisories absent from the npm audit
+response. Both were verified against the upstream advisories above. A local
+`3.1.6` reproduction serialized an injected port into a URL targeting a different
+host; `3.1.7` rejects that port. This is why a clean npm result for `fast-uri`
+alone was insufficient evidence for the final version choice.
 
 ## Other GitHub reports
 
