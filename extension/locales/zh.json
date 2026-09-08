@@ -316,5 +316,9 @@
   "DEBUG_YES": "是",
   "DEBUG_NO": "否",
   "DEBUG_YES_CHECKED": "是（已检查）",
-  "DEBUG_NA": "无"
+  "DEBUG_NA": "无",
+  "LABEL_SHARE_VIDEO_URL": "分享视频链接",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "将所选标签页的网址加密分享给房间内的所有人。",
+  "PEER_LINK_OPEN": "打开此参与者的视频",
+  "PEER_LINK_UNAVAILABLE": "视频链接不可用或跳转失败。"
 }

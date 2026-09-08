@@ -1,3 +1,4 @@
+import { normalizePeerUrl } from './peer-links.js';
 import { EVENTS, OFFICIAL_LANDING_PAGE_URL, SUPPORT_URL, getReviewUrl } from './shared/constants.js';
 import {
     BLACKLIST_OVERRIDES_STORAGE_KEY,
@@ -94,6 +95,7 @@ const elements = {
     chatStartMode: document.getElementById('chatStartMode'),
     chatReactionDisplay: document.getElementById('chatReactionDisplay'),
     sendTabTitle: document.getElementById('sendTabTitle'),
+    shareVideoUrl: document.getElementById('shareVideoUrl'),
     mediaTitlePrivacyMode: document.getElementById('mediaTitlePrivacyMode'),
     episodeLobbyCard: document.getElementById('episodeLobbyCard'),
     lobbyTitle: document.getElementById('lobbyTitle'),
@@ -362,7 +364,7 @@ function setRoomRefreshCooldown() {
 async function init() {
     // Local-only by design — settings and room credentials never come from
     // storage.sync (only onboardingComplete + dismissedHints live there).
-    const localData = await chrome.storage.local.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey', 'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username', 'filterNoise', 'autoSyncNextEpisode', 'sendTabTitle', 'mediaTitlePrivacyMode', 'titlePrivacyMode', 'forceSyncMode', 'browserNotifications', 'autoCopyInvite', 'locale', 'audioSettings', 'activeTab', 'themeMode', 'themePalette']);
+    const localData = await chrome.storage.local.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey', 'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username', 'filterNoise', 'autoSyncNextEpisode', 'sendTabTitle', 'shareVideoUrl', 'mediaTitlePrivacyMode', 'titlePrivacyMode', 'forceSyncMode', 'browserNotifications', 'autoCopyInvite', 'locale', 'audioSettings', 'activeTab', 'themeMode', 'themePalette']);
 
     let activeLang = localData.locale;
     if (!activeLang) {
@@ -403,6 +405,7 @@ async function init() {
     syncChatSettingsState();
     const legacyTitlePrivacyMode = Object.values(TITLE_PRIVACY_MODES).includes(localData.titlePrivacyMode) ? localData.titlePrivacyMode : TITLE_PRIVACY_MODES.FULL;
     const mediaTitlePrivacyMode = Object.values(TITLE_PRIVACY_MODES).includes(localData.mediaTitlePrivacyMode) ? localData.mediaTitlePrivacyMode : legacyTitlePrivacyMode;
+    if (elements.shareVideoUrl) elements.shareVideoUrl.checked = localData.shareVideoUrl === true;
     if (elements.sendTabTitle) elements.sendTabTitle.checked = normalizeSendTabTitle(localData.sendTabTitle, legacyTitlePrivacyMode);
     if (elements.mediaTitlePrivacyMode) elements.mediaTitlePrivacyMode.value = mediaTitlePrivacyMode;
     if (elements.forceSyncMode) elements.forceSyncMode.value = localData.forceSyncMode || 'jump-to-others';
@@ -933,6 +936,7 @@ function updatePeerList(peers) {
         id: p.peerId,
         user: p.username,
         tab: p.tabTitle,
+        url: p.tabUrl,
         media: p.mediaTitle,
         state: p.playbackState,
         vol: p.volume,
@@ -979,6 +983,29 @@ function updatePeerList(peers) {
                 nameSpan.textContent = `${avatar} ${pId}`;
             }
 
+            const peerUrl = normalizePeerUrl(p.tabUrl);
+            if (peerUrl && pId !== localPeerId) {
+                nameSpan.setAttribute('role', 'button');
+                nameSpan.tabIndex = 0;
+                nameSpan.title = `${getMessage('PEER_LINK_OPEN')}: ${peerUrl}`;
+                nameSpan.setAttribute('aria-label', `${getMessage('PEER_LINK_OPEN')}: ${pUsername || pId}`);
+                nameSpan.style.cursor = 'pointer';
+                nameSpan.style.textDecoration = 'underline dotted';
+                let opening = false;
+                const openPeer = async () => {
+                    if (opening) return;
+                    opening = true;
+                    try {
+                        const response = await chrome.runtime.sendMessage({ type: 'NAVIGATE_TO_PEER', peerId: pId });
+                        if (!['ok', 'navigating', 'superseded'].includes(response?.status)) showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error');
+                    } catch (_) { showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error'); }
+                    finally { opening = false; }
+                };
+                nameSpan.addEventListener('click', openPeer);
+                nameSpan.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPeer(); }
+                });
+            }
             header.appendChild(nameSpan);
 
             // Right-side badges + actions, kept in one group so they sit together
@@ -1619,6 +1646,12 @@ if (elements.chatStartMode) {
 if (elements.chatReactionDisplay) {
     elements.chatReactionDisplay.addEventListener('change', () => {
         chrome.storage.local.set({ chatReactionDisplay: elements.chatReactionDisplay.value === 'video' ? 'video' : 'chat' });
+    });
+}
+
+if (elements.shareVideoUrl) {
+    elements.shareVideoUrl.addEventListener('change', () => {
+        chrome.storage.local.set({ shareVideoUrl: elements.shareVideoUrl.checked });
     });
 }
 

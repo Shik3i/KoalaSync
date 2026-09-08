@@ -316,5 +316,9 @@
   "DEBUG_YES": "SIM",
   "DEBUG_NO": "NÃO",
   "DEBUG_YES_CHECKED": "SIM (verificado)",
-  "DEBUG_NA": "n/d"
+  "DEBUG_NA": "n/d",
+  "LABEL_SHARE_VIDEO_URL": "Partilhar ligação do vídeo",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Partilhar o URL encriptado do separador selecionado com todos na sala.",
+  "PEER_LINK_OPEN": "Abrir o vídeo deste participante",
+  "PEER_LINK_UNAVAILABLE": "Ligação indisponível ou falha na navegação."
 }

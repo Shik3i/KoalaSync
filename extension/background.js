@@ -6,6 +6,8 @@ import { applyTitlePrivacyToPayload, sanitizeSharedTitle, sanitizeTabTitle, norm
 import { initTabManager } from './modules/tab-manager.js';
 import { clearChatKeyCache, decryptChatMessage, encryptChatMessage, generateChatSecret, validateChatSecret } from './chat-crypto.js';
 import { buildChatRelayPayload, encodeSocketEvent } from './chat-wire.js';
+import { createPeerLinkSession, normalizePeerUrl, readPeerLinkPacket } from './peer-links.js';
+import { createPeerNavigator } from './peer-navigation.js';
 import { createChatEchoTracker, createChatSendLimiter, createLatestTaskQueue, normalizeRoomId, shouldShowChatNotification } from './chat-session.js';
 import { createChatActivityStore } from './chat-activity.js';
 import { canonicalMediaStateFromRoomData, createCanonicalMediaStateTracker } from './canonical-media-state.js';
@@ -284,6 +286,88 @@ const chatSendLimiter = createChatSendLimiter();
 const chatEchoTracker = createChatEchoTracker();
 const chatActivityStore = createChatActivityStore();
 const webJoinCoordinator = createLatestTaskQueue();
+const peerUrls = new Map();
+let linkSession = null;
+let linkSessionIdentity = '';
+let linkTask = Promise.resolve();
+let linkSendTimer = null;
+function peersWithUrls() {
+    return (currentRoom?.peers || []).map(p => ({ ...p, tabUrl: peerUrls.get(p.peerId) || null }));
+}
+function resetPeerLinks() {
+    linkSession?.close();
+    linkSession = null;
+    linkSessionIdentity = '';
+    peerUrls.clear();
+    if (linkSendTimer) clearTimeout(linkSendTimer);
+    linkSendTimer = null;
+}
+function pumpPeerLinks() {
+    if (linkSendTimer || !linkSession?.pending) return;
+    linkSendTimer = setTimeout(() => {
+        linkSendTimer = null;
+        if (!linkSession?.pending || !currentRoom || socket?.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
+        const limit = chatSendLimiter.take();
+        if (limit.allowed) {
+            const ciphertext = linkSession.nextPacket();
+            if (ciphertext) emitLive(EVENTS.CHAT_MESSAGE, { ciphertext });
+        }
+        pumpPeerLinks();
+    }, 1200);
+}
+function updatePeerLinks(packet = null, senderId = null, announce = false) {
+    const expected = connectionGeneration;
+    linkTask = linkTask.catch(() => {}).then(async () => {
+        if (expected !== connectionGeneration || !currentRoom || !serverSupportsChat()) return;
+        const settings = await getSettings();
+        if (expected !== connectionGeneration || !currentRoom || settings.roomId !== currentRoom.roomId) return;
+        const identity = `${expected}|${currentRoom.roomId}|${peerId}|${settings.chatKey}`;
+        if (identity !== linkSessionIdentity) {
+            resetPeerLinks();
+            const session = await createPeerLinkSession({ roomId: currentRoom.roomId, peerId, chatSecret: settings.chatKey,
+                onUrl(id, url) {
+                    if (linkSession !== session) return;
+                    if (url) peerUrls.set(id, url); else peerUrls.delete(id);
+                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
+                }
+            });
+            if (expected !== connectionGeneration || !currentRoom) { session.close(); return; }
+            linkSession = session;
+            linkSessionIdentity = identity;
+            session.announce();
+        }
+        const session = linkSession;
+        session.setPeers(currentRoom.peers.map(p => p.peerId));
+        const selected = normalizeTabId(currentTabId);
+        const { shareVideoUrl } = await chrome.storage.local.get('shareVideoUrl');
+        const tab = selected && shareVideoUrl === true ? await chrome.tabs.get(selected).catch(() => null) : null;
+        if (expected !== connectionGeneration || session !== linkSession) return;
+        const url = selected === normalizeTabId(currentTabId) ? normalizePeerUrl(tab?.url) : null;
+        await session.publish(url);
+        if (url) peerUrls.set(peerId, url); else peerUrls.delete(peerId);
+        if (announce) session.announce();
+        if (packet) await session.receive(senderId, packet).catch(() => {});
+        pumpPeerLinks();
+    }).catch(() => addLog('Peer link exchange unavailable', 'warn'));
+    return linkTask;
+}
+const peerNavigator = createPeerNavigator({
+    api: chrome,
+    getSelection: () => normalizeTabId(userSelectedTabId),
+    getRoomId: () => currentRoom?.roomId || null,
+    select: rememberUserSelection,
+    async suspend() {
+        const tabId = normalizeTabId(currentTabId);
+        invalidateTargetActivations();
+        currentTabId = null;
+        clearCurrentContentTarget();
+        await chrome.storage.session.set({ currentTabId: null });
+        if (tabId) await deactivateTargetTab(tabId);
+        updatePeerLinks();
+    },
+    activate: activateTargetTab,
+    failure: recordUserSelectionFailure
+});
 function serverSupports(cap) { return Array.isArray(serverCapabilities) && serverCapabilities.includes(cap); }
 function serverSupportsChat() {
     return serverSupports(CAPABILITIES.CHAT_V1) || serverSupports(CAPABILITIES.CHAT);
@@ -751,7 +835,7 @@ function updateLocalPeerState(targetPeerId, updates) {
             peer.lastHeartbeat = Date.now(); // reset time interpolation baseline
         }
         if (storageInitialized) chrome.storage.session.set({ currentRoom });
-        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
     }
 }
 
@@ -868,6 +952,7 @@ function resolveServerUrl(settings) {
 }
 
 function forceDisconnect({ preserveEventQueue = false } = {}) {
+    resetPeerLinks();
     connectionGeneration++;
     resetCanonicalMediaRecoveryRetries();
     if (reconnectTimer) {
@@ -1051,6 +1136,11 @@ function sendMessageToContentTab(tabId, message, callback = null) {
     return chrome.tabs.sendMessage(tabId, message);
 }
 
+function isCurrentChatSender(sender) {
+    return normalizeTabId(sender?.tab?.id) === normalizeTabId(currentTabId)
+        && normalizeTabId(currentTabId) !== null && sender.frameId === 0;
+}
+
 function isCurrentContentSender(sender) {
     if (!sender?.tab) return false;
     const senderTabId = normalizeTabId(sender.tab.id);
@@ -1189,6 +1279,8 @@ async function clearTargetSelectionForLifecycle({
     }
 
     resetUserSelectionState();
+    peerNavigator.cancel().catch(() => {});
+    updatePeerLinks();
     // Persist the terminal selection state before any frame messaging or host
     // permission cleanup can yield. A worker stop or a concurrent new target
     // must never resurrect the selection this lifecycle transition removed.
@@ -1603,6 +1695,8 @@ async function connect() {
 
             connectionSocket.onclose = () => {
                 if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                resetPeerLinks();
+                chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
                 // Invalidate any async message handler that began before the
                 // close event and is still suspended at an await boundary.
                 connectionGeneration++;
@@ -1698,7 +1792,10 @@ function broadcastConnectionStatus(status) {
         status = 'idle';
     }
     chrome.runtime.sendMessage({ type: 'CONNECTION_STATUS', status }).catch(() => {});
-    if (currentTabId) sendMessageToCurrentContent({ type: 'CONNECTION_STATUS', status }).catch(() => {});
+    if (currentTabId) {
+        sendMessageToCurrentContent({ type: 'CONNECTION_STATUS', status }).catch(() => {});
+        sendMessageToChatOverlay({ type: 'CONNECTION_STATUS', status }).catch(() => {});
+    }
     updateBadgeStatus();
 }
 
@@ -2361,6 +2458,8 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                 currentRoom.peers = [];
             }
 
+            updatePeerLinks(null, null, true);
+            peerNavigator.resume().catch(() => {});
             const roomPeerIds = new Set(currentRoom.peers.map(candidate => candidate.peerId));
             const authoritativeEpisodeSyncV2 = serverSupports(CAPABILITIES.EPISODE_SYNC_V2)
                 ? normalizeEpisodeSyncV2(data.episodeSyncV2, roomPeerIds)
@@ -2447,7 +2546,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             }
             if (storageInitialized) chrome.storage.session.set({ currentRoom });
             addLog(`Joined Room: ${data?.roomId || 'unknown'}`, 'success');
-            chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: data.peers }).catch(() => {});
+            chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
                         
             // Inform Website Bridge & Popup
             const joinStatusMsg = { type: 'JOIN_STATUS', success: true, message: 'Joined' };
@@ -2504,6 +2603,11 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
             chrome.runtime.sendMessage({ type: 'ROOM_LIST', rooms: data.rooms }).catch(() => {});
             break;
         case EVENTS.CHAT_MESSAGE: {
+            const linkPacket = readPeerLinkPacket(data?.ciphertext);
+            if (linkPacket) {
+                updatePeerLinks(linkPacket, data.senderId);
+                break;
+            }
             if (!currentRoom || !serverSupportsChat() || !currentTabId) break;
             const generation = chatSessionGeneration;
             const roomId = currentRoom.roomId;
@@ -2690,7 +2794,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                     }
                 });
                 if (storageInitialized) chrome.storage.session.set({ currentRoom });
-                chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
             }
 
             routeToContent(event, data);
@@ -2730,7 +2834,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
 
                         currentRoom.peers.push(createPeerData(data));
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
-                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
                         sendChatActivity('joined', data.peerId, Date.now());
                         showNotification(data.username || data.peerId, 'joined');
 
@@ -2745,13 +2849,16 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                             emitEpisodeLobbyForCurrentPrivacy();
                         }
                     }
+                    updatePeerLinks(null, null, true);
                 } else if (data.status === 'left') {
                     const departedDisplayName = chatActivityDisplayName(data.peerId);
                     sendChatActivity('left', data.peerId, Date.now());
                     showNotification(departedDisplayName, 'left');
                     currentRoom.peers = currentRoom.peers.filter(p => (p.peerId || p) !== data.peerId);
+                    peerUrls.delete(data.peerId);
+                    updatePeerLinks();
                     if (storageInitialized) chrome.storage.session.set({ currentRoom });
-                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
 
                     if (episodeLobby) {
                         checkEpisodeLobbyPeerDeparture();
@@ -2797,7 +2904,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                             currentRoom.peers[idx] = createPeerData(data);
                         }
                         if (storageInitialized) chrome.storage.session.set({ currentRoom });
-                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
                         if (episodeLobby) {
                             checkEpisodeLobbyCompletion();
                         }
@@ -2893,7 +3000,7 @@ async function handleServerEvent(event, data, expectedConnectionGeneration = con
                                 candidate.lastReactiveUpdate = Date.now();
                             }
                         });
-                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
                     }
                     clearEpisodeSyncV2State({ notifyContent: false, reason: 'executed' });
                     addLog(`Episode Sync v2 executed for "${completed.expectedTitle}"`, 'success');
@@ -3051,7 +3158,7 @@ function executeForceSync() {
             }
         });
         if (storageInitialized) chrome.storage.session.set({ currentRoom });
-        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
     }
 
     const executionTimestamp = Date.now();
@@ -4449,6 +4556,8 @@ async function activateTargetTab(tabId, tabTitle, {
             return { status: 'superseded' };
         }
         updateBadgeStatus();
+        sendMessageToChatOverlay({ type: 'CHAT_CONTEXT_UPDATE' }).catch(() => {});
+        updatePeerLinks();
         if (currentTargetHasVideo) {
             await tryApplyPendingCanonicalMediaState();
         }
@@ -4722,6 +4831,7 @@ if (chrome.tabs?.onRemoved?.addListener) {
             });
             updateBadgeStatus();
             chrome.runtime.sendMessage({ type: 'TARGET_TAB_CLEARED', tabId }).catch(() => {});
+            updatePeerLinks();
             if (isCurrent) {
                 addLog('Target tab closed.', 'warn');
                 if (currentRoom) {
@@ -4748,7 +4858,7 @@ if (chrome.tabs?.onRemoved?.addListener) {
                             }
                             chrome.runtime.sendMessage({
                                 type: 'PEER_UPDATE',
-                                peers: currentRoom.peers
+                                peers: peersWithUrls()
                             }).catch(() => {});
                         }
                     }).catch(() => {});
@@ -4833,6 +4943,8 @@ async function _routeToContentInternal(tabId, action, payload, actionTimestamp, 
 chrome.alarms.create('keepAlive', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     await ensureState();
+    peerNavigator.resume().catch(() => {});
+    updatePeerLinks();
     if (alarm.name === 'keepAlive') {
         chrome.storage.session.get('keepAlive', () => {});
         if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -4963,6 +5075,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.browserNotifications && currentTabId) {
         sendMessageToChatOverlay({ type: 'CHAT_CONTEXT_UPDATE' }).catch(() => {});
     }
+    if (changes.shareVideoUrl || changes.chatKey) updatePeerLinks();
     if (!changes.roomId && !changes.chatKey && !changes.chatEnabled) return;
     if (changes.chatKey) chatSecretGuard = validateChatSecret(changes.chatKey.newValue);
     invalidateChatSession();
@@ -5080,7 +5193,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         sendResponse({
             status,
             peerId,
-            peers: currentRoom ? currentRoom.peers : [],
+            peers: peersWithUrls(),
             lastActionState,
             targetTabId: publicTargetTabId,
             targetTabTitle: userSelectedTabTitle ?? currentTabTitle,
@@ -5119,7 +5232,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             chatEnabled: settings.chatEnabled
         });
     } else if (message.type === 'GET_CHAT_CONTEXT') {
-        if (!currentRoom || !currentTabId || !isCurrentContentSender(sender)) {
+        if (!currentRoom || !currentTabId || !isCurrentChatSender(sender)) {
             sendResponse({ supported: false, hasKey: false });
             return;
         }
@@ -5129,7 +5242,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         const isCurrentSession = () => generation === chatSessionGeneration
             && currentRoom?.roomId === roomId
             && Number(currentTabId) === tabId
-            && isCurrentContentSender(sender);
+            && isCurrentChatSender(sender);
         const settings = await getSettings();
         const localeData = await chrome.storage.local.get(['locale', 'browserNotifications']);
         await loadLocale(localeData.locale || getSystemLanguage());
@@ -5177,7 +5290,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             }
         });
     } else if (message.type === 'CHAT_SEND') {
-        if (!currentRoom || !currentTabId || !isCurrentContentSender(sender)) {
+        if (!currentRoom || !currentTabId || !isCurrentChatSender(sender)) {
             sendResponse({ status: 'invalid_tab' });
             return;
         }
@@ -5721,6 +5834,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 return;
             }
             const sharedTitles = getSharedTitleFields(settings, heartbeatPayload.mediaTitle);
+            updatePeerLinks();
             const statusPayload = {
                 ...heartbeatPayload,
                 peerId,
@@ -5744,7 +5858,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     me.muted = heartbeatPayload.muted;
                     me.lastHeartbeat = Date.now();
                     if (storageInitialized) chrome.storage.session.set({ currentRoom });
-                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: currentRoom.peers }).catch(() => {});
+                    chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
                 }
             }
             sendResponse({ status: 'ok' });
@@ -5774,7 +5888,13 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             sendResponse(injectionFailureResponse(err));
         });
         return true;
+    } else if (message.type === 'NAVIGATE_TO_PEER') {
+        if (!isExtensionPageSender(sender)) { sendResponse({ status: 'invalid_sender' }); return; }
+        const url = peerUrls.get(message.peerId);
+        const member = currentRoom?.peers.some(p => p.peerId === message.peerId);
+        sendResponse(member && url ? await peerNavigator.navigate(url) : { status: 'unavailable' });
     } else if (message.type === 'SET_TARGET_TAB') {
+        await peerNavigator.cancel();
         await waitForRoomTeardown();
         if (message.tabId === null || message.tabId === undefined || message.tabId === '') {
             await clearTargetSelectionForLifecycle({ markRoomIdle: true });
@@ -6119,3 +6239,10 @@ getSettings().then(settings => {
     connectIntent = !!settings.roomId;
     if (connectIntent) connect();
 }).catch(() => connectIntent = false);
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    ensureState().then(async () => {
+        if (changeInfo.status === 'complete') await peerNavigator.complete(tabId);
+        if (tabId === normalizeTabId(currentTabId) && (changeInfo.url || changeInfo.status === 'complete')) updatePeerLinks();
+    }).catch(() => {});
+});

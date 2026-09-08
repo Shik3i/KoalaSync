@@ -316,5 +316,9 @@
   "DEBUG_YES": "YES",
   "DEBUG_NO": "NO",
   "DEBUG_YES_CHECKED": "YES (checked)",
-  "DEBUG_NA": "n/a"
+  "DEBUG_NA": "n/a",
+  "LABEL_SHARE_VIDEO_URL": "Share video link",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Share the selected tab URL, encrypted, with everyone in the room.",
+  "PEER_LINK_OPEN": "Open this participant’s video",
+  "PEER_LINK_UNAVAILABLE": "Video link unavailable or navigation failed."
 }
