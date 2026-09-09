@@ -316,5 +316,9 @@
   "DEBUG_YES": "ДА",
   "DEBUG_NO": "НЕТ",
   "DEBUG_YES_CHECKED": "ДА (проверено)",
-  "DEBUG_NA": "н/д"
+  "DEBUG_NA": "н/д",
+  "LABEL_SHARE_VIDEO_URL": "Делиться ссылкой на видео",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Передавать зашифрованный адрес выбранной вкладки всем участникам комнаты.",
+  "PEER_LINK_OPEN": "Открыть видео этого участника",
+  "PEER_LINK_UNAVAILABLE": "Ссылка недоступна или переход не удался."
 }

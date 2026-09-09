@@ -316,5 +316,9 @@
   "DEBUG_YES": "SÌ",
   "DEBUG_NO": "NO",
   "DEBUG_YES_CHECKED": "SÌ (verificato)",
-  "DEBUG_NA": "n/d"
+  "DEBUG_NA": "n/d",
+  "LABEL_SHARE_VIDEO_URL": "Condividi link video",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Condividi l’URL cifrato della scheda selezionata con tutti nella stanza.",
+  "PEER_LINK_OPEN": "Apri il video di questo partecipante",
+  "PEER_LINK_UNAVAILABLE": "Link video non disponibile o navigazione non riuscita."
 }

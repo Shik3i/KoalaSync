@@ -316,5 +316,9 @@
   "DEBUG_YES": "예",
   "DEBUG_NO": "아니요",
   "DEBUG_YES_CHECKED": "예(확인됨)",
-  "DEBUG_NA": "없음"
+  "DEBUG_NA": "없음",
+  "LABEL_SHARE_VIDEO_URL": "동영상 링크 공유",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "선택한 탭의 URL을 암호화하여 방의 모든 참가자와 공유합니다.",
+  "PEER_LINK_OPEN": "이 참가자의 동영상 열기",
+  "PEER_LINK_UNAVAILABLE": "동영상 링크를 사용할 수 없거나 이동하지 못했습니다."
 }

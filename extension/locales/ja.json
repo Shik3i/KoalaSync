@@ -316,5 +316,9 @@
   "DEBUG_YES": "はい",
   "DEBUG_NO": "いいえ",
   "DEBUG_YES_CHECKED": "はい（確認済み）",
-  "DEBUG_NA": "なし"
+  "DEBUG_NA": "なし",
+  "LABEL_SHARE_VIDEO_URL": "動画リンクを共有",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "選択したタブのURLを暗号化してルームの全員と共有します。",
+  "PEER_LINK_OPEN": "この参加者の動画を開く",
+  "PEER_LINK_UNAVAILABLE": "動画リンクが利用できないか、移動に失敗しました。"
 }

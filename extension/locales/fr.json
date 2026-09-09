@@ -316,5 +316,9 @@
   "DEBUG_YES": "OUI",
   "DEBUG_NO": "NON",
   "DEBUG_YES_CHECKED": "OUI (vérifié)",
-  "DEBUG_NA": "n/d"
+  "DEBUG_NA": "n/d",
+  "LABEL_SHARE_VIDEO_URL": "Partager le lien vidéo",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Partager l’URL de l’onglet sélectionné, chiffrée, avec tous les participants.",
+  "PEER_LINK_OPEN": "Ouvrir la vidéo de ce participant",
+  "PEER_LINK_UNAVAILABLE": "Lien vidéo indisponible ou échec de navigation."
 }

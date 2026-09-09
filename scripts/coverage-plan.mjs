@@ -17,6 +17,8 @@ export const VITEST_COVERAGE_INCLUDE = Object.freeze([
     'extension/media-frame-target.js',
     'extension/offline-media-intent.js',
     'extension/title-privacy.js',
+    'extension/peer-links.js',
+    'extension/peer-navigation.js',
     'scripts/release-artifact-checks.mjs'
 ]);
 

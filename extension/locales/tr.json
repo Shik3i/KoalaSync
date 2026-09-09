@@ -316,5 +316,9 @@
   "DEBUG_YES": "EVET",
   "DEBUG_NO": "HAYIR",
   "DEBUG_YES_CHECKED": "EVET (kontrol edildi)",
-  "DEBUG_NA": "yok"
+  "DEBUG_NA": "yok",
+  "LABEL_SHARE_VIDEO_URL": "Video bağlantısını paylaş",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Seçili sekmenin URL adresini odadaki herkesle şifreli olarak paylaş.",
+  "PEER_LINK_OPEN": "Bu katılımcının videosunu aç",
+  "PEER_LINK_UNAVAILABLE": "Video bağlantısı kullanılamıyor veya gezinme başarısız oldu."
 }

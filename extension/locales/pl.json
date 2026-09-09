@@ -316,5 +316,9 @@
   "DEBUG_YES": "TAK",
   "DEBUG_NO": "NIE",
   "DEBUG_YES_CHECKED": "TAK (sprawdzono)",
-  "DEBUG_NA": "brak"
+  "DEBUG_NA": "brak",
+  "LABEL_SHARE_VIDEO_URL": "Udostępnij link do filmu",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Udostępnij zaszyfrowany adres wybranej karty wszystkim w pokoju.",
+  "PEER_LINK_OPEN": "Otwórz film tego uczestnika",
+  "PEER_LINK_UNAVAILABLE": "Link niedostępny lub nawigacja nie powiodła się."
 }
