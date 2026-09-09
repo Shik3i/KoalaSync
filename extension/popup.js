@@ -942,7 +942,7 @@ function updatePeerList(peers) {
         vol: p.volume,
         muted: p.muted
     }));
-    const currentPeersJson = JSON.stringify(stateToHash);
+    const currentPeersJson = JSON.stringify([getMessage('PEER_LINK_OPEN'), stateToHash]);
     if (currentPeersJson === lastPeersJson) return;
     lastPeersJson = currentPeersJson;
 

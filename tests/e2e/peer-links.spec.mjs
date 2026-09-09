@@ -22,6 +22,24 @@ async function select(page, url) {
     }, url);
 }
 
+test('video-link privacy setting defaults off and persists through popup reopening', async ({ context, extensionId }) => {
+    const page = await control(context, extensionId);
+    await page.evaluate(() => chrome.storage.sync.set({ onboardingComplete: true }));
+    await page.goto(`chrome-extension://${extensionId}/popup.html`);
+    await page.locator('#tab-settings-button').click();
+    await page.locator('summary[data-i18n="LABEL_PRIVACY_SETTINGS"]').click();
+    await expect(page.locator('#shareVideoUrl')).not.toBeChecked();
+    await expect(page.locator('label[for="shareVideoUrl"]')).toHaveAttribute('title', /.+/);
+    await page.locator('label.toggle-switch:has(#shareVideoUrl)').click();
+    await expect.poll(() => page.evaluate(async () => (await chrome.storage.local.get('shareVideoUrl')).shareVideoUrl)).toBe(true);
+    await page.reload();
+    await page.locator('#tab-settings-button').click();
+    await page.locator('summary[data-i18n="LABEL_PRIVACY_SETTINGS"]').click();
+    await expect(page.locator('#shareVideoUrl')).toBeChecked();
+    await page.locator('label.toggle-switch:has(#shareVideoUrl)').click();
+    await expect.poll(() => page.evaluate(async () => (await chrome.storage.local.get('shareVideoUrl')).shareVideoUrl)).toBe(false);
+});
+
 test('chat appears on first selection and URL clicks work for every peer without invitation keys', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(150000);
     const others = [];
@@ -58,6 +76,18 @@ test('chat appears on first selection and URL clicks work for every peer without
         const popup = await third.context.newPage();
         await popup.goto(`chrome-extension://${third.extensionId}/popup.html`);
         await popup.locator('#tab-sync-button').click();
+        const aliceLink = popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Alice' });
+        await expect(aliceLink).toHaveAttribute('title', `Open this participant’s video: ${aUrl}`);
+        await aliceLink.hover();
+        await popup.keyboard.press('Tab');
+        await aliceLink.focus();
+        await expect(aliceLink).toBeFocused();
+        expect(await aliceLink.evaluate(el => globalThis.getComputedStyle(el).outlineStyle)).toBe('solid');
+        await popup.locator('#tab-settings-button').click();
+        await popup.locator('#langSelector').selectOption('de');
+        await popup.locator('#tab-sync-button').click();
+        await expect(aliceLink).toHaveAttribute('title', `Video dieses Teilnehmers öffnen: ${aUrl}`);
+        await expect(aliceLink).toHaveAttribute('aria-label', 'Video dieses Teilnehmers öffnen: Alice');
         const newPageEvent = third.context.waitForEvent('page');
         await popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Alice' }).click();
         const created = await newPageEvent;
@@ -71,6 +101,12 @@ test('chat appears on first selection and URL clicks work for every peer without
         await expect(created).toHaveURL(bUrl);
         await expect.poll(() => status(pages[2])).toMatchObject({ targetTabId: selectedId, targetReady: true });
         await expect.poll(async () => (await status(pages[0])).peers.find(p => p.username === 'Charlie')?.tabUrl, { timeout: 20000 }).toBe(bUrl);
+        await aliceLink.press('Space');
+        await expect(created).toHaveURL(aUrl);
+        await expect.poll(() => status(pages[2])).toMatchObject({ targetTabId: selectedId, targetReady: true });
+        await popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Bob' }).click();
+        await expect(created).toHaveURL(bUrl);
+        await expect.poll(() => status(pages[2])).toMatchObject({ targetTabId: selectedId, targetReady: true });
 
         // Same-document URL changes are published without reloading the video.
         const updated = `${aUrl}#episode-two`;

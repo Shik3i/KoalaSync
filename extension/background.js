@@ -291,10 +291,19 @@ let linkSession = null;
 let linkSessionIdentity = '';
 let linkTask = Promise.resolve();
 let linkSendTimer = null;
+let linkSharingGeneration = 0;
+let linkSessionGeneration = 0;
+function revokeLocalPeerUrl() {
+    linkSharingGeneration++;
+    peerUrls.delete(peerId);
+    // publish clears an obsolete queued URL synchronously, before encryption.
+    linkSession?.publish(null).then(pumpPeerLinks).catch(() => {});
+}
 function peersWithUrls() {
     return (currentRoom?.peers || []).map(p => ({ ...p, tabUrl: peerUrls.get(p.peerId) || null }));
 }
 function resetPeerLinks() {
+    linkSessionGeneration++;
     linkSession?.close();
     linkSession = null;
     linkSessionIdentity = '';
@@ -304,16 +313,28 @@ function resetPeerLinks() {
 }
 function pumpPeerLinks() {
     if (linkSendTimer || !linkSession?.pending) return;
-    linkSendTimer = setTimeout(() => {
-        linkSendTimer = null;
-        if (!linkSession?.pending || !currentRoom || socket?.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
-        const limit = chatSendLimiter.take();
-        if (limit.allowed) {
-            const ciphertext = linkSession.nextPacket();
-            if (ciphertext) emitLive(EVENTS.CHAT_MESSAGE, { ciphertext });
+    const timer = setTimeout(async () => {
+        const session = linkSession;
+        const expected = connectionGeneration;
+        try {
+            const { shareVideoUrl, roomId } = await chrome.storage.local.get(['shareVideoUrl', 'roomId']);
+            if (!session || session !== linkSession || expected !== connectionGeneration || roomId !== currentRoom?.roomId) return;
+            if (shareVideoUrl !== true || normalizeTabId(currentTabId) !== normalizeTabId(userSelectedTabId)) await session.publish(null);
+            if (session !== linkSession || expected !== connectionGeneration || !session.pending || !currentRoom || socket?.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
+            const limit = chatSendLimiter.take();
+            if (limit.allowed) {
+                const ciphertext = session.nextPacket();
+                if (ciphertext) emitLive(EVENTS.CHAT_MESSAGE, { ciphertext });
+            }
+        } catch (_) { /* Keep the queued packet until settings are readable. */ }
+        finally {
+            if (linkSendTimer === timer) {
+                linkSendTimer = null;
+                pumpPeerLinks();
+            }
         }
-        pumpPeerLinks();
     }, 1200);
+    linkSendTimer = timer;
 }
 function updatePeerLinks(packet = null, senderId = null, announce = false) {
     const expected = connectionGeneration;
@@ -324,6 +345,7 @@ function updatePeerLinks(packet = null, senderId = null, announce = false) {
         const identity = `${expected}|${currentRoom.roomId}|${peerId}|${settings.chatKey}`;
         if (identity !== linkSessionIdentity) {
             resetPeerLinks();
+            const sessionGeneration = linkSessionGeneration;
             const session = await createPeerLinkSession({ roomId: currentRoom.roomId, peerId, chatSecret: settings.chatKey,
                 onUrl(id, url) {
                     if (linkSession !== session) return;
@@ -331,20 +353,25 @@ function updatePeerLinks(packet = null, senderId = null, announce = false) {
                     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: peersWithUrls() }).catch(() => {});
                 }
             });
-            if (expected !== connectionGeneration || !currentRoom) { session.close(); return; }
+            if (expected !== connectionGeneration || !currentRoom || sessionGeneration !== linkSessionGeneration) { session.close(); return; }
             linkSession = session;
             linkSessionIdentity = identity;
             session.announce();
         }
         const session = linkSession;
         session.setPeers(currentRoom.peers.map(p => p.peerId));
+        const sharingGeneration = linkSharingGeneration;
         const selected = normalizeTabId(currentTabId);
         const { shareVideoUrl } = await chrome.storage.local.get('shareVideoUrl');
         const tab = selected && shareVideoUrl === true ? await chrome.tabs.get(selected).catch(() => null) : null;
         if (expected !== connectionGeneration || session !== linkSession) return;
-        const url = selected === normalizeTabId(currentTabId) ? normalizePeerUrl(tab?.url) : null;
-        await session.publish(url);
-        if (url) peerUrls.set(peerId, url); else peerUrls.delete(peerId);
+        if (sharingGeneration === linkSharingGeneration) {
+            const url = selected === normalizeTabId(currentTabId) && selected === normalizeTabId(userSelectedTabId) ? normalizePeerUrl(tab?.url) : null;
+            await session.publish(url);
+            if (sharingGeneration === linkSharingGeneration && session === linkSession) {
+                if (url) peerUrls.set(peerId, url); else peerUrls.delete(peerId);
+            }
+        }
         if (announce) session.announce();
         if (packet) await session.receive(senderId, packet).catch(() => {});
         pumpPeerLinks();
@@ -356,13 +383,17 @@ const peerNavigator = createPeerNavigator({
     getSelection: () => normalizeTabId(userSelectedTabId),
     getRoomId: () => currentRoom?.roomId || null,
     select: rememberUserSelection,
-    async suspend() {
+    async suspend(isCurrent) {
         const tabId = normalizeTabId(currentTabId);
+        const contentTarget = currentContentTarget();
+        revokeLocalPeerUrl();
         invalidateTargetActivations();
+        const expectedGeneration = targetActivationGeneration;
+        const shouldContinue = () => isCurrent() && expectedGeneration === targetActivationGeneration;
         currentTabId = null;
         clearCurrentContentTarget();
         await chrome.storage.session.set({ currentTabId: null });
-        if (tabId) await deactivateTargetTab(tabId);
+        if (tabId && shouldContinue()) await deactivateTargetTab(tabId, contentTarget, { shouldContinue });
         updatePeerLinks();
     },
     activate: activateTargetTab,
@@ -441,7 +472,6 @@ function clearCanonicalMediaRecovery() {
 function invalidateChatSession() {
     chatSessionGeneration++;
     chatReceiveQueue = Promise.resolve();
-    chatSendLimiter.reset();
     chatEchoTracker.reset();
     clearChatKeyCache();
 }
@@ -1633,6 +1663,7 @@ async function connect() {
             // --- Phase 5: Event Listeners ---
             connectionSocket.onopen = () => {
                 if (generation !== connectionGeneration || socket !== connectionSocket) return;
+                chatSendLimiter.reset();
                 reconnectAttempts = 0;
                 reconnectStartTime = null;
                 reconnectFailed = false;
@@ -3773,12 +3804,13 @@ async function deactivateMediaFrameMonitors(tabId) {
     }));
 }
 
-async function deactivateTargetTab(tabId, contentTarget = null, { deactivateMonitor = true } = {}) {
+async function deactivateTargetTab(tabId, contentTarget = null, { deactivateMonitor = true, shouldContinue = () => true } = {}) {
     const normalizedTabId = normalizeTabId(tabId);
-    if (normalizedTabId === null) return;
+    if (normalizedTabId === null || !shouldContinue()) return;
     if (deactivateMonitor) {
         await deactivateMediaFrameMonitors(normalizedTabId);
     }
+    if (!shouldContinue()) return;
     const target = contentTarget
         || (normalizedTabId === normalizeTabId(currentTabId) ? currentContentTarget() : null)
         || (normalizedTabId === normalizeTabId(activeTargetActivation?.tabId)
@@ -3796,6 +3828,7 @@ async function deactivateTargetTab(tabId, contentTarget = null, { deactivateMoni
         null,
         target.documentId
     ).catch(() => {});
+    if (!shouldContinue()) return;
     await sendMessageToFrame(
         normalizedTabId,
         target.frameId,
@@ -3805,6 +3838,7 @@ async function deactivateTargetTab(tabId, contentTarget = null, { deactivateMoni
     ).catch(() => {});
     // The overlay lives in the top document whenever the player is nested, so
     // clearing only the media frame would leave a stale chat behind on Drive.
+    if (!shouldContinue()) return;
     if (normalizeFrameId(target.frameId) !== 0) {
         await sendMessageToFrame(
             normalizedTabId,
@@ -4332,6 +4366,7 @@ function expireStuckActivation() {
 async function rememberUserSelection(tabId, tabTitle) {
     const normalizedTabId = normalizeTabId(tabId);
     if (normalizedTabId === null) return false;
+    if (normalizedTabId !== normalizeTabId(userSelectedTabId)) revokeLocalPeerUrl();
     userSelectedTabId = normalizedTabId;
     userSelectedTabTitle = typeof tabTitle === 'string' ? tabTitle : null;
     userSelectionErrorTabId = null;
@@ -4382,6 +4417,7 @@ async function clearUserSelection(expectedTabId = null) {
 }
 
 function resetUserSelectionState() {
+    revokeLocalPeerUrl();
     userSelectedTabId = null;
     userSelectedTabTitle = null;
     userSelectionErrorTabId = null;
@@ -5075,6 +5111,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.browserNotifications && currentTabId) {
         sendMessageToChatOverlay({ type: 'CHAT_CONTEXT_UPDATE' }).catch(() => {});
     }
+    if (changes.shareVideoUrl) {
+        linkSharingGeneration++;
+        if (changes.shareVideoUrl.newValue !== true) revokeLocalPeerUrl();
+    }
+    if (changes.chatKey || changes.roomId) resetPeerLinks();
     if (changes.shareVideoUrl || changes.chatKey) updatePeerLinks();
     if (!changes.roomId && !changes.chatKey && !changes.chatEnabled) return;
     if (changes.chatKey) chatSecretGuard = validateChatSecret(changes.chatKey.newValue);

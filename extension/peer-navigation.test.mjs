@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import fs from 'node:fs';
+import vm from 'node:vm';
 import { createPeerNavigator } from './peer-navigation.js';
 
 function setup(selected = 1) {
@@ -28,6 +30,48 @@ function setup(selected = 1) {
 }
 
 describe('peer click navigation', () => {
+    it.each(['monitor', 'target'])('stops old cleanup when selection changes during %s deactivation', async phase => {
+        const source = fs.readFileSync(new URL('./background.js', import.meta.url), 'utf8');
+        const start = source.indexOf('async function deactivateTargetTab(');
+        const code = source.slice(start, source.indexOf('\nfunction createHostAccessRequiredError', start));
+        let current = true;
+        const sendMessageToFrame = vi.fn(async () => { if (phase === 'target') current = false; });
+        const env = {
+            normalizeTabId: id => id, normalizeFrameId: id => id,
+            deactivateMediaFrameMonitors: async () => { if (phase === 'monitor') current = false; },
+            resetAudioProcessingInTab: vi.fn(), sendMessageToFrame,
+            shouldContinue: () => current
+        };
+        await vm.runInNewContext(code + '\ndeactivateTargetTab(1, { frameId: 2 }, { shouldContinue });', env);
+        expect(sendMessageToFrame.mock.calls.some(call => call[2].type === 'CHAT_DESTROY')).toBe(false);
+        expect(sendMessageToFrame).toHaveBeenCalledTimes(phase === 'monitor' ? 0 : 1);
+    });
+    it('ignores a late tab error after switching rooms', async () => {
+        const h = setup();
+        await h.navigator.navigate('https://example.org/new');
+        h.api.tabs.get.mockImplementationOnce(async () => { h.setRoom('other'); throw new Error('Tab closed'); });
+        await h.navigator.complete(1);
+        expect(h.failure).not.toHaveBeenCalled();
+    });
+    it('does not override a selection made while creating the new tab', async () => {
+        const h = setup(null);
+        h.api.tabs.create.mockImplementationOnce(async () => { h.setSelection(3); return { id: 2 }; });
+        expect(await h.navigator.navigate('https://example.org/new')).toMatchObject({ status: 'superseded' });
+        expect(h.options.getSelection()).toBe(3);
+        expect(h.suspend).not.toHaveBeenCalled();
+        expect(h.api.tabs.update).not.toHaveBeenCalled();
+    });
+    it.each(['room', 'selection'])('revalidates %s after the browser tab lookup', async changed => {
+        const h = setup();
+        await h.navigator.navigate('https://example.org/new');
+        h.tabs.get(1).status = 'complete';
+        h.api.tabs.get.mockImplementationOnce(async () => {
+            if (changed === 'room') h.setRoom('other'); else h.setSelection(2);
+            return { ...h.tabs.get(1) };
+        });
+        await h.navigator.complete(1);
+        expect(h.activate).not.toHaveBeenCalled();
+    });
     it.each([1, null])('navigates and activates the requested target, selection=%s', async selection => {
         const h = setup(selection);
         const response = await h.navigator.navigate('https://example.org/new');

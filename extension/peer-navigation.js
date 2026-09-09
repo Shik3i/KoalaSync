@@ -8,6 +8,8 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
     let queuedCompletion = null;
     let starting = null;
     const key = 'pendingPeerNavigation';
+    const isCurrent = (job, expected) => expected === generation
+        && job.roomId === getRoomId() && job.tabId === getSelection();
     async function cancel() {
         const token = ++generation;
         await api.storage.session.remove(key);
@@ -17,8 +19,9 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
         if (completing) { queuedCompletion = tabId; return; }
         completing = true;
         const expected = generation;
+        let job;
         try {
-            const job = (await api.storage.session.get(key))[key];
+            job = (await api.storage.session.get(key))[key];
             if (!job || job.tabId !== tabId) return;
             if (expected !== generation) return;
             if (job.roomId !== getRoomId() || job.tabId !== getSelection()) {
@@ -28,15 +31,15 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
             if (now() - job.started > 45000) throw new Error('Peer navigation timed out');
             if (!job.issued) return;
             const tab = await api.tabs.get(tabId);
-            if (expected !== generation) return;
+            if (!isCurrent(job, expected)) return;
             if (tab.status !== 'complete' || tab.url === 'about:blank' || tab.pendingUrl) return;
             if (!normalizePeerUrl(tab.url)) throw new Error('Invalid navigation destination');
             const response = await activate(tabId, tab.title || null);
-            if (expected !== generation) return;
+            if (!isCurrent(job, expected)) return;
             await api.storage.session.remove(key);
             if (response.status !== 'ok' && response.status !== 'superseded') await failure(tabId, response);
         } catch (error) {
-            if (expected === generation) {
+            if (job && isCurrent(job, expected)) {
                 await api.storage.session.remove(key);
                 await failure(tabId, error);
             }
@@ -59,10 +62,10 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
                 && now() - job.started <= 45000 && normalizePeerUrl(job.url)) {
                 try {
                     await api.tabs.update(job.tabId, { url: job.url, active: true });
-                    if (expected !== generation) return;
+                    if (!isCurrent(job, expected)) return;
                     await api.storage.session.set({ [key]: { ...job, issued: true } });
                 } catch (error) {
-                    if (expected === generation) {
+                    if (isCurrent(job, expected)) {
                         await api.storage.session.remove(key);
                         await failure(job.tabId, error);
                     }
@@ -78,26 +81,30 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
             if (expected !== generation) return { status: 'superseded' };
             const roomId = getRoomId();
             let tabId = getSelection();
+            let expectedSelection = tabId;
+            const current = () => expected === generation && roomId === getRoomId() && expectedSelection === getSelection();
             starting = expected;
             try {
+                const originalSelection = tabId;
                 let tab = tabId ? await api.tabs.get(tabId).catch(() => null) : null;
-                if (expected !== generation || roomId !== getRoomId()) return { status: 'superseded' };
+                if (expected !== generation || roomId !== getRoomId() || originalSelection !== getSelection()) return { status: 'superseded' };
                 if (!tab) tab = await api.tabs.create({ url: 'about:blank', active: true });
                 tabId = tab.id;
-                if (expected !== generation || roomId !== getRoomId()) return { status: 'superseded' };
-                await suspend();
-                if (expected !== generation || roomId !== getRoomId()) return { status: 'superseded' };
+                if (!current()) return { status: 'superseded' };
+                await suspend(current);
+                if (!current()) return { status: 'superseded' };
+                expectedSelection = tabId;
                 await select(tabId, tab.title || null);
-                if (expected !== generation || roomId !== getRoomId()) return { status: 'superseded' };
+                if (!current()) return { status: 'superseded' };
                 await api.storage.session.set({ [key]: { tabId, roomId, started: now(), url } });
-                if (expected !== generation || roomId !== getRoomId()) return { status: 'superseded' };
+                if (!current()) return { status: 'superseded' };
                 await api.tabs.update(tabId, tab.url === url ? { active: true } : { url, active: true });
-                if (expected !== generation || roomId !== getRoomId()) return { status: 'superseded' };
+                if (!current()) return { status: 'superseded' };
                 await api.storage.session.set({ [key]: { tabId, roomId, started: now(), url, issued: true } });
                 await complete(tabId);
                 return { status: 'navigating', tabId };
             } catch (error) {
-                if (expected === generation) {
+                if (current()) {
                     await api.storage.session.remove(key);
                     if (tabId) await failure(tabId, error);
                 }

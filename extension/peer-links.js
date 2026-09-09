@@ -80,9 +80,19 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
         entry.revision = value.r;
         onUrl(id, value.u);
     }
+    async function queueUrl() {
+        const expectedRevision = revision;
+        const c = await encrypt(senderKey, { r: revision, u: url }, aad(peerId, epoch, 'url'));
+        if (expectedRevision === revision) queue('url', { t: 'url', s: epoch, c });
+    }
     async function sendKey(id, entry) {
-        const c = await encrypt(entry.pair, { k: encode(senderRaw), r: revision, u: url }, aad(peerId, epoch, 'key', `${id}|${entry.epoch}`));
-        if (peers.get(id) === entry) queue(`key:${id}`, { t: 'key', s: epoch, to: id, d: entry.epoch, c });
+        // Key distribution must never retain a URL that can subsequently be
+        // withdrawn. The separately coalesced URL frame supplies late joiners.
+        const c = await encrypt(entry.pair, { k: encode(senderRaw) }, aad(peerId, epoch, 'key', `${id}|${entry.epoch}`));
+        if (peers.get(id) === entry) {
+            queue(`key:${id}`, { t: 'key', s: epoch, to: id, d: entry.epoch, c });
+            await queueUrl();
+        }
     }
     async function receive(id, packet) {
         if (closed || !members.has(id) || id === peerId || !packet || typeof packet.s !== 'string' || !/^[\w-]{22}$/.test(packet.s)) return;
@@ -106,7 +116,6 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
             const raw = decode(value.k);
             if (raw.length !== 32) return;
             entry.key = await subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
-            accept(id, entry, value);
             if (entry.pending) {
                 const pending = entry.pending;
                 entry.pending = null;
@@ -133,14 +142,18 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
             if (next === url || closed) return;
             url = next;
             revision++;
-            queue('url', { t: 'url', s: epoch, c: await encrypt(senderKey, { r: revision, u: url }, aad(peerId, epoch, 'url')) });
+            outbox.delete('url');
+            await queueUrl();
         },
         receive,
         nextPacket() {
-            const next = outbox.entries().next().value;
-            if (!next) return null;
-            outbox.delete(next[0]);
-            return next[1];
+            // Public identity must precede keys, and keys must precede URLs.
+            const id = outbox.has('hello') ? 'hello'
+                : [...outbox.keys()].find(key => key.startsWith('key:')) || (outbox.has('url') ? 'url' : null);
+            if (id === null) return null;
+            const packet = outbox.get(id);
+            outbox.delete(id);
+            return packet;
         },
         get pending() { return outbox.size > 0; },
         close() { closed = true; outbox.clear(); peers.clear(); members.clear(); senderRaw.fill(0); }
