@@ -37,7 +37,7 @@
     "fs-extra": "^11.4.0",
     "htmlnano": "^3.4.0",
     "sharp": "^0.35.3",
-    "svgo": "^4.0.2",
+    "svgo": "^4.1.0",
     "vitest": "^4.1.10"
   },
   "overrides": {
