@@ -84,6 +84,30 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
         release(); await updating;
         expect(h.session.publish.mock.calls).toEqual([[null]]);
     });
+    it('stays inert when the relay does not advertise chat support', async () => {
+        const h = backgroundHarness();
+        const create = vi.fn(async () => h.session);
+        h.env.createPeerLinkSession = create;
+        h.env.serverSupportsChat = () => false;
+        await h.updatePeerLinks();
+        expect(create).not.toHaveBeenCalled();
+        expect(h.env.chrome.tabs.get).not.toHaveBeenCalled();
+        expect(h.env.emitLive).not.toHaveBeenCalled();
+    });
+    it.each([undefined, false, 'true', 1])('never reads the tab URL unless sharing is exactly enabled (%s)', async value => {
+        const h = backgroundHarness();
+        h.env.chrome.storage.local.get.mockResolvedValue({ roomId: 'room', shareVideoUrl: value });
+        await h.updatePeerLinks();
+        expect(h.env.chrome.tabs.get).not.toHaveBeenCalled();
+        expect(h.session.publish).toHaveBeenCalledWith(null);
+        expect(h.session.publish).not.toHaveBeenCalledWith(expect.any(String));
+    });
+    it('publishes the tab URL once sharing is enabled (control)', async () => {
+        const h = backgroundHarness();
+        await h.updatePeerLinks();
+        expect(h.env.chrome.tabs.get).toHaveBeenCalledOnce();
+        expect(h.session.publish).toHaveBeenCalledWith('https://example.org/private');
+    });
     it('checks the persisted privacy setting again before dispatching a queued URL', async () => {
         const h = backgroundHarness();
         await h.updatePeerLinks();

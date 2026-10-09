@@ -2,6 +2,20 @@ import { normalizePeerUrl } from './peer-links.js';
 
 // The job is stored before navigation. Closing the popup or restarting the
 // service worker cannot lose the user's target selection.
+//
+// A job that was stored but whose navigation was never issued (the worker died
+// in between) expires quickly. An issued navigation is given generously long to
+// load, since slow pages still end up activated; every competing action
+// (selection, room change, closing the tab) cancels the job immediately. After
+// the grace period the page must still be on the peer's site: a tab that has
+// since been taken somewhere else by the user is not activated.
+const UNISSUED_JOB_TTL_MS = 45000;
+const LOAD_GRACE_MS = 45000;
+const MAX_LOAD_MS = 5 * 60000;
+const expired = (job, current) => current - job.started > (job.issued ? MAX_LOAD_MS : UNISSUED_JOB_TTL_MS);
+const sameOrigin = (left, right) => {
+    try { return new URL(left).origin === new URL(right).origin; } catch (_) { return false; }
+};
 export function createPeerNavigator({ api, getSelection, getRoomId, select, suspend, activate, failure, now = () => Date.now() }) {
     let generation = 0;
     let completing = false;
@@ -28,12 +42,13 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
                 await cancel();
                 return;
             }
-            if (now() - job.started > 45000) throw new Error('Peer navigation timed out');
+            if (expired(job, now())) throw new Error('Peer navigation timed out');
             if (!job.issued) return;
             const tab = await api.tabs.get(tabId);
             if (!isCurrent(job, expected)) return;
             if (tab.status !== 'complete' || tab.url === 'about:blank' || tab.pendingUrl) return;
             if (!normalizePeerUrl(tab.url)) throw new Error('Invalid navigation destination');
+            if (now() - job.started > LOAD_GRACE_MS && !sameOrigin(tab.url, job.url)) throw new Error('Peer navigation timed out');
             const response = await activate(tabId, tab.title || null);
             if (!isCurrent(job, expected)) return;
             await api.storage.session.remove(key);
@@ -59,7 +74,7 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
             const job = (await api.storage.session.get(key))[key];
             if (!job || expected !== generation) return;
             if (!job.issued && job.roomId === getRoomId() && job.tabId === getSelection()
-                && now() - job.started <= 45000 && normalizePeerUrl(job.url)) {
+                && !expired(job, now()) && normalizePeerUrl(job.url)) {
                 try {
                     await api.tabs.update(job.tabId, { url: job.url, active: true });
                     if (!isCurrent(job, expected)) return;

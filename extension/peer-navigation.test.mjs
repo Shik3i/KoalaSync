@@ -124,13 +124,69 @@ describe('peer click navigation', () => {
     it('bounds load time and reports a closed or forbidden destination', async () => {
         for (const mode of ['timeout', 'closed', 'forbidden']) {
             const h = setup(); await h.navigator.navigate('https://example.org/new');
-            if (mode === 'timeout') h.setTime(50000);
+            if (mode === 'timeout') h.setTime(100 + 5 * 60000 + 1);
             if (mode === 'closed') h.tabs.clear();
             if (mode === 'forbidden') Object.assign(h.tabs.get(1), { status: 'complete', url: 'chrome://settings' });
             await h.navigator.complete(1);
             expect(h.failure).toHaveBeenCalledOnce();
             expect(h.storage.pendingPeerNavigation).toBeUndefined();
         }
+    });
+    it('still activates a slow page that finishes loading after 45 seconds', async () => {
+        const h = setup(); await h.navigator.navigate('https://example.org/new');
+        h.setTime(100 + 46000);
+        await h.navigator.complete(1);
+        await createPeerNavigator(h.options).resume();
+        expect(h.failure).not.toHaveBeenCalled();
+        expect(h.activate).not.toHaveBeenCalled();
+        expect(h.storage.pendingPeerNavigation).toBeDefined();
+        h.setTime(100 + 120000);
+        h.tabs.get(1).status = 'complete';
+        await h.navigator.complete(1);
+        expect(h.activate).toHaveBeenCalledOnce();
+        expect(h.failure).not.toHaveBeenCalled();
+        expect(h.storage.pendingPeerNavigation).toBeUndefined();
+    });
+    it('does not activate a slow tab that was taken to another site in the meantime', async () => {
+        const h = setup(); await h.navigator.navigate('https://example.org/new');
+        h.setTime(100 + 120000);
+        Object.assign(h.tabs.get(1), { status: 'complete', url: 'https://other.example.net/elsewhere' });
+        await h.navigator.complete(1);
+        expect(h.activate).not.toHaveBeenCalled();
+        expect(h.failure).toHaveBeenCalledOnce();
+        expect(h.storage.pendingPeerNavigation).toBeUndefined();
+    });
+    it('still follows a redirect while the page loads within the grace period', async () => {
+        const h = setup(); await h.navigator.navigate('https://example.org/new');
+        h.setTime(100 + 20000);
+        Object.assign(h.tabs.get(1), { status: 'complete', url: 'https://login.example.net/redirected' });
+        await h.navigator.complete(1);
+        expect(h.activate).toHaveBeenCalledOnce();
+    });
+    it('reports a navigation that never finishes through the keep-alive resume', async () => {
+        const h = setup(); await h.navigator.navigate('https://example.org/new');
+        h.setTime(100 + 5 * 60000 + 1);
+        await createPeerNavigator(h.options).resume();
+        expect(h.failure).toHaveBeenCalledOnce();
+        expect(h.storage.pendingPeerNavigation).toBeUndefined();
+    });
+    it('expires a job whose navigation was never issued', async () => {
+        const h = setup();
+        h.storage.pendingPeerNavigation = { tabId: 1, roomId: 'room', started: 100, url: 'https://example.org/new' };
+        h.setTime(100 + 46000);
+        await h.navigator.resume();
+        expect(h.api.tabs.update).not.toHaveBeenCalled();
+        expect(h.failure).toHaveBeenCalledOnce();
+        expect(h.storage.pendingPeerNavigation).toBeUndefined();
+    });
+    it('does not let a slow job outlive a competing action', async () => {
+        const h = setup(); await h.navigator.navigate('https://example.org/new');
+        h.setTime(100 + 200000);
+        await h.navigator.cancel();
+        h.tabs.get(1).status = 'complete';
+        await h.navigator.complete(1);
+        expect(h.activate).not.toHaveBeenCalled();
+        expect(h.storage.pendingPeerNavigation).toBeUndefined();
     });
     it('retains access errors for the existing site-access flow', async () => {
         const h = setup(); h.activate.mockResolvedValue({ status: 'host_permission_required' });
