@@ -318,7 +318,7 @@
   "DEBUG_YES_CHECKED": "JA (geprüft)",
   "DEBUG_NA": "k. A.",
   "LABEL_SHARE_VIDEO_URL": "Video-Link teilen",
-  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Die URL des ausgewählten Tabs verschlüsselt mit allen im Raum teilen.",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Die vollständige URL des ausgewählten Tabs (inkl. Query und Fragment) verschlüsselt mit allen im Raum teilen. Standardmäßig aus.",
   "PEER_LINK_OPEN": "Video dieses Teilnehmers öffnen",
   "PEER_LINK_UNAVAILABLE": "Video-Link nicht verfügbar oder Navigation fehlgeschlagen."
 }

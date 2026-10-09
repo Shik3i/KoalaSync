@@ -318,7 +318,7 @@
   "DEBUG_YES_CHECKED": "YES (checked)",
   "DEBUG_NA": "n/a",
   "LABEL_SHARE_VIDEO_URL": "Share video link",
-  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Share the selected tab URL, encrypted, with everyone in the room.",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Share the full URL of the selected tab, including any query and fragment, encrypted, with everyone in the room. Off by default.",
   "PEER_LINK_OPEN": "Open this participant’s video",
   "PEER_LINK_UNAVAILABLE": "Video link unavailable or navigation failed."
 }

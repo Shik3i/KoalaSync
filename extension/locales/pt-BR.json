@@ -318,7 +318,7 @@
   "DEBUG_YES_CHECKED": "SIM (verificado)",
   "DEBUG_NA": "n/d",
   "LABEL_SHARE_VIDEO_URL": "Compartilhar link do vídeo",
-  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Compartilhar a URL criptografada da aba selecionada com todos na sala.",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Compartilhar com todos na sala a URL completa da aba selecionada (com parâmetros e fragmento), criptografada. Desativado por padrão.",
   "PEER_LINK_OPEN": "Abrir o vídeo deste participante",
   "PEER_LINK_UNAVAILABLE": "Link indisponível ou falha na navegação."
 }

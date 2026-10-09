@@ -9,6 +9,7 @@ KoalaSync is designed with a **Security-First & Volatile** architecture. This me
 ## 1. Data Processing (In-Memory Only)
 KoalaSync does not use a database. All active session data exists only in the server's RAM and is purged immediately when no longer needed.
 - **Session Data**: To synchronize playback, the server must temporarily hold your `peerId` and `username`. By default, KoalaSync also shares the selected tab title and media title with the room so peers can identify matching videos and coordinate episode transitions. Privacy Settings let you disable sending the tab title separately, and choose whether media titles are sent in full, reduced to a detected episode identifier (for example `S01E04`), or not sent. Playback metadata (`playbackState`, `currentTime`, `volume`, `muted`) is held per peer for the duration of the session. All of this is deleted as soon as you leave the room.
+- **Shared Video Link (opt-in, off by default)**: If you enable *Settings → Privacy → Share video link*, the extension shares the full URL of your selected tab, including any query string and fragment, with the other participants of the room. Only HTTP(S) URLs up to 900 bytes are shared. The URL is encrypted in your browser and travels through the relay as opaque ciphertext inside the existing chat message envelope; the relay cannot read it, stores it nowhere, and discards it like any other relayed message. This works even when the chat display is turned off. Room participants can read the URL, so do not enable it for pages whose address contains private tokens. Turning the option off, switching tabs, or leaving the room withdraws the link. When all participants share the invitation's chat secret, the key exchange cannot be read by the relay. Participants without that secret use an automatic key exchange that does not protect against an actively malicious relay.
 - **Room Passwords**: If you set a room password, it is stored only as an in-memory **keyed SHA-256 HMAC hash**. The server receives the plaintext password only during join validation, never stores it, and keeps only the hash for the short room lifetime.
 - **Routing Maps**: The server maintains ephemeral lookup tables (`socketToRoom`, `peerToSocket`) to route messages between peers. These contain only transport identifiers and are purged on disconnect.
 
@@ -16,6 +17,7 @@ KoalaSync does not use a database. All active session data exists only in the se
 | Data Type | Maximum Retention | Trigger for Deletion |
 |:----------|:------------------|:---------------------|
 | Session data (peerId, username, video metadata) | Duration of session | User leaves room or disconnects |
+| Shared video link (opt-in; ciphertext only, never stored by the relay) | Not stored; relayed once | Delivered or dropped immediately |
 | Room state | 2 hours max | Last peer leaves, or inactivity timeout |
 | Auth failure records (lockout after 5 failed attempts) | 15 minutes | Periodic cleanup |
 | Connection rate-limit counters | 60 seconds | Automatic expiry |

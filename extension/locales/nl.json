@@ -318,7 +318,7 @@
   "DEBUG_YES_CHECKED": "JA (gecontroleerd)",
   "DEBUG_NA": "n.v.t.",
   "LABEL_SHARE_VIDEO_URL": "Videolink delen",
-  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Deel de URL van het geselecteerde tabblad versleuteld met iedereen in de kamer.",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Deel de volledige URL van het geselecteerde tabblad (inclusief query en fragment) versleuteld met iedereen in de kamer. Standaard uit.",
   "PEER_LINK_OPEN": "Video van deze deelnemer openen",
   "PEER_LINK_UNAVAILABLE": "Videolink niet beschikbaar of navigatie mislukt."
 }

@@ -102,4 +102,31 @@ the stamped value as AAD.
 - New extensions accept the first beta's unversioned server `chat` capability as
   well as `chat-v1`, so a server-first or extension-first rollout degrades safely.
 
+## Peer-link subprotocol (extension only)
+
+The optional *Share video link* setting reuses the opaque chat envelope; the
+relay and its capability negotiation are unchanged. Link frames are ordinary
+`chat_message` ciphertexts (29 to 2028 bytes) whose plaintext starts with
+`KoalaSyncLinks1:` followed by JSON. Current extensions consume them before chat
+decryption. Older chat clients cannot authenticate them and discard them as
+failed chat messages. They work even when the chat display is off.
+
+- `hello`: a per-session random epoch, an ephemeral P-256 public key and a tag
+  (the first 16 bytes of SHA-256 over `roomId|chatSecret`, empty without a secret).
+- `gkey`: sent once per session to every peer whose tag matches. It carries the
+  sender's random AES-GCM key wrapped under an HKDF group key derived from the chat
+  secret (info `KoalaSyncLinks1 group key`). Handshake cost is therefore constant
+  per participant.
+- `key`: a per-pair fallback for peers without a matching secret. The sender key is
+  wrapped under an ECDH-derived key. The relay cannot read it, but without the
+  shared secret an actively malicious relay can substitute the public keys.
+- `url`: `{r: revision, u: url|null}` encrypted under the sender key, with
+  room, sender and epoch bound as additional authenticated data.
+
+Only HTTP(S) URLs up to 900 bytes without credentials are shared; the query string
+and fragment are kept because they identify the video. A withdrawal (`u: null`)
+overtakes queued handshake frames. Link frames share the relay's per-socket chat
+budget: the client sends them only while at least four of the ten slots per window
+remain free for user chat.
+
 Peer removal and role management are outside chat scope.

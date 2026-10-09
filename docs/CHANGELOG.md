@@ -5,6 +5,14 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
+## Unreleased
+
+### Added
+- **Extension: Optional shared video links** — Participants can opt in under Settings → Privacy → Share video link. Everyone in the room can then open a peer's page by clicking their name in the participant list, in the selected tab or a new one. URLs travel encrypted through the existing relay chat envelope, so no relay change is required; only HTTP(S) URLs up to 900 bytes are shared, including query string and fragment. Peers that share the invitation's chat secret exchange keys in a constant number of frames per participant.
+
+### Fixed
+- **Extension: Chat available immediately after selecting a player** — The chat overlay now activates at once for top-level and embedded players instead of after a reselection or reload.
+
 ## [v3.2.0] — 2026-09-01
 
 This release makes episode transitions relay-authoritative and safe across mixed
