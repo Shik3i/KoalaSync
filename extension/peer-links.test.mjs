@@ -66,7 +66,7 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
                 tabs: { get: vi.fn(async () => ({ url: 'https://example.org/private' })) },
                 runtime: { sendMessage: async () => {} } },
             socket: { readyState: 1 }, WebSocket: { OPEN: 1 }, isNamespaceJoined: true,
-            chatSendLimiter: { take: () => ({ allowed: true }) }, EVENTS: { CHAT_MESSAGE: 'chat' }, emitLive: vi.fn()
+            chatSendLimiter: { take: () => ({ allowed: true }) }, PEER_LINK_CHAT_RESERVE: 4, EVENTS: { CHAT_MESSAGE: 'chat' }, emitLive: vi.fn()
         };
         vm.runInNewContext(block + '\nglobalThis.harness = { updatePeerLinks, revokeLocalPeerUrl };', env);
         return { ...env.harness, env, session, callbacks };
@@ -160,6 +160,95 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
             expect(Buffer.from(frame.ciphertext, 'base64url').toString()).not.toContain('example.org');
             await expect(decryptChatMessage({ ciphertext: frame.ciphertext, roomId: 'test-room', senderId: frame.id, secret })).rejects.toThrow();
         }
+    });
+
+    it('uses O(1) frames per peer when every participant holds the chat secret', async () => {
+        const secret = generateChatSecret();
+        const n = await network(Array(25).fill(secret));
+        for (let i = 0; i < 25; i++) await n.sessions[i].publish(`https://example.org/${i}`);
+        await n.drain();
+        for (let i = 0; i < 25; i++) for (let j = 0; j < 25; j++) {
+            if (i !== j) expect(n.seen[i].get(String(j + 1))).toBe(`https://example.org/${j}`);
+        }
+        expect(n.wire.some(f => f.packet.t === 'key')).toBe(false);
+        for (let i = 1; i <= 25; i++) expect(n.wire.filter(f => f.id === String(i)).length).toBeLessThanOrEqual(4);
+        // A late joiner costs each peer one coalesced hello, group key, and URL; its own publish adds one.
+        const before = n.wire.length;
+        await n.add(secret);
+        await n.sessions[25].publish('https://example.org/late');
+        await n.drain();
+        expect(n.wire.length - before).toBeLessThanOrEqual(26 * 3 + 1);
+        for (let i = 0; i < 25; i++) expect(n.seen[i].get('26')).toBe('https://example.org/late');
+        expect(n.seen[25].get('1')).toBe('https://example.org/0');
+    });
+
+    it('serves secret holders with one group key and unkeyed peers with pairwise keys', async () => {
+        const secret = generateChatSecret();
+        const n = await network([secret, secret, '']);
+        for (let i = 0; i < 3; i++) await n.sessions[i].publish(`https://example.org/${i}`);
+        await n.drain();
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== j) expect(n.seen[i].get(String(j + 1))).toBe(`https://example.org/${j}`);
+        expect(n.wire.filter(f => f.packet.t === 'gkey').map(f => f.id).sort()).toEqual(['1', '2']);
+        // The unkeyed peer only gets pairwise keys from the keyed peers.
+        expect(n.wire.filter(f => f.packet.t === 'key').every(f => f.packet.to === '3' || f.id === '3')).toBe(true);
+    });
+
+    it('does not exchange group keys between different chat secrets', async () => {
+        const n = await network([generateChatSecret(), generateChatSecret()]);
+        await n.sessions[0].publish('https://example.org/a');
+        await n.sessions[1].publish('https://example.org/b');
+        await n.drain();
+        expect(n.wire.some(f => f.packet.t === 'gkey')).toBe(false);
+        expect(n.seen[0].get('2')).toBe('https://example.org/b');
+        expect(n.seen[1].get('1')).toBe('https://example.org/a');
+    });
+
+    it('rejects a participant that copies a chat-secret tag without knowing the secret', async () => {
+        const secret = generateChatSecret();
+        const n = await network([secret, '']);
+        const hello0 = readPeerLinkPacket(n.sessions[0].nextPacket());
+        const hello1 = readPeerLinkPacket(n.sessions[1].nextPacket());
+        await n.sessions[1].receive('1', hello0);
+        await n.sessions[0].receive('2', { ...hello1, a: hello0.a });
+        await n.sessions[1].publish('https://example.org/forged');
+        let rejected = 0;
+        while (n.sessions[1].pending) {
+            try { await n.sessions[0].receive('2', readPeerLinkPacket(n.sessions[1].nextPacket())); } catch (_) { rejected++; }
+        }
+        expect(rejected).toBe(0);
+        expect(n.seen[0].get('2')).toBeNull();
+    });
+
+    it('rejects tampered, replayed, or misaddressed group keys', async () => {
+        const secret = generateChatSecret();
+        const n = await network([secret, secret]);
+        await n.drain();
+        const group = n.wire.find(f => f.id === '1' && f.packet.t === 'gkey');
+        const bytes = Buffer.from(group.packet.c, 'base64url'); bytes[20] ^= 1;
+        n.sessions[1].setPeers(['2']);
+        n.sessions[1].setPeers(['1', '2']);
+        await n.sessions[1].receive('1', readPeerLinkPacket(n.wire.find(f => f.id === '1' && f.packet.t === 'hello').ciphertext));
+        await expect(n.sessions[1].receive('1', { ...group.packet, c: bytes.toString('base64url') })).rejects.toThrow();
+        await n.sessions[1].receive('1', { ...group.packet, s: 'B'.repeat(22) });
+        await n.sessions[1].receive('1', group.packet);
+        await n.sessions[0].publish('https://example.org/after-tamper');
+        await n.drain();
+        expect(n.seen[1].get('1')).toBe('https://example.org/after-tamper');
+    });
+
+    it('sends a withdrawal ahead of queued handshake frames', async () => {
+        const n = await network(['', '', '']);
+        await n.sessions[0].publish('https://example.org/revoked');
+        await n.sessions[0].publish(null);
+        const first = readPeerLinkPacket(n.sessions[0].nextPacket());
+        expect(first.t).toBe('url');
+        const second = readPeerLinkPacket(n.sessions[0].nextPacket());
+        expect(second.t).toBe('hello');
+        // Once sent, the withdrawal no longer outranks later handshakes.
+        await n.sessions[0].publish('https://example.org/again');
+        n.sessions[0].announce();
+        expect(readPeerLinkPacket(n.sessions[0].nextPacket()).t).toBe('hello');
+        expect(readPeerLinkPacket(n.sessions[0].nextPacket()).t).toBe('url');
     });
 
     it('supplies a late joiner without a selected video and clears withdrawn links', async () => {

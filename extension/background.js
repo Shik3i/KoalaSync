@@ -8,7 +8,7 @@ import { clearChatKeyCache, decryptChatMessage, encryptChatMessage, generateChat
 import { buildChatRelayPayload, encodeSocketEvent } from './chat-wire.js';
 import { createPeerLinkSession, normalizePeerUrl, readPeerLinkPacket } from './peer-links.js';
 import { createPeerNavigator } from './peer-navigation.js';
-import { createChatEchoTracker, createChatSendLimiter, createLatestTaskQueue, normalizeRoomId, shouldShowChatNotification } from './chat-session.js';
+import { CHAT_SEND_JITTER_MARGIN_MS, CHAT_SEND_WINDOW_MS, PEER_LINK_CHAT_RESERVE, createChatEchoTracker, createChatSendLimiter, createLatestTaskQueue, normalizeRoomId, shouldShowChatNotification } from './chat-session.js';
 import { createChatActivityStore } from './chat-activity.js';
 import { canonicalMediaStateFromRoomData, createCanonicalMediaStateTracker } from './canonical-media-state.js';
 import {
@@ -282,7 +282,7 @@ let serverCapabilities = [];
 let chatSecretGuard = '';
 let chatSessionGeneration = 0;
 let chatReceiveQueue = Promise.resolve();
-const chatSendLimiter = createChatSendLimiter();
+const chatSendLimiter = createChatSendLimiter({ windowMs: CHAT_SEND_WINDOW_MS + CHAT_SEND_JITTER_MARGIN_MS });
 const chatEchoTracker = createChatEchoTracker();
 const chatActivityStore = createChatActivityStore();
 const webJoinCoordinator = createLatestTaskQueue();
@@ -321,7 +321,7 @@ function pumpPeerLinks() {
             if (!session || session !== linkSession || expected !== connectionGeneration || roomId !== currentRoom?.roomId) return;
             if (shareVideoUrl !== true || normalizeTabId(currentTabId) !== normalizeTabId(userSelectedTabId)) await session.publish(null);
             if (session !== linkSession || expected !== connectionGeneration || !session.pending || !currentRoom || socket?.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
-            const limit = chatSendLimiter.take();
+            const limit = chatSendLimiter.take({ reserve: PEER_LINK_CHAT_RESERVE });
             if (limit.allowed) {
                 const ciphertext = session.nextPacket();
                 if (ciphertext) emitLive(EVENTS.CHAT_MESSAGE, { ciphertext });

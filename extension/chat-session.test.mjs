@@ -32,6 +32,14 @@ describe('chat session boundaries', () => {
         expect(limiter.take()).toEqual({ allowed: true, retryAfterMs: 0 });
     });
 
+    it('keeps reserved slots free for chat while background traffic is limited', () => {
+        const limiter = createChatSendLimiter({ now: () => 1000 });
+        for (let index = 0; index < CHAT_SEND_LIMIT - 4; index++) expect(limiter.take({ reserve: 4 }).allowed).toBe(true);
+        expect(limiter.take({ reserve: 4 }).allowed).toBe(false);
+        for (let index = 0; index < 4; index++) expect(limiter.take().allowed).toBe(true);
+        expect(limiter.take().allowed).toBe(false);
+    });
+
     it('waits for the matching relay echo and clears pending sends on reset or timeout', async () => {
         const timers = new Map();
         let nextTimerId = 1;

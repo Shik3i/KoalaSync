@@ -1,6 +1,9 @@
 // An extension-only subprotocol inside the existing opaque chat relay envelope.
 // URLs and sender keys are encrypted; only ephemeral public keys and routing
-// metadata are public. Without a shared chat secret, ECDH trusts relay identity.
+// metadata are public. Peers holding the same chat secret receive the sender key
+// through one broadcast frame wrapped under a secret-derived group key, so the
+// handshake costs O(1) frames per peer. Only peers without that secret fall back
+// to per-pair ECDH, which trusts relay identity.
 const PREFIX = 'KoalaSyncLinks1:';
 const encoder = new globalThis.TextEncoder();
 const decoder = new globalThis.TextDecoder('utf-8', { fatal: true });
@@ -42,8 +45,11 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
     const tag = secret.length ? encode(new Uint8Array(await subtle.digest('SHA-256', encoder.encode(`${roomId}|${chatSecret}`))).slice(0, 16)) : '';
     const senderRaw = random(32);
     const senderKey = await subtle.importKey('raw', senderRaw, 'AES-GCM', false, ['encrypt']);
+    const groupKey = secret.length ? await subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: encoder.encode(roomId), info: encoder.encode('KoalaSyncLinks1 group key') },
+        await subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']), { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) : null;
     let revision = 0;
     let url = null;
+    let withdrawing = false;
     let closed = false;
     const members = new Set();
     const peers = new Map();
@@ -66,11 +72,11 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
         const bytes = decode(value);
         return JSON.parse(decoder.decode(await subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(0, 12), additionalData }, key, bytes.slice(12))));
     }
+    const groupPacket = groupKey ? { t: 'gkey', s: epoch, c: await encrypt(groupKey, { k: encode(senderRaw) }, aad(peerId, epoch, 'gkey')) } : null;
     async function pairKey(id, packet) {
         const remote = await subtle.importKey('raw', decode(packet.p), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
         const bits = new Uint8Array(await subtle.deriveBits({ name: 'ECDH', public: remote }, keys.privateKey, 256));
-        const sharedChat = tag && packet.a === tag ? secret : new Uint8Array();
-        const material = await subtle.importKey('raw', new Uint8Array([...bits, ...sharedChat]), 'HKDF', false, ['deriveKey']);
+        const material = await subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
         const participants = [[peerId, epoch], [id, packet.s]].sort((a, b) => a[0] < b[0] ? -1 : 1);
         return subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: encoder.encode(roomId), info: encoder.encode(JSON.stringify(['peer-links-v1', participants])) }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
     }
@@ -100,22 +106,33 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
             if (typeof packet.p !== 'string' || decode(packet.p).length !== 65 || typeof packet.a !== 'string' || packet.a.length > 22) return;
             const previous = peers.get(id);
             if (previous?.epoch === packet.s) return;
-            const pair = await pairKey(id, packet);
+            const shared = groupKey !== null && packet.a === tag;
+            const pair = shared ? null : await pairKey(id, packet);
             if (closed || !members.has(id)) return;
-            const entry = { epoch: packet.s, pair, key: null, revision: -1, pending: null };
+            const entry = { epoch: packet.s, pair, shared, key: null, revision: -1, pending: null };
             peers.set(id, entry);
             onUrl(id, null);
             queue('hello', hello);
-            await sendKey(id, entry);
+            if (shared) {
+                // One coalesced broadcast serves every peer with the chat secret.
+                queue('gkey', groupPacket);
+                await queueUrl();
+            } else await sendKey(id, entry);
             return;
         }
         const entry = peers.get(id);
         if (!entry || entry.epoch !== packet.s) return;
-        if (packet.t === 'key' && packet.to === peerId && packet.d === epoch) {
-            const value = await decrypt(entry.pair, packet.c, aad(id, packet.s, 'key', `${peerId}|${epoch}`));
+        if (packet.t === 'gkey' || (packet.t === 'key' && packet.to === peerId && packet.d === epoch)) {
+            const shared = packet.t === 'gkey';
+            if (entry.shared !== shared || entry.key) return;
+            const value = shared
+                ? await decrypt(groupKey, packet.c, aad(id, packet.s, 'gkey'))
+                : await decrypt(entry.pair, packet.c, aad(id, packet.s, 'key', `${peerId}|${epoch}`));
             const raw = decode(value.k);
             if (raw.length !== 32) return;
-            entry.key = await subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+            const key = await subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+            if (closed || peers.get(id) !== entry) return;
+            entry.key = key;
             if (entry.pending) {
                 const pending = entry.pending;
                 entry.pending = null;
@@ -141,6 +158,7 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
             const next = normalizePeerUrl(value);
             if (next === url || closed) return;
             url = next;
+            withdrawing = next === null;
             revision++;
             outbox.delete('url');
             await queueUrl();
@@ -148,11 +166,16 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
         receive,
         nextPacket() {
             // Public identity must precede keys, and keys must precede URLs.
-            const id = outbox.has('hello') ? 'hello'
+            // A withdrawal overtakes the handshake so revoking a link is never
+            // queued behind key distribution.
+            const id = withdrawing && outbox.has('url') ? 'url'
+                : outbox.has('hello') ? 'hello'
+                : outbox.has('gkey') ? 'gkey'
                 : [...outbox.keys()].find(key => key.startsWith('key:')) || (outbox.has('url') ? 'url' : null);
             if (id === null) return null;
             const packet = outbox.get(id);
             outbox.delete(id);
+            if (id === 'url') withdrawing = false;
             return packet;
         },
         get pending() { return outbox.size > 0; },
