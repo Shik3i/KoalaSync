@@ -96,6 +96,7 @@ const elements = {
     chatReactionDisplay: document.getElementById('chatReactionDisplay'),
     sendTabTitle: document.getElementById('sendTabTitle'),
     shareVideoUrl: document.getElementById('shareVideoUrl'),
+    shareVideoUrlHint: document.getElementById('shareVideoUrlHint'),
     mediaTitlePrivacyMode: document.getElementById('mediaTitlePrivacyMode'),
     episodeLobbyCard: document.getElementById('episodeLobbyCard'),
     lobbyTitle: document.getElementById('lobbyTitle'),
@@ -450,6 +451,7 @@ async function init() {
             updatePeerList(res.peers);
             lastKnownPeers = res.peers || [];
             updateHostControlUI({ controlMode: res.controlMode, amHost: res.amHost, amController: res.amController, controllers: res.controllers, hostPeerId: res.hostPeerId, hostControlSupported: res.hostControlSupported, coHostSupported: res.coHostSupported, inRoom: res.status === 'connected' });
+            refreshShareVideoUrlHint();
             if (res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
 
             // If user has a room configured but background is not connected (disconnected or idle),
@@ -920,6 +922,18 @@ function renderEmpty(container, type) {
     }
 
     container.replaceChildren(wrapper);
+}
+
+// Video links travel through the relay's chat channel. Against a relay that does
+// not advertise chat the setting would silently do nothing, so say so.
+function refreshShareVideoUrlHint() {
+    const hint = elements.shareVideoUrlHint;
+    if (!hint) return;
+    if (!elements.shareVideoUrl?.checked) { hint.hidden = true; return; }
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, res => {
+        if (chrome.runtime.lastError) return;
+        hint.hidden = !(res && res.status === 'connected' && res.chatSupported === false);
+    });
 }
 
 // A click that would replace the selected tab waits here for explicit consent.
@@ -1725,6 +1739,7 @@ if (elements.chatReactionDisplay) {
 if (elements.shareVideoUrl) {
     elements.shareVideoUrl.addEventListener('change', () => {
         chrome.storage.local.set({ shareVideoUrl: elements.shareVideoUrl.checked });
+        refreshShareVideoUrlHint();
     });
 }
 
@@ -2612,6 +2627,7 @@ chrome.runtime.onMessage.addListener((msg) => {
         const inRoom = elements.sectionActive && elements.sectionActive.style.display === 'block';
         updateHostControlUI({ controlMode: msg.controlMode, amHost: msg.amHost, amController: msg.amController, controllers: msg.controllers, hostPeerId: msg.hostPeerId, hostControlSupported: msg.hostControlSupported, coHostSupported: msg.coHostSupported, inRoom });
     } else if (msg.type === 'CONNECTION_STATUS') {
+        refreshShareVideoUrlHint();
         if (msg.status === 'connected' || msg.status === 'disconnected') {
             if (joinBtnTimeout) { clearTimeout(joinBtnTimeout); joinBtnTimeout = null; }
         }

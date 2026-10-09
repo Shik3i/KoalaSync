@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Video link unavailable or navigation failed.",
   "PEER_LINK_CONFIRM": "Replace the selected tab with {host}?",
   "PEER_LINK_CONFIRM_YES": "Open",
-  "PEER_LINK_CONFIRM_NO": "Cancel"
+  "PEER_LINK_CONFIRM_NO": "Cancel",
+  "PEER_LINK_RELAY_UNSUPPORTED": "This relay does not support encrypted chat, which video links need. Sharing is inactive on it."
 }

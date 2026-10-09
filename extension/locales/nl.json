@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Videolink niet beschikbaar of navigatie mislukt.",
   "PEER_LINK_CONFIRM": "Het geselecteerde tabblad vervangen door {host}?",
   "PEER_LINK_CONFIRM_YES": "Openen",
-  "PEER_LINK_CONFIRM_NO": "Annuleren"
+  "PEER_LINK_CONFIRM_NO": "Annuleren",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Deze relay ondersteunt de versleutelde chat niet die videolinks nodig hebben. Delen is hier inactief."
 }

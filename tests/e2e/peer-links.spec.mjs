@@ -40,6 +40,47 @@ test('video-link privacy setting defaults off and persists through popup reopeni
     await expect.poll(() => page.evaluate(async () => (await chrome.storage.local.get('shareVideoUrl')).shareVideoUrl)).toBe(false);
 });
 
+test('the setting explains that a relay without chat support cannot share links', async ({ context, extensionId }) => {
+    let relay;
+    try {
+        const page = await control(context, extensionId);
+        const port = await reservePort(); relay = await startRelay(port);
+        await connect(page, `ws://127.0.0.1:${port}`, 'Alice');
+        const open = async (chatSupported) => {
+            const popup = await context.newPage();
+            await popup.addInitScript(supported => {
+                const original = chrome.runtime.sendMessage.bind(chrome.runtime);
+                chrome.runtime.sendMessage = (message, callback) => message?.type === 'GET_STATUS' && typeof callback === 'function'
+                    ? original(message, response => callback(response && supported !== null ? { ...response, chatSupported: supported } : response))
+                    : original(message, callback);
+            }, chatSupported);
+            await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+            await popup.locator('#tab-settings-button').click();
+            await popup.locator('summary[data-i18n="LABEL_PRIVACY_SETTINGS"]').click();
+            return popup;
+        };
+        // A capable relay: no hint although sharing is on (the connect helper enables it).
+        const capable = await open(null);
+        await expect(capable.locator('#shareVideoUrl')).toBeChecked();
+        await expect(capable.locator('#shareVideoUrlHint')).toBeHidden();
+        await capable.close();
+        // A relay that does not advertise chat: the hint appears with the toggle and goes with it.
+        const unsupported = await open(false);
+        await expect(unsupported.locator('#shareVideoUrl')).toBeChecked();
+        await expect(unsupported.locator('#shareVideoUrlHint')).toBeVisible();
+        await expect(unsupported.locator('#shareVideoUrlHint')).toContainText('does not support encrypted chat');
+        await unsupported.locator('label.toggle-switch:has(#shareVideoUrl)').click();
+        await expect(unsupported.locator('#shareVideoUrlHint')).toBeHidden();
+        await unsupported.locator('label.toggle-switch:has(#shareVideoUrl)').click();
+        await expect(unsupported.locator('#shareVideoUrlHint')).toBeVisible();
+        await unsupported.evaluate(() => chrome.storage.local.set({ locale: 'de' }));
+        await unsupported.reload();
+        await unsupported.locator('#tab-settings-button').click();
+        await unsupported.locator('summary[data-i18n="LABEL_PRIVACY_SETTINGS"]').click();
+        await expect(unsupported.locator('#shareVideoUrlHint')).toContainText('Dieses Relay');
+    } finally { await stopRelay(relay); }
+});
+
 test('chat appears on first selection and URL clicks work for every peer without invitation keys', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(150000);
     const others = [];

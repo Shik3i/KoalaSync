@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Lien vidéo indisponible ou échec de navigation.",
   "PEER_LINK_CONFIRM": "Remplacer l’onglet sélectionné par {host} ?",
   "PEER_LINK_CONFIRM_YES": "Ouvrir",
-  "PEER_LINK_CONFIRM_NO": "Annuler"
+  "PEER_LINK_CONFIRM_NO": "Annuler",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Ce relais ne prend pas en charge le chat chiffré dont les liens vidéo ont besoin. Le partage est inactif ici."
 }

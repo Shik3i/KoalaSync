@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "视频链接不可用或跳转失败。",
   "PEER_LINK_CONFIRM": "用 {host} 替换所选标签页？",
   "PEER_LINK_CONFIRM_YES": "打开",
-  "PEER_LINK_CONFIRM_NO": "取消"
+  "PEER_LINK_CONFIRM_NO": "取消",
+  "PEER_LINK_RELAY_UNSUPPORTED": "此中继不支持视频链接所需的加密聊天，因此这里无法分享。"
 }

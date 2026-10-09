@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Ligação indisponível ou falha na navegação.",
   "PEER_LINK_CONFIRM": "Substituir o separador selecionado por {host}?",
   "PEER_LINK_CONFIRM_YES": "Abrir",
-  "PEER_LINK_CONFIRM_NO": "Cancelar"
+  "PEER_LINK_CONFIRM_NO": "Cancelar",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay não suporta o chat encriptado de que as ligações de vídeo precisam. A partilha está inativa aqui."
 }

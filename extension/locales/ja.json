@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "動画リンクが利用できないか、移動に失敗しました。",
   "PEER_LINK_CONFIRM": "選択中のタブを {host} に置き換えますか？",
   "PEER_LINK_CONFIRM_YES": "開く",
-  "PEER_LINK_CONFIRM_NO": "キャンセル"
+  "PEER_LINK_CONFIRM_NO": "キャンセル",
+  "PEER_LINK_RELAY_UNSUPPORTED": "このリレーは、動画リンクに必要な暗号化チャットに対応していません。ここでは共有は無効です。"
 }

@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Link video non disponibile o navigazione non riuscita.",
   "PEER_LINK_CONFIRM": "Sostituire la scheda selezionata con {host}?",
   "PEER_LINK_CONFIRM_YES": "Apri",
-  "PEER_LINK_CONFIRM_NO": "Annulla"
+  "PEER_LINK_CONFIRM_NO": "Annulla",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Questo relay non supporta la chat cifrata richiesta dai link video. La condivisione qui è inattiva."
 }

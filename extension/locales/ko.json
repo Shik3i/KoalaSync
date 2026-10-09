@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "동영상 링크를 사용할 수 없거나 이동하지 못했습니다.",
   "PEER_LINK_CONFIRM": "선택한 탭을 {host}(으)로 바꾸시겠습니까?",
   "PEER_LINK_CONFIRM_YES": "열기",
-  "PEER_LINK_CONFIRM_NO": "취소"
+  "PEER_LINK_CONFIRM_NO": "취소",
+  "PEER_LINK_RELAY_UNSUPPORTED": "이 릴레이는 동영상 링크에 필요한 암호화 채팅을 지원하지 않습니다. 여기서는 공유가 비활성 상태입니다."
 }

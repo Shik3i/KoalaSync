@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Посилання недоступне або перехід не вдався.",
   "PEER_LINK_CONFIRM": "Замінити вибрану вкладку на {host}?",
   "PEER_LINK_CONFIRM_YES": "Відкрити",
-  "PEER_LINK_CONFIRM_NO": "Скасувати"
+  "PEER_LINK_CONFIRM_NO": "Скасувати",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Цей релей не підтримує зашифрований чат, потрібний для посилань на відео. Передача тут неактивна."
 }

@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Enlace no disponible o error de navegación.",
   "PEER_LINK_CONFIRM": "¿Reemplazar la pestaña seleccionada por {host}?",
   "PEER_LINK_CONFIRM_YES": "Abrir",
-  "PEER_LINK_CONFIRM_NO": "Cancelar"
+  "PEER_LINK_CONFIRM_NO": "Cancelar",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay no admite el chat cifrado que necesitan los enlaces de vídeo. Compartir está inactivo aquí."
 }

@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Video bağlantısı kullanılamıyor veya gezinme başarısız oldu.",
   "PEER_LINK_CONFIRM": "Seçili sekme {host} ile değiştirilsin mi?",
   "PEER_LINK_CONFIRM_YES": "Aç",
-  "PEER_LINK_CONFIRM_NO": "İptal"
+  "PEER_LINK_CONFIRM_NO": "İptal",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Bu röle, video bağlantılarının ihtiyaç duyduğu şifreli sohbeti desteklemiyor. Paylaşım burada etkin değil."
 }

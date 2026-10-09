@@ -323,5 +323,6 @@
   "PEER_LINK_UNAVAILABLE": "Link niedostępny lub nawigacja nie powiodła się.",
   "PEER_LINK_CONFIRM": "Zastąpić wybraną kartę stroną {host}?",
   "PEER_LINK_CONFIRM_YES": "Otwórz",
-  "PEER_LINK_CONFIRM_NO": "Anuluj"
+  "PEER_LINK_CONFIRM_NO": "Anuluj",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Ten przekaźnik nie obsługuje szyfrowanego czatu wymaganego przez linki do wideo. Udostępnianie jest tu nieaktywne."
 }
