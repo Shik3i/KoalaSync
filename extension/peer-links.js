@@ -24,6 +24,16 @@ export function normalizePeerUrl(value) {
     } catch (_) { return null; }
 }
 
+// The destination a click would open, for display next to the participant. The
+// scheme is shown only when insecure; IDN hosts appear in punycode, which keeps
+// look-alike domains distinguishable.
+export function peerLinkHost(value) {
+    const href = normalizePeerUrl(value);
+    if (!href) return '';
+    const url = new URL(href);
+    return (url.protocol === 'http:' ? 'http://' : '') + url.host;
+}
+
 export function readPeerLinkPacket(ciphertext) {
     try {
         const bytes = decode(ciphertext);

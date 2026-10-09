@@ -5933,6 +5933,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         if (!isExtensionPageSender(sender)) { sendResponse({ status: 'invalid_sender' }); return; }
         const url = peerUrls.get(message.peerId);
         const member = currentRoom?.peers.some(p => p.peerId === message.peerId);
+        // The popup names the destination it showed; a peer that changed its link
+        // in the meantime must not redirect an already confirmed click.
+        if (typeof message.url === 'string' && message.url !== url) { sendResponse({ status: 'changed' }); return; }
         sendResponse(member && url ? await peerNavigator.navigate(url) : { status: 'unavailable' });
     } else if (message.type === 'SET_TARGET_TAB') {
         await peerNavigator.cancel();

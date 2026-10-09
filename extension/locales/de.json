@@ -320,5 +320,8 @@
   "LABEL_SHARE_VIDEO_URL": "Video-Link teilen",
   "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Die vollständige URL des ausgewählten Tabs (inkl. Query und Fragment) verschlüsselt mit allen im Raum teilen. Standardmäßig aus.",
   "PEER_LINK_OPEN": "Video dieses Teilnehmers öffnen",
-  "PEER_LINK_UNAVAILABLE": "Video-Link nicht verfügbar oder Navigation fehlgeschlagen."
+  "PEER_LINK_UNAVAILABLE": "Video-Link nicht verfügbar oder Navigation fehlgeschlagen.",
+  "PEER_LINK_CONFIRM": "Den ausgewählten Tab durch {host} ersetzen?",
+  "PEER_LINK_CONFIRM_YES": "Öffnen",
+  "PEER_LINK_CONFIRM_NO": "Abbrechen"
 }

@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { describe, it, expect, vi } from 'vitest';
-import { createPeerLinkSession, normalizePeerUrl, readPeerLinkPacket } from './peer-links.js';
+import { createPeerLinkSession, normalizePeerUrl, peerLinkHost, readPeerLinkPacket } from './peer-links.js';
 import { createChatEnvelope } from '../server/chat.js';
 import { decryptChatMessage, generateChatSecret } from './chat-crypto.js';
 import { createChatSendLimiter } from './chat-session.js';
@@ -310,6 +310,14 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
         await n.sessions[1].receive('1', packets.find(p => p.t === 'url'));
         await n.sessions[1].receive('1', packets.find(p => p.t === 'key'));
         expect(n.seen[1].get('1')).toBe('https://example.org/out-of-order');
+    });
+
+    it('names the destination host, flags insecure schemes, and exposes look-alike domains', () => {
+        expect(peerLinkHost('https://www.example.org/watch?v=1#t=2')).toBe('www.example.org');
+        expect(peerLinkHost('https://example.org:8443/x')).toBe('example.org:8443');
+        expect(peerLinkHost('http://192.168.0.5/video')).toBe('http://192.168.0.5');
+        expect(peerLinkHost('https://exаmple.org/')).toBe('xn--exmple-4nf.org');
+        for (const bad of [null, '', 'javascript:alert(1)', 'https://user:pw@example.org/']) expect(peerLinkHost(bad)).toBe('');
     });
 
     it('bounds URLs and packets; retains content-identifying query and hash', async () => {

@@ -95,16 +95,39 @@ test('chat appears on first selection and URL clicks work for every peer without
         await expect.poll(() => status(pages[2])).toMatchObject({ targetReady: true });
         const selectedId = (await status(pages[2])).targetTabId;
 
-        // A later click reuses that selected tab, not the popup/active tab.
+        // Every participant row names the destination host.
+        await expect(popup.locator('#peerListSync [data-peer-link-host]').first()).toContainText('localhost');
+
+        // A tab is now selected, so a click asks before replacing it. Cancel keeps the page.
         await popup.bringToFront();
+        const confirmation = popup.locator('#peerListSync [data-peer-link-confirm]');
         await popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Bob' }).press('Enter');
+        await expect(confirmation).toContainText('localhost');
+        await expect(confirmation.locator('button[data-action="cancel"]')).toBeFocused();
+        await confirmation.locator('button[data-action="cancel"]').click();
+        await expect(confirmation).toHaveCount(0);
+        await expect(created).toHaveURL(aUrl);
+
+        // Escape also cancels; a changed link can never be opened by an old confirmation.
+        await popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Bob' }).press('Enter');
+        await expect(confirmation).toHaveCount(1);
+        await confirmation.press('Escape');
+        await expect(confirmation).toHaveCount(0);
+        expect(await pages[2].evaluate(([peerId, url]) => chrome.runtime.sendMessage({ type: 'NAVIGATE_TO_PEER', peerId, url }), [bobId, `${bUrl}&stale=1`])).toMatchObject({ status: 'changed' });
+        await expect(created).toHaveURL(aUrl);
+
+        // Confirming reuses that selected tab, not the popup/active tab.
+        await popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Bob' }).press('Enter');
+        await confirmation.locator('button[data-action="confirm"]').click();
         await expect(created).toHaveURL(bUrl);
         await expect.poll(() => status(pages[2])).toMatchObject({ targetTabId: selectedId, targetReady: true });
         await expect.poll(async () => (await status(pages[0])).peers.find(p => p.username === 'Charlie')?.tabUrl, { timeout: 20000 }).toBe(bUrl);
         await aliceLink.press('Space');
+        await confirmation.locator('button[data-action="confirm"]').click();
         await expect(created).toHaveURL(aUrl);
         await expect.poll(() => status(pages[2])).toMatchObject({ targetTabId: selectedId, targetReady: true });
         await popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Bob' }).click();
+        await confirmation.locator('button[data-action="confirm"]').click();
         await expect(created).toHaveURL(bUrl);
         await expect.poll(() => status(pages[2])).toMatchObject({ targetTabId: selectedId, targetReady: true });
 

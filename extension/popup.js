@@ -1,4 +1,4 @@
-import { normalizePeerUrl } from './peer-links.js';
+import { normalizePeerUrl, peerLinkHost } from './peer-links.js';
 import { EVENTS, OFFICIAL_LANDING_PAGE_URL, SUPPORT_URL, getReviewUrl } from './shared/constants.js';
 import {
     BLACKLIST_OVERRIDES_STORAGE_KEY,
@@ -922,9 +922,69 @@ function renderEmpty(container, type) {
     container.replaceChildren(wrapper);
 }
 
+// A click that would replace the selected tab waits here for explicit consent.
+let peerLinkConfirm = null; // { peerId, url }
+
+function rerenderPeers() {
+    lastPeersJson = '';
+    if (activePeers) updatePeerList(activePeers);
+}
+
+async function selectedTabWouldBeReplaced(url) {
+    const status = await chrome.runtime.sendMessage({ type: 'GET_STATUS' }).catch(() => null);
+    const tabId = normalizeTabId(status?.targetTabId ?? status?.pendingTargetTabId);
+    if (tabId === null) return false;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    return !!tab && normalizePeerUrl(tab.url) !== url;
+}
+
+async function navigateToPeer(peerId, url) {
+    try {
+        const response = await chrome.runtime.sendMessage({ type: 'NAVIGATE_TO_PEER', peerId, url });
+        if (!['ok', 'navigating', 'superseded'].includes(response?.status)) showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error');
+    } catch (_) { showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error'); }
+}
+
+function createPeerLinkConfirmation(peerId, url) {
+    const panel = document.createElement('div');
+    panel.dataset.peerLinkConfirm = peerId;
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', getMessage('PEER_LINK_CONFIRM', { host: peerLinkHost(url) }));
+    panel.style.cssText = 'margin-top:6px; padding:6px 8px; border:1px solid var(--accent-terracotta); border-radius:6px; font-size:11px; display:flex; flex-wrap:wrap; align-items:center; gap:6px;';
+    const text = document.createElement('span');
+    text.style.cssText = 'flex:1 1 100%; overflow-wrap:anywhere;';
+    text.textContent = getMessage('PEER_LINK_CONFIRM', { host: peerLinkHost(url) });
+    const buttonStyle = 'display:inline-block; width:auto; margin:0; padding:3px 10px; font-size:11px;';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'primary';
+    confirm.dataset.action = 'confirm';
+    confirm.style.cssText = buttonStyle;
+    confirm.textContent = getMessage('PEER_LINK_CONFIRM_YES');
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.dataset.action = 'cancel';
+    cancel.style.cssText = buttonStyle;
+    cancel.textContent = getMessage('PEER_LINK_CONFIRM_NO');
+    confirm.addEventListener('click', async () => {
+        peerLinkConfirm = null;
+        rerenderPeers();
+        await navigateToPeer(peerId, url);
+    });
+    cancel.addEventListener('click', () => { peerLinkConfirm = null; rerenderPeers(); });
+    panel.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.stopPropagation(); peerLinkConfirm = null; rerenderPeers(); }
+    });
+    panel.append(text, confirm, cancel);
+    // Cancel is the safe default for keyboard users.
+    requestAnimationFrame(() => { if (cancel.isConnected && cancel.offsetParent) cancel.focus(); });
+    return panel;
+}
+
 function updatePeerList(peers) {
     if (!peers) return;
     activePeers = peers;
+    if (peerLinkConfirm && !peers.some(p => p.peerId === peerLinkConfirm.peerId && p.tabUrl === peerLinkConfirm.url)) peerLinkConfirm = null;
     if (peers.length === 0) {
         stopInterpolation();
     } else if (!interpolationInterval) {
@@ -942,7 +1002,7 @@ function updatePeerList(peers) {
         vol: p.volume,
         muted: p.muted
     }));
-    const currentPeersJson = JSON.stringify([getMessage('PEER_LINK_OPEN'), stateToHash]);
+    const currentPeersJson = JSON.stringify([getMessage('PEER_LINK_OPEN'), peerLinkConfirm, stateToHash]);
     if (currentPeersJson === lastPeersJson) return;
     lastPeersJson = currentPeersJson;
 
@@ -996,10 +1056,11 @@ function updatePeerList(peers) {
                     if (opening) return;
                     opening = true;
                     try {
-                        const response = await chrome.runtime.sendMessage({ type: 'NAVIGATE_TO_PEER', peerId: pId });
-                        if (!['ok', 'navigating', 'superseded'].includes(response?.status)) showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error');
-                    } catch (_) { showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error'); }
-                    finally { opening = false; }
+                        if (await selectedTabWouldBeReplaced(peerUrl)) {
+                            peerLinkConfirm = { peerId: pId, url: peerUrl };
+                            rerenderPeers();
+                        } else await navigateToPeer(pId, peerUrl);
+                    } finally { opening = false; }
                 };
                 nameSpan.addEventListener('click', openPeer);
                 nameSpan.addEventListener('keydown', event => {
@@ -1081,6 +1142,18 @@ function updatePeerList(peers) {
             if (rightGroup.childNodes.length) header.appendChild(rightGroup);
 
             peerItem.appendChild(header);
+
+            if (peerUrl && pId !== localPeerId) {
+                const hostLine = document.createElement('div');
+                hostLine.dataset.peerLinkHost = '';
+                hostLine.style.cssText = 'font-size:10px; opacity:0.75; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px;';
+                hostLine.textContent = `↗ ${peerLinkHost(peerUrl)}`;
+                hostLine.title = peerUrl;
+                peerItem.appendChild(hostLine);
+                if (peerLinkConfirm?.peerId === pId && peerLinkConfirm.url === peerUrl) {
+                    peerItem.appendChild(createPeerLinkConfirmation(pId, peerUrl));
+                }
+            }
 
             // Media Info
             if (p.mediaTitle) {

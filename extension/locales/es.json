@@ -320,5 +320,8 @@
   "LABEL_SHARE_VIDEO_URL": "Compartir enlace del vídeo",
   "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Compartir con toda la sala la URL completa de la pestaña seleccionada (con parámetros y fragmento), cifrada. Desactivado por defecto.",
   "PEER_LINK_OPEN": "Abrir el vídeo de este participante",
-  "PEER_LINK_UNAVAILABLE": "Enlace no disponible o error de navegación."
+  "PEER_LINK_UNAVAILABLE": "Enlace no disponible o error de navegación.",
+  "PEER_LINK_CONFIRM": "¿Reemplazar la pestaña seleccionada por {host}?",
+  "PEER_LINK_CONFIRM_YES": "Abrir",
+  "PEER_LINK_CONFIRM_NO": "Cancelar"
 }

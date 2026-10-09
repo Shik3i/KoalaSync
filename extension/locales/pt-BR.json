@@ -320,5 +320,8 @@
   "LABEL_SHARE_VIDEO_URL": "Compartilhar link do vídeo",
   "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Compartilhar com todos na sala a URL completa da aba selecionada (com parâmetros e fragmento), criptografada. Desativado por padrão.",
   "PEER_LINK_OPEN": "Abrir o vídeo deste participante",
-  "PEER_LINK_UNAVAILABLE": "Link indisponível ou falha na navegação."
+  "PEER_LINK_UNAVAILABLE": "Link indisponível ou falha na navegação.",
+  "PEER_LINK_CONFIRM": "Substituir a aba selecionada por {host}?",
+  "PEER_LINK_CONFIRM_YES": "Abrir",
+  "PEER_LINK_CONFIRM_NO": "Cancelar"
 }

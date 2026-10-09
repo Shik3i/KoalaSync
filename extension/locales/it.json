@@ -320,5 +320,8 @@
   "LABEL_SHARE_VIDEO_URL": "Condividi link video",
   "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Condividi con tutti nella stanza l’URL completo della scheda selezionata (inclusi parametri e frammento), cifrato. Disattivato per impostazione predefinita.",
   "PEER_LINK_OPEN": "Apri il video di questo partecipante",
-  "PEER_LINK_UNAVAILABLE": "Link video non disponibile o navigazione non riuscita."
+  "PEER_LINK_UNAVAILABLE": "Link video non disponibile o navigazione non riuscita.",
+  "PEER_LINK_CONFIRM": "Sostituire la scheda selezionata con {host}?",
+  "PEER_LINK_CONFIRM_YES": "Apri",
+  "PEER_LINK_CONFIRM_NO": "Annulla"
 }

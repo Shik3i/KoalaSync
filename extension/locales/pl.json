@@ -320,5 +320,8 @@
   "LABEL_SHARE_VIDEO_URL": "Udostępnij link do filmu",
   "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Udostępnij zaszyfrowany pełny adres wybranej karty (z parametrami i fragmentem) wszystkim w pokoju. Domyślnie wyłączone.",
   "PEER_LINK_OPEN": "Otwórz film tego uczestnika",
-  "PEER_LINK_UNAVAILABLE": "Link niedostępny lub nawigacja nie powiodła się."
+  "PEER_LINK_UNAVAILABLE": "Link niedostępny lub nawigacja nie powiodła się.",
+  "PEER_LINK_CONFIRM": "Zastąpić wybraną kartę stroną {host}?",
+  "PEER_LINK_CONFIRM_YES": "Otwórz",
+  "PEER_LINK_CONFIRM_NO": "Anuluj"
 }
