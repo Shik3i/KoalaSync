@@ -10,7 +10,8 @@ const status = page => page.evaluate(() => chrome.runtime.sendMessage({ type: 'G
 async function connect(page, serverUrl, username, chatKey = '') {
     await page.evaluate(async settings => {
         await chrome.storage.sync.set({ onboardingComplete: true });
-        await chrome.storage.local.set({ ...settings, roomId: 'peer-links-e2e', password: '', useCustomServer: true, shareVideoUrl: true, chatEnabled: !!settings.chatKey, chatStartMode: 'open', locale: 'en' });
+        // Created rooms always carry a password; the popup's invite link needs one with a chat key.
+        await chrome.storage.local.set({ ...settings, roomId: 'peer-links-e2e', password: 'PW1234', useCustomServer: true, shareVideoUrl: true, chatEnabled: !!settings.chatKey, chatStartMode: 'open', locale: 'en' });
         await chrome.runtime.sendMessage({ type: 'CONNECT' });
     }, { serverUrl, username, chatKey });
     await expect.poll(() => status(page)).toMatchObject({ status: 'connected' });

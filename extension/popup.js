@@ -1239,8 +1239,16 @@ function updatePeerList(peers) {
         });
     };
 
+    // Live updates rebuild the rows; keep keyboard focus on the same participant.
+    const focused = document.activeElement;
+    const focusedPeer = focused?.dataset?.peerLinkOpen;
+    const focusedList = focusedPeer ? focused.closest('#peerList, #peerListSync') : null;
     if (elements.peerList) renderPeers(elements.peerList);
     if (elements.peerListSync) renderPeers(elements.peerListSync);
+    if (focusedList) {
+        [...focusedList.querySelectorAll('[data-peer-link-open]')]
+            .find(element => element.dataset.peerLinkOpen === focusedPeer)?.focus();
+    }
 
     // Re-populate tabs to update Star Matching when peers change
     populateTabs(peers);
