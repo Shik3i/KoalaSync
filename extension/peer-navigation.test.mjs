@@ -86,6 +86,21 @@ describe('peer click navigation', () => {
         expect(h.storage.pendingPeerNavigation).toBeUndefined();
         expect(h.api.tabs.create).toHaveBeenCalledTimes(selection ? 0 : 1);
     });
+    it('still activates the job tab when other tabs finish loading meanwhile', async () => {
+        const h = setup();
+        h.storage.pendingPeerNavigation = { tabId: 1, roomId: 'room', started: 100, url: 'https://example.org/old', issued: true };
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const get = h.api.storage.session.get.getMockImplementation();
+        h.api.storage.session.get.mockImplementationOnce(async () => { await gate; return get(); });
+        const busy = h.navigator.complete(5);
+        h.navigator.complete(1);
+        h.navigator.complete(8);
+        release(); await busy;
+        expect(h.activate).toHaveBeenCalledWith(1, 'Old');
+        expect(h.storage.pendingPeerNavigation).toBeUndefined();
+    });
+
     it('does not reload an already matching URL', async () => {
         const h = setup();
         await h.navigator.navigate('https://example.org/old');

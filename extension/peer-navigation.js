@@ -19,7 +19,9 @@ const sameOrigin = (left, right) => {
 export function createPeerNavigator({ api, getSelection, getRoomId, select, suspend, activate, failure, now = () => Date.now() }) {
     let generation = 0;
     let completing = false;
-    let queuedCompletion = null;
+    // Every tab that finished loading meanwhile; keeping only the last one could
+    // drop the job's own tab when another tab completes in between.
+    const queuedCompletions = new Set();
     let starting = null;
     const key = 'pendingPeerNavigation';
     const isCurrent = (job, expected) => expected === generation
@@ -30,7 +32,7 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
         return token;
     }
     async function complete(tabId) {
-        if (completing) { queuedCompletion = tabId; return; }
+        if (completing) { queuedCompletions.add(tabId); return; }
         completing = true;
         const expected = generation;
         let job;
@@ -60,9 +62,11 @@ export function createPeerNavigator({ api, getSelection, getRoomId, select, susp
             }
         } finally {
             completing = false;
-            const pending = queuedCompletion;
-            queuedCompletion = null;
-            if (pending !== null) await complete(pending);
+            const [pending] = queuedCompletions;
+            if (pending !== undefined) {
+                queuedCompletions.delete(pending);
+                await complete(pending);
+            }
         }
     }
     return {
