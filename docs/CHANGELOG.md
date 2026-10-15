@@ -7,11 +7,20 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ## Unreleased
 
+This update lets participants open each other's video with one click and makes
+chat available as soon as a player is selected.
+
 ### Added
-- **Extension: Optional shared video links** — Participants can opt in under Settings → Privacy → Share video link. Everyone in the room can then open a peer's page by clicking their name in the participant list, in the selected tab or a new one. URLs travel encrypted through the existing relay chat envelope, so no relay change is required; only HTTP(S) URLs up to 900 bytes are shared, including query string and fragment. Peers that share the invitation's chat secret exchange keys in a constant number of frames per participant and never fall back to the relay-trusted key exchange, so they share links only with each other; rooms without a chat secret use a pairwise exchange. A link is shared only while the selected tab shows a detected video, and a withdrawal is never delayed by chat traffic. The participant list shows each link's destination host (insecure `http://` and punycode look-alikes stay visible), and KoalaSync asks before replacing an already selected tab; a link that changed after it was displayed is never opened by an earlier confirmation.
+- **Shared video links (opt-in)** — With *Settings → Privacy → Share video link* enabled, clicking a participant's name opens their video in the selected tab or a new one. Off by default; the full URL including query string and fragment is shared end-to-end encrypted through the existing chat relay, without relay changes.
+- **Safe link opening** — Each participant row shows the destination host, and KoalaSync asks before replacing an already selected tab; a link that changed after it was shown is never opened.
+- **Link privacy** — Links are shared only while the selected tab shows a detected video and are withdrawn when sharing is turned off, the tab changes or navigates away, or you leave the room. Participants holding the invitation's chat secret exchange links only with each other.
+- **Relay compatibility note** — On a relay without encrypted chat, the setting explains that sharing is inactive there.
 
 ### Fixed
-- **Extension: Chat available immediately after selecting a player** — The chat overlay now activates at once for top-level and embedded players instead of after a reselection or reload.
+- **Chat on first selection** — The chat overlay now appears immediately for top-level and embedded players instead of after a reselection or reload.
+
+### Security
+- **Relay dependencies** — Updates engine.io and proxy-addr to clear two published production advisories.
 
 ## [v3.2.0] — 2026-09-01
 
