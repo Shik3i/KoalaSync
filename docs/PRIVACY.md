@@ -33,7 +33,7 @@ To prevent abuse and brute-force attacks, the following data is processed:
 ## 3. Extension Permissions
 The browser extension requires the following permissions:
 - `storage`: To remember your local preferences (username, server URL, room settings).
-- `tabs` & `scripting`: To detect and control video elements on the pages you choose to sync, and, only if you enable *Share video link*, to read the address of the selected tab.
+- `tabs` & `scripting`: To detect and control video elements on the pages you choose to sync, and to read tab addresses locally where tab selection and synchronization need them (for example to filter the tab list). Only if you enable *Share video link* is the selected tab's address shared with room participants.
 - `<all_urls>` (host permission): Required to detect `<video>` elements on any website the user chooses to synchronize. The extension only activates on the specific tab the user has actively selected — it does not scan, monitor, or interact with any other tabs or pages.
 - `alarms`: To keep the background service worker alive during active sync sessions (the extension only stays connected while you are in a room).
 - `notifications`: To display sync status updates (e.g., "Peer joined", "Force Sync initiated").

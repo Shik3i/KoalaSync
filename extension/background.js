@@ -5881,8 +5881,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
             chrome.storage.session.set({ currentTabTitle });
             updateBadgeStatus();
-            // content.js sends heartbeats only while it finds a video.
-            linkDocumentConfirmed = true;
         }
 
         requestCanonicalMediaRecoveryAttempt();
@@ -5898,6 +5896,9 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                 sendResponse({ status: 'ignored_stale_session' });
                 return;
             }
+            // content.js sends heartbeats only while it finds a video; confirm the
+            // document only once the heartbeat passed the session checks above.
+            if (sender.tab) linkDocumentConfirmed = true;
             const sharedTitles = getSharedTitleFields(settings, heartbeatPayload.mediaTitle);
             updatePeerLinks();
             const statusPayload = {
