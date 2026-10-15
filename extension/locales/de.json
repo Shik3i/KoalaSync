@@ -316,5 +316,13 @@
   "DEBUG_YES": "JA",
   "DEBUG_NO": "NEIN",
   "DEBUG_YES_CHECKED": "JA (geprüft)",
-  "DEBUG_NA": "k. A."
+  "DEBUG_NA": "k. A.",
+  "LABEL_SHARE_VIDEO_URL": "Video-Link teilen",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Die vollständige URL des ausgewählten Tabs (inkl. Query und Fragment) verschlüsselt mit allen im Raum teilen. Standardmäßig aus.",
+  "PEER_LINK_OPEN": "Video dieses Teilnehmers öffnen",
+  "PEER_LINK_UNAVAILABLE": "Video-Link nicht verfügbar oder Navigation fehlgeschlagen.",
+  "PEER_LINK_CONFIRM": "Den ausgewählten Tab durch {host} ersetzen?",
+  "PEER_LINK_CONFIRM_YES": "Öffnen",
+  "PEER_LINK_CONFIRM_NO": "Abbrechen",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Dieses Relay unterstützt keinen verschlüsselten Chat, den Video-Links benötigen. Das Teilen ist hier inaktiv."
 }

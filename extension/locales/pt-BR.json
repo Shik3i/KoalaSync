@@ -316,5 +316,13 @@
   "DEBUG_YES": "SIM",
   "DEBUG_NO": "NÃO",
   "DEBUG_YES_CHECKED": "SIM (verificado)",
-  "DEBUG_NA": "n/d"
+  "DEBUG_NA": "n/d",
+  "LABEL_SHARE_VIDEO_URL": "Compartilhar link do vídeo",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Compartilhar com todos na sala a URL completa da aba selecionada (com parâmetros e fragmento), criptografada. Desativado por padrão.",
+  "PEER_LINK_OPEN": "Abrir o vídeo deste participante",
+  "PEER_LINK_UNAVAILABLE": "Link indisponível ou falha na navegação.",
+  "PEER_LINK_CONFIRM": "Substituir a aba selecionada por {host}?",
+  "PEER_LINK_CONFIRM_YES": "Abrir",
+  "PEER_LINK_CONFIRM_NO": "Cancelar",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay não oferece suporte ao chat criptografado de que os links de vídeo precisam. O compartilhamento está inativo aqui."
 }

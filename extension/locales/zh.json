@@ -316,5 +316,13 @@
   "DEBUG_YES": "是",
   "DEBUG_NO": "否",
   "DEBUG_YES_CHECKED": "是（已检查）",
-  "DEBUG_NA": "无"
+  "DEBUG_NA": "无",
+  "LABEL_SHARE_VIDEO_URL": "分享视频链接",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "将所选标签页的完整网址（含查询参数和片段）加密分享给房间内的所有人。默认关闭。",
+  "PEER_LINK_OPEN": "打开此参与者的视频",
+  "PEER_LINK_UNAVAILABLE": "视频链接不可用或跳转失败。",
+  "PEER_LINK_CONFIRM": "用 {host} 替换所选标签页？",
+  "PEER_LINK_CONFIRM_YES": "打开",
+  "PEER_LINK_CONFIRM_NO": "取消",
+  "PEER_LINK_RELAY_UNSUPPORTED": "此中继不支持视频链接所需的加密聊天，因此这里无法分享。"
 }

@@ -316,5 +316,13 @@
   "DEBUG_YES": "예",
   "DEBUG_NO": "아니요",
   "DEBUG_YES_CHECKED": "예(확인됨)",
-  "DEBUG_NA": "없음"
+  "DEBUG_NA": "없음",
+  "LABEL_SHARE_VIDEO_URL": "동영상 링크 공유",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "선택한 탭의 전체 URL(쿼리와 프래그먼트 포함)을 암호화하여 방의 모든 참가자와 공유합니다. 기본값은 꺼짐입니다.",
+  "PEER_LINK_OPEN": "이 참가자의 동영상 열기",
+  "PEER_LINK_UNAVAILABLE": "동영상 링크를 사용할 수 없거나 이동하지 못했습니다.",
+  "PEER_LINK_CONFIRM": "선택한 탭을 {host}(으)로 바꾸시겠습니까?",
+  "PEER_LINK_CONFIRM_YES": "열기",
+  "PEER_LINK_CONFIRM_NO": "취소",
+  "PEER_LINK_RELAY_UNSUPPORTED": "이 릴레이는 동영상 링크에 필요한 암호화 채팅을 지원하지 않습니다. 여기서는 공유가 비활성 상태입니다."
 }

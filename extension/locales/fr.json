@@ -316,5 +316,13 @@
   "DEBUG_YES": "OUI",
   "DEBUG_NO": "NON",
   "DEBUG_YES_CHECKED": "OUI (vérifié)",
-  "DEBUG_NA": "n/d"
+  "DEBUG_NA": "n/d",
+  "LABEL_SHARE_VIDEO_URL": "Partager le lien vidéo",
+  "LABEL_SHARE_VIDEO_URL_TOOLTIP": "Partager avec tous les participants l’URL complète de l’onglet sélectionné (paramètres et fragment inclus), chiffrée. Désactivé par défaut.",
+  "PEER_LINK_OPEN": "Ouvrir la vidéo de ce participant",
+  "PEER_LINK_UNAVAILABLE": "Lien vidéo indisponible ou échec de navigation.",
+  "PEER_LINK_CONFIRM": "Remplacer l’onglet sélectionné par {host} ?",
+  "PEER_LINK_CONFIRM_YES": "Ouvrir",
+  "PEER_LINK_CONFIRM_NO": "Annuler",
+  "PEER_LINK_RELAY_UNSUPPORTED": "Ce relais ne prend pas en charge le chat chiffré dont les liens vidéo ont besoin. Le partage est inactif ici."
 }

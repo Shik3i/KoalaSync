@@ -1,3 +1,4 @@
+import { normalizePeerUrl, peerLinkHost } from './peer-links.js';
 import { EVENTS, OFFICIAL_LANDING_PAGE_URL, SUPPORT_URL, getReviewUrl } from './shared/constants.js';
 import {
     BLACKLIST_OVERRIDES_STORAGE_KEY,
@@ -94,6 +95,8 @@ const elements = {
     chatStartMode: document.getElementById('chatStartMode'),
     chatReactionDisplay: document.getElementById('chatReactionDisplay'),
     sendTabTitle: document.getElementById('sendTabTitle'),
+    shareVideoUrl: document.getElementById('shareVideoUrl'),
+    shareVideoUrlHint: document.getElementById('shareVideoUrlHint'),
     mediaTitlePrivacyMode: document.getElementById('mediaTitlePrivacyMode'),
     episodeLobbyCard: document.getElementById('episodeLobbyCard'),
     lobbyTitle: document.getElementById('lobbyTitle'),
@@ -362,7 +365,7 @@ function setRoomRefreshCooldown() {
 async function init() {
     // Local-only by design — settings and room credentials never come from
     // storage.sync (only onboardingComplete + dismissedHints live there).
-    const localData = await chrome.storage.local.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey', 'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username', 'filterNoise', 'autoSyncNextEpisode', 'sendTabTitle', 'mediaTitlePrivacyMode', 'titlePrivacyMode', 'forceSyncMode', 'browserNotifications', 'autoCopyInvite', 'locale', 'audioSettings', 'activeTab', 'themeMode', 'themePalette']);
+    const localData = await chrome.storage.local.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey', 'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username', 'filterNoise', 'autoSyncNextEpisode', 'sendTabTitle', 'shareVideoUrl', 'mediaTitlePrivacyMode', 'titlePrivacyMode', 'forceSyncMode', 'browserNotifications', 'autoCopyInvite', 'locale', 'audioSettings', 'activeTab', 'themeMode', 'themePalette']);
 
     let activeLang = localData.locale;
     if (!activeLang) {
@@ -403,6 +406,7 @@ async function init() {
     syncChatSettingsState();
     const legacyTitlePrivacyMode = Object.values(TITLE_PRIVACY_MODES).includes(localData.titlePrivacyMode) ? localData.titlePrivacyMode : TITLE_PRIVACY_MODES.FULL;
     const mediaTitlePrivacyMode = Object.values(TITLE_PRIVACY_MODES).includes(localData.mediaTitlePrivacyMode) ? localData.mediaTitlePrivacyMode : legacyTitlePrivacyMode;
+    if (elements.shareVideoUrl) elements.shareVideoUrl.checked = localData.shareVideoUrl === true;
     if (elements.sendTabTitle) elements.sendTabTitle.checked = normalizeSendTabTitle(localData.sendTabTitle, legacyTitlePrivacyMode);
     if (elements.mediaTitlePrivacyMode) elements.mediaTitlePrivacyMode.value = mediaTitlePrivacyMode;
     if (elements.forceSyncMode) elements.forceSyncMode.value = localData.forceSyncMode || 'jump-to-others';
@@ -447,6 +451,7 @@ async function init() {
             updatePeerList(res.peers);
             lastKnownPeers = res.peers || [];
             updateHostControlUI({ controlMode: res.controlMode, amHost: res.amHost, amController: res.amController, controllers: res.controllers, hostPeerId: res.hostPeerId, hostControlSupported: res.hostControlSupported, coHostSupported: res.coHostSupported, inRoom: res.status === 'connected' });
+            refreshShareVideoUrlHint();
             if (res.lastActionState) updateLastActionUI(res.lastActionState, res.peers);
 
             // If user has a room configured but background is not connected (disconnected or idle),
@@ -919,9 +924,96 @@ function renderEmpty(container, type) {
     container.replaceChildren(wrapper);
 }
 
+// Video links travel through the relay's chat channel. Against a relay that does
+// not advertise chat the setting would silently do nothing, so say so.
+function refreshShareVideoUrlHint() {
+    const hint = elements.shareVideoUrlHint;
+    if (!hint) return;
+    if (!elements.shareVideoUrl?.checked) { hint.hidden = true; return; }
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, res => {
+        if (chrome.runtime.lastError) return;
+        hint.hidden = !(res && res.status === 'connected' && res.chatSupported === false);
+    });
+}
+
+// A click that would replace the selected tab waits here for explicit consent.
+let peerLinkConfirm = null; // { peerId, url }
+
+function rerenderPeers() {
+    lastPeersJson = '';
+    if (activePeers) updatePeerList(activePeers);
+}
+
+// Closing the confirmation rebuilds the list; keep keyboard users on the name.
+function closePeerLinkConfirmation(peerId) {
+    peerLinkConfirm = null;
+    rerenderPeers();
+    const name = [...document.querySelectorAll('[data-peer-link-open]')]
+        .find(element => element.dataset.peerLinkOpen === peerId && element.offsetParent);
+    name?.focus();
+}
+
+// Long hosts are cut from the left so the registrable domain stays visible.
+function displayPeerLinkHost(url) {
+    const host = peerLinkHost(url);
+    return host.length > 40 ? `…${host.slice(-39)}` : host;
+}
+
+async function selectedTabWouldBeReplaced(url) {
+    const status = await chrome.runtime.sendMessage({ type: 'GET_STATUS' }).catch(() => null);
+    const tabId = normalizeTabId(status?.targetTabId ?? status?.pendingTargetTabId);
+    if (tabId === null) return false;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    return !!tab && normalizePeerUrl(tab.url) !== url;
+}
+
+async function navigateToPeer(peerId, url) {
+    try {
+        const response = await chrome.runtime.sendMessage({ type: 'NAVIGATE_TO_PEER', peerId, url });
+        if (!['ok', 'navigating', 'superseded'].includes(response?.status)) showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error');
+    } catch (_) { showToast(getMessage('PEER_LINK_UNAVAILABLE'), 'error'); }
+}
+
+function createPeerLinkConfirmation(peerId, url) {
+    const panel = document.createElement('div');
+    panel.dataset.peerLinkConfirm = peerId;
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', getMessage('PEER_LINK_CONFIRM', { host: peerLinkHost(url) }));
+    panel.style.cssText = 'margin-top:6px; padding:6px 8px; border:1px solid var(--accent-terracotta); border-radius:6px; font-size:11px; display:flex; flex-wrap:wrap; align-items:center; gap:6px;';
+    const text = document.createElement('span');
+    text.style.cssText = 'flex:1 1 100%; overflow-wrap:anywhere;';
+    text.textContent = getMessage('PEER_LINK_CONFIRM', { host: peerLinkHost(url) });
+    const buttonStyle = 'display:inline-block; width:auto; margin:0; padding:3px 10px; font-size:11px;';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'primary';
+    confirm.dataset.action = 'confirm';
+    confirm.style.cssText = buttonStyle;
+    confirm.textContent = getMessage('PEER_LINK_CONFIRM_YES');
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.dataset.action = 'cancel';
+    cancel.style.cssText = buttonStyle;
+    cancel.textContent = getMessage('PEER_LINK_CONFIRM_NO');
+    confirm.addEventListener('click', async () => {
+        peerLinkConfirm = null;
+        rerenderPeers();
+        await navigateToPeer(peerId, url);
+    });
+    cancel.addEventListener('click', () => closePeerLinkConfirmation(peerId));
+    panel.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.stopPropagation(); closePeerLinkConfirmation(peerId); }
+    });
+    panel.append(text, confirm, cancel);
+    // Cancel is the safe default for keyboard users.
+    requestAnimationFrame(() => { if (cancel.isConnected && cancel.offsetParent) cancel.focus(); });
+    return panel;
+}
+
 function updatePeerList(peers) {
     if (!peers) return;
     activePeers = peers;
+    if (peerLinkConfirm && !peers.some(p => p.peerId === peerLinkConfirm.peerId && p.tabUrl === peerLinkConfirm.url)) peerLinkConfirm = null;
     if (peers.length === 0) {
         stopInterpolation();
     } else if (!interpolationInterval) {
@@ -933,12 +1025,13 @@ function updatePeerList(peers) {
         id: p.peerId,
         user: p.username,
         tab: p.tabTitle,
+        url: p.tabUrl,
         media: p.mediaTitle,
         state: p.playbackState,
         vol: p.volume,
         muted: p.muted
     }));
-    const currentPeersJson = JSON.stringify(stateToHash);
+    const currentPeersJson = JSON.stringify([getMessage('PEER_LINK_OPEN'), peerLinkConfirm, stateToHash]);
     if (currentPeersJson === lastPeersJson) return;
     lastPeersJson = currentPeersJson;
 
@@ -979,6 +1072,31 @@ function updatePeerList(peers) {
                 nameSpan.textContent = `${avatar} ${pId}`;
             }
 
+            const peerUrl = normalizePeerUrl(p.tabUrl);
+            if (peerUrl && pId !== localPeerId) {
+                nameSpan.setAttribute('role', 'button');
+                nameSpan.dataset.peerLinkOpen = pId;
+                nameSpan.tabIndex = 0;
+                nameSpan.title = `${getMessage('PEER_LINK_OPEN')}: ${peerUrl}`;
+                nameSpan.setAttribute('aria-label', `${getMessage('PEER_LINK_OPEN')}: ${pUsername || pId}`);
+                nameSpan.style.cursor = 'pointer';
+                nameSpan.style.textDecoration = 'underline dotted';
+                let opening = false;
+                const openPeer = async () => {
+                    if (opening) return;
+                    opening = true;
+                    try {
+                        if (await selectedTabWouldBeReplaced(peerUrl)) {
+                            peerLinkConfirm = { peerId: pId, url: peerUrl };
+                            rerenderPeers();
+                        } else await navigateToPeer(pId, peerUrl);
+                    } finally { opening = false; }
+                };
+                nameSpan.addEventListener('click', openPeer);
+                nameSpan.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPeer(); }
+                });
+            }
             header.appendChild(nameSpan);
 
             // Right-side badges + actions, kept in one group so they sit together
@@ -1055,6 +1173,18 @@ function updatePeerList(peers) {
 
             peerItem.appendChild(header);
 
+            if (peerUrl && pId !== localPeerId) {
+                const hostLine = document.createElement('div');
+                hostLine.dataset.peerLinkHost = '';
+                hostLine.style.cssText = 'font-size:10px; opacity:0.75; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px;';
+                hostLine.textContent = `↗ ${displayPeerLinkHost(peerUrl)}`;
+                hostLine.title = peerUrl;
+                peerItem.appendChild(hostLine);
+                if (peerLinkConfirm?.peerId === pId && peerLinkConfirm.url === peerUrl) {
+                    peerItem.appendChild(createPeerLinkConfirmation(pId, peerUrl));
+                }
+            }
+
             // Media Info
             if (p.mediaTitle) {
                 const mediaDiv = document.createElement('div');
@@ -1109,8 +1239,16 @@ function updatePeerList(peers) {
         });
     };
 
+    // Live updates rebuild the rows; keep keyboard focus on the same participant.
+    const focused = document.activeElement;
+    const focusedPeer = focused?.dataset?.peerLinkOpen;
+    const focusedList = focusedPeer ? focused.closest('#peerList, #peerListSync') : null;
     if (elements.peerList) renderPeers(elements.peerList);
     if (elements.peerListSync) renderPeers(elements.peerListSync);
+    if (focusedList) {
+        [...focusedList.querySelectorAll('[data-peer-link-open]')]
+            .find(element => element.dataset.peerLinkOpen === focusedPeer)?.focus();
+    }
 
     // Re-populate tabs to update Star Matching when peers change
     populateTabs(peers);
@@ -1619,6 +1757,13 @@ if (elements.chatStartMode) {
 if (elements.chatReactionDisplay) {
     elements.chatReactionDisplay.addEventListener('change', () => {
         chrome.storage.local.set({ chatReactionDisplay: elements.chatReactionDisplay.value === 'video' ? 'video' : 'chat' });
+    });
+}
+
+if (elements.shareVideoUrl) {
+    elements.shareVideoUrl.addEventListener('change', () => {
+        chrome.storage.local.set({ shareVideoUrl: elements.shareVideoUrl.checked });
+        refreshShareVideoUrlHint();
     });
 }
 
@@ -2506,6 +2651,7 @@ chrome.runtime.onMessage.addListener((msg) => {
         const inRoom = elements.sectionActive && elements.sectionActive.style.display === 'block';
         updateHostControlUI({ controlMode: msg.controlMode, amHost: msg.amHost, amController: msg.amController, controllers: msg.controllers, hostPeerId: msg.hostPeerId, hostControlSupported: msg.hostControlSupported, coHostSupported: msg.coHostSupported, inRoom });
     } else if (msg.type === 'CONNECTION_STATUS') {
+        refreshShareVideoUrlHint();
         if (msg.status === 'connected' || msg.status === 'disconnected') {
             if (joinBtnTimeout) { clearTimeout(joinBtnTimeout); joinBtnTimeout = null; }
         }
