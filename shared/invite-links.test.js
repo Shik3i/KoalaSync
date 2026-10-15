@@ -55,4 +55,39 @@ describe('invite links', () => {
         expect(parse('#join:ROOM:PASS:1:%E0%A4%A')).toBeNull();
         expect(parse('#other:r=ROOM&p=PASS&k=KEY')).toBeNull();
     });
+    it('extracts invites from pasted text regardless of domain', () => {
+        const api = globalThis.KoalaSyncInviteLinks;
+        const hash = api.buildJ2Hash({
+            roomId: 'SILENT-EAGLE-90',
+            password: '30PXPD',
+            chatKey: 'R5Ti1nxp0crfAFHf3gVncw',
+            serverUrl: 'wss://relay.example.test'
+        });
+        const expected = {
+            format: 'j2',
+            roomId: 'SILENT-EAGLE-90',
+            password: '30PXPD',
+            chatKey: 'R5Ti1nxp0crfAFHf3gVncw',
+            useCustomServer: true,
+            serverUrl: 'wss://relay.example.test'
+        };
+        expect(api.parseInviteText(`https://sync.koalastuff.net/join.html${hash}`)).toEqual(expected);
+        expect(api.parseInviteText(`https://sync.my-server.example/join${hash}`)).toEqual(expected);
+        expect(api.parseInviteText(`  join us: https://any.example/x${hash}\nsee you  `)).toEqual(expected);
+        expect(api.parseInviteText(hash)).toEqual(expected);
+        expect(api.parseInviteText('https://other.example/join#join:ROOM-1:PASS')).toMatchObject({
+            format: 'legacy',
+            roomId: 'ROOM-1',
+            password: 'PASS'
+        });
+    });
+
+    it('ignores pasted text without a valid invite', () => {
+        const parse = globalThis.KoalaSyncInviteLinks.parseInviteText;
+        expect(parse('SILENT-EAGLE-90')).toBeNull();
+        expect(parse('https://example.com/#section')).toBeNull();
+        expect(parse('https://example.com/join#j2:r=ROOM&p=PASS')).toBeNull();
+        expect(parse('')).toBeNull();
+        expect(parse(null)).toBeNull();
+    });
 });

@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://your-server:3000",
   "LABEL_ROOM_ID": "房间 ID",
   "LABEL_ROOM_ID_TOOLTIP": "您的同步室的唯一标识符",
-  "PLACEHOLDER_ROOM_ID": "输入Room ID",
+  "PLACEHOLDER_ROOM_ID": "房间ID或邀请链接",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "您要加入的房间的唯一ID",
   "LABEL_PASSWORD": "密码（可选）",
   "LABEL_PASSWORD_TOOLTIP": "可选密码以限制房间访问",

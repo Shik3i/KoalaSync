@@ -1645,6 +1645,20 @@ function updateRoomList(rooms) {
     });
 }
 
+function applyInvite(invite) {
+    elements.roomId.value = normalizeRoomId(invite.roomId);
+    elements.password.value = invite.password;
+    pendingInviteRoomId = elements.roomId.value;
+    pendingInviteChatKey = normalizeChatKey(invite.chatKey);
+
+    elements.serverUrl.value = invite.serverUrl;
+    setServerMode(invite.useCustomServer);
+    chrome.storage.local.set({ serverUrl: invite.serverUrl, useCustomServer: invite.useCustomServer });
+
+    elements.joinBtn.style.boxShadow = '0 0 15px var(--accent)';
+    setTimeout(() => elements.joinBtn.style.boxShadow = '', 2000);
+}
+
 function checkInviteLink() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0];
@@ -1652,22 +1666,22 @@ function checkInviteLink() {
             try {
                 const invite = globalThis.KoalaSyncInviteLinks.parseInviteHash(new URL(tab.url).hash);
                 if (!invite) return;
-                elements.roomId.value = normalizeRoomId(invite.roomId);
-                elements.password.value = invite.password;
-                pendingInviteRoomId = elements.roomId.value;
-                pendingInviteChatKey = normalizeChatKey(invite.chatKey);
-
-                elements.serverUrl.value = invite.serverUrl;
-                setServerMode(invite.useCustomServer);
-                chrome.storage.local.set({ serverUrl: invite.serverUrl, useCustomServer: invite.useCustomServer });
-
-                elements.joinBtn.style.boxShadow = '0 0 15px var(--accent)';
-                setTimeout(() => elements.joinBtn.style.boxShadow = '', 2000);
+                applyInvite(invite);
             } catch (_e) {
                 // Malformed invite link, ignore
             }
         }
     });
+}
+
+// Pasting a full invite link (any domain) into the room or password field
+// fills in everything. Uses the paste event, so no clipboard permission.
+function handleInvitePaste(event) {
+    const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+    const invite = globalThis.KoalaSyncInviteLinks.parseInviteText(text);
+    if (!invite) return;
+    event.preventDefault();
+    applyInvite(invite);
 }
 
 function setServerMode(custom) {
@@ -2047,6 +2061,9 @@ function showError(msg) {
 }
 
 // --- Action Handlers ---
+elements.roomId.addEventListener('paste', handleInvitePaste);
+elements.password.addEventListener('paste', handleInvitePaste);
+
 elements.roomId.addEventListener('input', () => {
     elements.roomId.value = normalizeRoomId(elements.roomId.value);
     pendingRoomCreation = false;

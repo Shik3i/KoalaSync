@@ -61,6 +61,20 @@
         return parseJ2Hash(hash) || parseLegacyHash(hash);
     }
 
+    // Pulls an invite out of arbitrary pasted text (full link on any domain,
+    // bare hash, or a message containing the link). Only the fragment counts.
+    function parseInviteText(text) {
+        if (typeof text !== 'string') return null;
+        for (const prefix of [J2_PREFIX, LEGACY_PREFIX]) {
+            const start = text.indexOf(prefix);
+            if (start === -1) continue;
+            const hash = text.slice(start).split(/\s/, 1)[0];
+            const invite = parseInviteHash(hash);
+            if (invite) return invite;
+        }
+        return null;
+    }
+
     function buildJ2Hash({ roomId, password, chatKey, serverUrl = '' }) {
         if (!roomId || !password || !chatKey) throw new TypeError('roomId, password, and chatKey are required');
         const params = new URLSearchParams({ r: roomId, p: password, k: chatKey });
@@ -72,6 +86,7 @@
         J2_PREFIX,
         LEGACY_PREFIX,
         parseInviteHash,
+        parseInviteText,
         buildJ2Hash
     });
 })(globalThis);

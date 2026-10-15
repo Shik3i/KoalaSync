@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://ваш-сервер:3000",
   "LABEL_ROOM_ID": "ID комнаты",
   "LABEL_ROOM_ID_TOOLTIP": "Уникальный идентификатор вашей синхронной комнаты",
-  "PLACEHOLDER_ROOM_ID": "Введите ID комнаты",
+  "PLACEHOLDER_ROOM_ID": "ID комнаты или ссылка-приглашение",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "Уникальный ID комнаты, к которой хотите присоединиться",
   "LABEL_PASSWORD": "Пароль (Опционально)",
   "LABEL_PASSWORD_TOOLTIP": "Дополнительный пароль для ограничения доступа к комнате",

@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://your-server:3000",
   "LABEL_ROOM_ID": "ルームID",
   "LABEL_ROOM_ID_TOOLTIP": "同期ルームの固有の識別子",
-  "PLACEHOLDER_ROOM_ID": "ルームIDを入力",
+  "PLACEHOLDER_ROOM_ID": "ルームIDまたは招待リンク",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "参加したいルームの固有のID",
   "LABEL_PASSWORD": "パスワード（任意）",
   "LABEL_PASSWORD_TOOLTIP": "ルームへのアクセスを制限するための任意のパスワード",

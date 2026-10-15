@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://dein-server:3000",
   "LABEL_ROOM_ID": "Raum-ID",
   "LABEL_ROOM_ID_TOOLTIP": "Der eindeutige Identifikator für deinen Sync-Raum",
-  "PLACEHOLDER_ROOM_ID": "Raum-ID eingeben",
+  "PLACEHOLDER_ROOM_ID": "Raum-ID oder Einladungslink",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "Die eindeutige ID des Raums, dem du beitreten möchtest",
   "LABEL_PASSWORD": "Passwort (Optional)",
   "LABEL_PASSWORD_TOOLTIP": "Optionales Passwort, um den Raumzugang zu beschränken",
