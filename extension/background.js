@@ -293,7 +293,23 @@ let linkTask = Promise.resolve();
 let linkSendTimer = null;
 let linkSharingGeneration = 0;
 let linkSessionGeneration = 0;
-function revokeLocalPeerUrl() {
+// Set once the selected tab's current document has shown a video (activation with
+// video, a heartbeat, or an adopted player frame) and cleared when that tab starts
+// loading another document. Only such a document is shared, so a selected tab
+// that is later taken to an unrelated page does not publish that page.
+let linkDocumentConfirmed = false;
+function linkTargetShareable() {
+    const selected = normalizeTabId(currentTabId);
+    return selected !== null && selected === normalizeTabId(userSelectedTabId)
+        && currentTargetHasVideo === true && linkDocumentConfirmed;
+}
+function confirmLinkDocument() {
+    if (linkDocumentConfirmed) return;
+    linkDocumentConfirmed = true;
+    updatePeerLinks();
+}
+function revokeLocalPeerUrl({ keepDocument = false } = {}) {
+    if (!keepDocument) linkDocumentConfirmed = false;
     linkSharingGeneration++;
     peerUrls.delete(peerId);
     // publish clears an obsolete queued URL synchronously, before encryption.
@@ -319,9 +335,10 @@ function pumpPeerLinks() {
         try {
             const { shareVideoUrl, roomId } = await chrome.storage.local.get(['shareVideoUrl', 'roomId']);
             if (!session || session !== linkSession || expected !== connectionGeneration || roomId !== currentRoom?.roomId) return;
-            if (shareVideoUrl !== true || normalizeTabId(currentTabId) !== normalizeTabId(userSelectedTabId)) await session.publish(null);
+            if (shareVideoUrl !== true || !linkTargetShareable()) await session.publish(null);
             if (session !== linkSession || expected !== connectionGeneration || !session.pending || !currentRoom || socket?.readyState !== WebSocket.OPEN || !isNamespaceJoined) return;
-            const limit = chatSendLimiter.take({ reserve: PEER_LINK_CHAT_RESERVE });
+            // A withdrawal may use the whole relay budget; it must never queue behind chat.
+            const limit = chatSendLimiter.take({ reserve: session.urgent ? 0 : PEER_LINK_CHAT_RESERVE });
             if (limit.allowed) {
                 const ciphertext = session.nextPacket();
                 if (ciphertext) emitLive(EVENTS.CHAT_MESSAGE, { ciphertext });
@@ -363,10 +380,10 @@ function updatePeerLinks(packet = null, senderId = null, announce = false) {
         const sharingGeneration = linkSharingGeneration;
         const selected = normalizeTabId(currentTabId);
         const { shareVideoUrl } = await chrome.storage.local.get('shareVideoUrl');
-        const tab = selected && shareVideoUrl === true ? await chrome.tabs.get(selected).catch(() => null) : null;
+        const tab = shareVideoUrl === true && linkTargetShareable() ? await chrome.tabs.get(selected).catch(() => null) : null;
         if (expected !== connectionGeneration || session !== linkSession) return;
         if (sharingGeneration === linkSharingGeneration) {
-            const url = selected === normalizeTabId(currentTabId) && selected === normalizeTabId(userSelectedTabId) ? normalizePeerUrl(tab?.url) : null;
+            const url = selected === normalizeTabId(currentTabId) && linkTargetShareable() ? normalizePeerUrl(tab?.url) : null;
             await session.publish(url);
             if (sharingGeneration === linkSharingGeneration && session === linkSession) {
                 if (url) peerUrls.set(peerId, url); else peerUrls.delete(peerId);
@@ -1205,6 +1222,7 @@ function adoptReportingFrame(sender) {
         && (!currentTargetDocumentId || sender.documentId === currentTargetDocumentId)) {
         if (currentTargetHasVideo === true) return false;
         currentTargetHasVideo = true;
+        confirmLinkDocument();
         stopMediaDiscoveryPoll();
         chrome.storage.session.set({ currentTargetHasVideo }).catch(() => {});
         requestCanonicalMediaRecoveryAttempt();
@@ -1214,6 +1232,7 @@ function adoptReportingFrame(sender) {
     currentTargetFrameId = senderFrameId;
     currentTargetDocumentId = typeof sender.documentId === 'string' ? sender.documentId : null;
     currentTargetHasVideo = true;
+    confirmLinkDocument();
     stopMediaDiscoveryPoll();
     rememberFrameId(senderTabId, senderFrameId);
     addLog(`Adopted frame ${senderFrameId} as the media target; it reported playback`, 'info');
@@ -1825,7 +1844,8 @@ function broadcastConnectionStatus(status) {
     chrome.runtime.sendMessage({ type: 'CONNECTION_STATUS', status }).catch(() => {});
     if (currentTabId) {
         sendMessageToCurrentContent({ type: 'CONNECTION_STATUS', status }).catch(() => {});
-        sendMessageToChatOverlay({ type: 'CONNECTION_STATUS', status }).catch(() => {});
+        // The overlay lives in the top frame; a top-level target already got it.
+        if (normalizeFrameId(currentTargetFrameId) !== 0) sendMessageToChatOverlay({ type: 'CONNECTION_STATUS', status }).catch(() => {});
     }
     updateBadgeStatus();
 }
@@ -4593,6 +4613,7 @@ async function activateTargetTab(tabId, tabTitle, {
         }
         updateBadgeStatus();
         sendMessageToChatOverlay({ type: 'CHAT_CONTEXT_UPDATE' }).catch(() => {});
+        linkDocumentConfirmed = currentTargetHasVideo;
         updatePeerLinks();
         if (currentTargetHasVideo) {
             await tryApplyPendingCanonicalMediaState();
@@ -5113,7 +5134,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
     if (changes.shareVideoUrl) {
         linkSharingGeneration++;
-        if (changes.shareVideoUrl.newValue !== true) revokeLocalPeerUrl();
+        if (changes.shareVideoUrl.newValue !== true) revokeLocalPeerUrl({ keepDocument: true });
     }
     if (changes.chatKey || changes.roomId) resetPeerLinks();
     if (changes.shareVideoUrl || changes.chatKey) updatePeerLinks();
@@ -5234,7 +5255,8 @@ async function handleAsyncMessage(message, sender, sendResponse) {
         sendResponse({
             status,
             peerId,
-            peers: peersWithUrls(),
+            // Shared links are for the popup; content scripts get the plain roster.
+            peers: isExtensionPageSender(sender) ? peersWithUrls() : (currentRoom?.peers || []),
             lastActionState,
             targetTabId: publicTargetTabId,
             targetTabTitle: userSelectedTabTitle ?? currentTabTitle,
@@ -5859,6 +5881,8 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             currentTabTitle = sender.tab.title ? sender.tab.title.substring(0, 50) : null;
             chrome.storage.session.set({ currentTabTitle });
             updateBadgeStatus();
+            // content.js sends heartbeats only while it finds a video.
+            linkDocumentConfirmed = true;
         }
 
         requestCanonicalMediaRecoveryAttempt();
@@ -6287,6 +6311,9 @@ getSettings().then(settings => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     ensureState().then(async () => {
         if (changeInfo.status === 'complete') await peerNavigator.complete(tabId);
-        if (tabId === normalizeTabId(currentTabId) && (changeInfo.url || changeInfo.status === 'complete')) updatePeerLinks();
+        if (tabId !== normalizeTabId(currentTabId)) return;
+        // A new document must show a video again before its URL is shared.
+        if (changeInfo.status === 'loading' && linkDocumentConfirmed) revokeLocalPeerUrl();
+        if (changeInfo.url || changeInfo.status === 'complete') updatePeerLinks();
     }).catch(() => {});
 });

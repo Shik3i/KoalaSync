@@ -2,8 +2,8 @@
 // URLs and sender keys are encrypted; only ephemeral public keys and routing
 // metadata are public. Peers holding the same chat secret receive the sender key
 // through one broadcast frame wrapped under a secret-derived group key, so the
-// handshake costs O(1) frames per peer. Only peers without that secret fall back
-// to per-pair ECDH, which trusts relay identity.
+// handshake costs O(1) frames per peer. Only rooms without any chat secret use
+// per-pair ECDH, which trusts relay identity; secret holders never fall back to it.
 const PREFIX = 'KoalaSyncLinks1:';
 const encoder = new globalThis.TextEncoder();
 const decoder = new globalThis.TextDecoder('utf-8', { fatal: true });
@@ -117,6 +117,18 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
             const previous = peers.get(id);
             if (previous?.epoch === packet.s) return;
             const shared = groupKey !== null && packet.a === tag;
+            // A chat-secret holder never falls back to relay-trusted ECDH: a relay
+            // could otherwise strip the tag from a forged hello and receive the
+            // sender key. Peers exchange links only within one secret group, or
+            // pairwise when neither side holds a secret.
+            if (!shared && (groupKey !== null || packet.a !== '')) {
+                if (previous) {
+                    peers.delete(id);
+                    outbox.delete(`key:${id}`);
+                    onUrl(id, null);
+                }
+                return;
+            }
             const pair = shared ? null : await pairKey(id, packet);
             if (closed || !members.has(id)) return;
             const entry = { epoch: packet.s, pair, shared, key: null, revision: -1, pending: null };
@@ -189,6 +201,8 @@ export async function createPeerLinkSession({ roomId, peerId, chatSecret = '', o
             return packet;
         },
         get pending() { return outbox.size > 0; },
+        // A queued withdrawal must not wait behind user chat for relay budget.
+        get urgent() { return withdrawing && outbox.has('url'); },
         close() { closed = true; outbox.clear(); peers.clear(); members.clear(); senderRaw.fill(0); }
     };
 }

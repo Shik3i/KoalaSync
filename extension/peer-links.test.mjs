@@ -45,20 +45,20 @@ async function network(secrets = ['', '', ''], cryptoOverrides = []) {
 }
 
 describe('encrypted room-wide peer links through the unchanged chat envelope', () => {
-    function backgroundHarness() {
+    function backgroundHarness({ confirmed = true } = {}) {
         const source = fs.readFileSync(new URL('./background.js', import.meta.url), 'utf8');
         const block = source.slice(source.indexOf('const peerUrls ='), source.indexOf('const peerNavigator ='));
         const callbacks = [];
         let published = null;
         const session = {
             publish: vi.fn(async value => { published = value; }),
-            pending: true, setPeers() {}, announce() {}, close() {},
+            pending: true, urgent: false, setPeers() {}, announce() {}, close() {},
             nextPacket: vi.fn(() => published === null ? 'withdrawn' : 'url'),
             receive: vi.fn()
         };
         const env = {
             connectionGeneration: 1, currentRoom: { roomId: 'room', peers: [] }, peerId: 'me',
-            currentTabId: 1, userSelectedTabId: 1, normalizeTabId: v => v, normalizePeerUrl,
+            currentTabId: 1, userSelectedTabId: 1, currentTargetHasVideo: true, normalizeTabId: v => v, normalizePeerUrl,
             serverSupportsChat: () => true, getSettings: async () => ({ roomId: 'room', chatKey: '' }),
             createPeerLinkSession: async () => session, addLog: vi.fn(),
             setTimeout: fn => { callbacks.push(fn); return callbacks.length; }, clearTimeout() {},
@@ -66,9 +66,9 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
                 tabs: { get: vi.fn(async () => ({ url: 'https://example.org/private' })) },
                 runtime: { sendMessage: async () => {} } },
             socket: { readyState: 1 }, WebSocket: { OPEN: 1 }, isNamespaceJoined: true,
-            chatSendLimiter: { take: () => ({ allowed: true }) }, PEER_LINK_CHAT_RESERVE: 4, EVENTS: { CHAT_MESSAGE: 'chat' }, emitLive: vi.fn()
+            chatSendLimiter: { take: vi.fn(() => ({ allowed: true })) }, PEER_LINK_CHAT_RESERVE: 4, EVENTS: { CHAT_MESSAGE: 'chat' }, emitLive: vi.fn()
         };
-        vm.runInNewContext(block + '\nglobalThis.harness = { updatePeerLinks, revokeLocalPeerUrl };', env);
+        vm.runInNewContext(block + `\nlinkDocumentConfirmed = ${confirmed};\nglobalThis.harness = { updatePeerLinks, revokeLocalPeerUrl };`, env);
         return { ...env.harness, env, session, callbacks };
     }
     it('does not republish a tab URL whose lookup finishes after privacy revocation', async () => {
@@ -101,6 +101,27 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
         expect(h.env.chrome.tabs.get).not.toHaveBeenCalled();
         expect(h.session.publish).toHaveBeenCalledWith(null);
         expect(h.session.publish).not.toHaveBeenCalledWith(expect.any(String));
+    });
+    it.each([
+        ['the selected target has no video', { currentTargetHasVideo: false }, true],
+        ['the current document never showed a video', {}, false],
+        ['activation of the selection is still pending', { currentTabId: null }, true]
+    ])('does not read or share the tab URL while %s', async (_, overrides, confirmed) => {
+        const h = backgroundHarness({ confirmed });
+        Object.assign(h.env, overrides);
+        await h.updatePeerLinks();
+        expect(h.env.chrome.tabs.get).not.toHaveBeenCalled();
+        expect(h.session.publish).not.toHaveBeenCalledWith(expect.any(String));
+    });
+    it('lets a queued withdrawal use the budget reserved for chat', async () => {
+        const h = backgroundHarness();
+        await h.updatePeerLinks();
+        h.session.urgent = true;
+        await h.callbacks[0]();
+        expect(h.env.chatSendLimiter.take).toHaveBeenLastCalledWith({ reserve: 0 });
+        h.session.urgent = false;
+        await h.callbacks[1]();
+        expect(h.env.chatSendLimiter.take).toHaveBeenLastCalledWith({ reserve: 4 });
     });
     it('publishes the tab URL once sharing is enabled (control)', async () => {
         const h = backgroundHarness();
@@ -170,9 +191,9 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
         });
         expect(limiter.take().allowed).toBe(false);
     });
-    it.each(['manual', 'shared', 'mixed'])('exchanges dynamic links for every pair: %s', async mode => {
+    it.each(['manual', 'shared'])('exchanges dynamic links for every pair: %s', async mode => {
         const secret = generateChatSecret();
-        const n = await network(mode === 'manual' ? ['', '', ''] : mode === 'shared' ? [secret, secret, secret] : [secret, '', secret]);
+        const n = await network(mode === 'manual' ? ['', '', ''] : [secret, secret, secret]);
         for (let i = 0; i < 3; i++) await n.sessions[i].publish(`https://example.org/video/${i}`);
         await n.drain();
         for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== j) expect(n.seen[i].get(String(j + 1))).toBe(`https://example.org/video/${j}`);
@@ -206,25 +227,58 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
         expect(n.seen[25].get('1')).toBe('https://example.org/0');
     });
 
-    it('serves secret holders with one group key and unkeyed peers with pairwise keys', async () => {
+    it('keeps secret holders and unkeyed peers apart instead of trusting the relay', async () => {
         const secret = generateChatSecret();
         const n = await network([secret, secret, '']);
         for (let i = 0; i < 3; i++) await n.sessions[i].publish(`https://example.org/${i}`);
         await n.drain();
-        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== j) expect(n.seen[i].get(String(j + 1))).toBe(`https://example.org/${j}`);
+        expect(n.seen[0].get('2')).toBe('https://example.org/1');
+        expect(n.seen[1].get('1')).toBe('https://example.org/0');
+        for (const [recipient, sender] of [[0, '3'], [1, '3'], [2, '1'], [2, '2']]) expect(n.seen[recipient].get(sender) ?? null).toBeNull();
         expect(n.wire.filter(f => f.packet.t === 'gkey').map(f => f.id).sort()).toEqual(['1', '2']);
-        // The unkeyed peer only gets pairwise keys from the keyed peers.
-        expect(n.wire.filter(f => f.packet.t === 'key').every(f => f.packet.to === '3' || f.id === '3')).toBe(true);
+        expect(n.wire.some(f => f.packet.t === 'key')).toBe(false);
     });
 
-    it('does not exchange group keys between different chat secrets', async () => {
+    it('does not exchange links between different chat secrets', async () => {
         const n = await network([generateChatSecret(), generateChatSecret()]);
         await n.sessions[0].publish('https://example.org/a');
         await n.sessions[1].publish('https://example.org/b');
         await n.drain();
-        expect(n.wire.some(f => f.packet.t === 'gkey')).toBe(false);
-        expect(n.seen[0].get('2')).toBe('https://example.org/b');
-        expect(n.seen[1].get('1')).toBe('https://example.org/a');
+        expect(n.wire.some(f => f.packet.t === 'gkey' || f.packet.t === 'key')).toBe(false);
+        expect(n.seen[0].get('2') ?? null).toBeNull();
+        expect(n.seen[1].get('1') ?? null).toBeNull();
+    });
+
+    it('never hands a sender key to a relay that strips the tag from a forged hello', async () => {
+        const secret = generateChatSecret();
+        const n = await network([secret, secret]);
+        await n.sessions[1].publish('https://example.org/private?session=1');
+        await n.drain();
+        expect(n.seen[0].get('2')).toBe('https://example.org/private?session=1');
+        const relayKeys = await globalThis.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+        const p = Buffer.from(new Uint8Array(await globalThis.crypto.subtle.exportKey('raw', relayKeys.publicKey))).toString('base64url');
+        // The relay impersonates peer 1 with its own key and no tag.
+        await n.sessions[1].receive('1', { t: 'hello', s: 'F'.repeat(22), p, a: '' });
+        const answered = [];
+        while (n.sessions[1].pending) answered.push(readPeerLinkPacket(n.sessions[1].nextPacket()).t);
+        expect(answered).not.toContain('key');
+        // The genuine session is left intact.
+        await n.sessions[1].publish('https://example.org/private?session=2');
+        await n.drain();
+        expect(n.seen[0].get('2')).toBe('https://example.org/private?session=2');
+    });
+
+    it('drops a peer that restarts without the shared secret', async () => {
+        const secret = generateChatSecret();
+        const n = await network([secret, secret]);
+        await n.sessions[0].publish('https://example.org/keyed');
+        await n.drain();
+        expect(n.seen[1].get('1')).toBe('https://example.org/keyed');
+        const unkeyed = await createPeerLinkSession({ roomId: 'test-room', peerId: '1' });
+        unkeyed.setPeers(['1', '2']);
+        unkeyed.announce();
+        await n.sessions[1].receive('1', readPeerLinkPacket(unkeyed.nextPacket()));
+        expect(n.seen[1].get('1')).toBeNull();
     });
 
     it('rejects a participant that copies a chat-secret tag without knowing the secret', async () => {
@@ -263,9 +317,12 @@ describe('encrypted room-wide peer links through the unchanged chat envelope', (
     it('sends a withdrawal ahead of queued handshake frames', async () => {
         const n = await network(['', '', '']);
         await n.sessions[0].publish('https://example.org/revoked');
+        expect(n.sessions[0].urgent).toBe(false);
         await n.sessions[0].publish(null);
+        expect(n.sessions[0].urgent).toBe(true);
         const first = readPeerLinkPacket(n.sessions[0].nextPacket());
         expect(first.t).toBe('url');
+        expect(n.sessions[0].urgent).toBe(false);
         const second = readPeerLinkPacket(n.sessions[0].nextPacket());
         expect(second.t).toBe('hello');
         // Once sent, the withdrawal no longer outranks later handshakes.

@@ -67,6 +67,11 @@ for (const keyed of [true, false]) {
             await expect.poll(() => link(bc, 'Alice'), { timeout: 30000 }).toBe(a1);
             const navigated = `${a1}&nav=1`; await pageA1.goto(navigated);
             await expect.poll(() => link(bc, 'Alice'), { timeout: 30000 }).toBe(navigated);
+            // A page without a video is never shared, even on another site in the selected tab.
+            await pageA1.goto(`${baseURL.replace('localhost', '127.0.0.1')}/pages/no-video.html?mail=inbox&token=private`);
+            await expect.poll(() => link(bc, 'Alice'), { timeout: 30000 }).toBeNull();
+            await pageA1.goto(navigated);
+            await expect.poll(() => link(bc, 'Alice'), { timeout: 30000 }).toBe(navigated);
             await pageA1.close();
             await expect.poll(() => link(bc, 'Alice'), { timeout: 30000 }).toBeNull();
 
