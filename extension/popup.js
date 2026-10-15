@@ -944,6 +944,21 @@ function rerenderPeers() {
     if (activePeers) updatePeerList(activePeers);
 }
 
+// Closing the confirmation rebuilds the list; keep keyboard users on the name.
+function closePeerLinkConfirmation(peerId) {
+    peerLinkConfirm = null;
+    rerenderPeers();
+    const name = [...document.querySelectorAll('[data-peer-link-open]')]
+        .find(element => element.dataset.peerLinkOpen === peerId && element.offsetParent);
+    name?.focus();
+}
+
+// Long hosts are cut from the left so the registrable domain stays visible.
+function displayPeerLinkHost(url) {
+    const host = peerLinkHost(url);
+    return host.length > 40 ? `…${host.slice(-39)}` : host;
+}
+
 async function selectedTabWouldBeReplaced(url) {
     const status = await chrome.runtime.sendMessage({ type: 'GET_STATUS' }).catch(() => null);
     const tabId = normalizeTabId(status?.targetTabId ?? status?.pendingTargetTabId);
@@ -985,9 +1000,9 @@ function createPeerLinkConfirmation(peerId, url) {
         rerenderPeers();
         await navigateToPeer(peerId, url);
     });
-    cancel.addEventListener('click', () => { peerLinkConfirm = null; rerenderPeers(); });
+    cancel.addEventListener('click', () => closePeerLinkConfirmation(peerId));
     panel.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { event.stopPropagation(); peerLinkConfirm = null; rerenderPeers(); }
+        if (event.key === 'Escape') { event.stopPropagation(); closePeerLinkConfirmation(peerId); }
     });
     panel.append(text, confirm, cancel);
     // Cancel is the safe default for keyboard users.
@@ -1060,6 +1075,7 @@ function updatePeerList(peers) {
             const peerUrl = normalizePeerUrl(p.tabUrl);
             if (peerUrl && pId !== localPeerId) {
                 nameSpan.setAttribute('role', 'button');
+                nameSpan.dataset.peerLinkOpen = pId;
                 nameSpan.tabIndex = 0;
                 nameSpan.title = `${getMessage('PEER_LINK_OPEN')}: ${peerUrl}`;
                 nameSpan.setAttribute('aria-label', `${getMessage('PEER_LINK_OPEN')}: ${pUsername || pId}`);
@@ -1161,7 +1177,7 @@ function updatePeerList(peers) {
                 const hostLine = document.createElement('div');
                 hostLine.dataset.peerLinkHost = '';
                 hostLine.style.cssText = 'font-size:10px; opacity:0.75; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px;';
-                hostLine.textContent = `↗ ${peerLinkHost(peerUrl)}`;
+                hostLine.textContent = `↗ ${displayPeerLinkHost(peerUrl)}`;
                 hostLine.title = peerUrl;
                 peerItem.appendChild(hostLine);
                 if (peerLinkConfirm?.peerId === pId && peerLinkConfirm.url === peerUrl) {

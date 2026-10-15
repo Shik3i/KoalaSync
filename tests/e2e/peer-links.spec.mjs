@@ -30,6 +30,10 @@ test('video-link privacy setting defaults off and persists through popup reopeni
     await page.locator('summary[data-i18n="LABEL_PRIVACY_SETTINGS"]').click();
     await expect(page.locator('#shareVideoUrl')).not.toBeChecked();
     await expect(page.locator('label[for="shareVideoUrl"]')).toHaveAttribute('title', /.+/);
+    // The disclosure is visible text, not only a tooltip.
+    await expect(page.locator('#shareVideoUrlDescription')).toBeVisible();
+    await expect(page.locator('#shareVideoUrlDescription')).toContainText('full URL');
+    await expect(page.locator('#shareVideoUrl')).toHaveAttribute('aria-describedby', 'shareVideoUrlDescription');
     await page.locator('label.toggle-switch:has(#shareVideoUrl)').click();
     await expect.poll(() => page.evaluate(async () => (await chrome.storage.local.get('shareVideoUrl')).shareVideoUrl)).toBe(true);
     await page.reload();
@@ -81,7 +85,7 @@ test('the setting explains that a relay without chat support cannot share links'
     } finally { await stopRelay(relay); }
 });
 
-test('chat appears on first selection and URL clicks work for every peer without invitation keys', async ({ context, extensionId, baseURL }) => {
+test('chat appears on first selection and URL clicks work for a late joiner without a selected tab', async ({ context, extensionId, baseURL }) => {
     test.setTimeout(150000);
     const others = [];
     let relay;
@@ -108,8 +112,9 @@ test('chat appears on first selection and URL clicks work for every peer without
         await b.locator('#koalasync-chat-overlay-host textarea').press('Enter');
         await expect(a.getByText('First-selection chat', { exact: true })).toBeVisible();
 
-        // Late manual join, chat disabled, no target selected.
-        await connect(pages[2], relayUrl, 'Charlie');
+        // Late join with the invitation's chat secret, no target selected. Secret
+        // holders exchange links only within their secret group.
+        await connect(pages[2], relayUrl, 'Charlie', chatKey);
         await expect.poll(async () => (await status(pages[2])).peers.filter(p => p.tabUrl).length, { timeout: 25000 }).toBe(2);
         const aliceId = (await status(pages[0])).peerId;
         const bobId = (await status(pages[1])).peerId;
@@ -147,6 +152,7 @@ test('chat appears on first selection and URL clicks work for every peer without
         await expect(confirmation.locator('button[data-action="cancel"]')).toBeFocused();
         await confirmation.locator('button[data-action="cancel"]').click();
         await expect(confirmation).toHaveCount(0);
+        await expect(popup.locator('#peerListSync [role="button"]').filter({ hasText: 'Bob' })).toBeFocused();
         await expect(created).toHaveURL(aUrl);
 
         // Escape also cancels; a changed link can never be opened by an old confirmation.

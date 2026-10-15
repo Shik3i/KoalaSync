@@ -83,7 +83,8 @@ export function getMessage(key, placeholders = null) {
     let msg = activeDictionary[key] !== undefined ? String(activeDictionary[key]) : key;
     if (placeholders && typeof placeholders === 'object') {
         for (const [k, v] of Object.entries(placeholders)) {
-            msg = msg.replace(new RegExp(`{${k}}`, 'g'), v);
+            // A replacer function keeps `$&`-style patterns in user data literal.
+            msg = msg.replace(new RegExp(`{${k}}`, 'g'), () => String(v));
         }
     }
     return msg;
