@@ -5,9 +5,9 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
-## Unreleased
+## [v3.3.0] — 2026-10-16
 
-This update lets participants open each other's video with one click, accepts
+This release lets participants open each other's video with one click, accepts
 pasted invite links from any domain, and makes chat available as soon as a
 player is selected.
 
