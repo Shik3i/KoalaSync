@@ -7,16 +7,24 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ## Unreleased
 
+This update lets participants open each other's video with one click, accepts
+pasted invite links from any domain, and makes chat available as soon as a
+player is selected.
+
 ### Added
-- **Extension: Optional shared video links** — Participants can opt in under Settings → Privacy → Share video link. Everyone in the room can then open a peer's page by clicking their name in the participant list, in the selected tab or a new one. URLs travel encrypted through the existing relay chat envelope, so no relay change is required; only HTTP(S) URLs up to 900 bytes are shared, including query string and fragment. Peers that share the invitation's chat secret exchange keys in a constant number of frames per participant and never fall back to the relay-trusted key exchange, so they share links only with each other; rooms without a chat secret use a pairwise exchange. A link is shared only while the selected tab shows a detected video, and a withdrawal is never delayed by chat traffic. The participant list shows each link's destination host (insecure `http://` and punycode look-alikes stay visible), and KoalaSync asks before replacing an already selected tab; a link that changed after it was displayed is never opened by an earlier confirmation.
-- **Extension: Paste invite links into the popup** — Pasting a full invite link into the Room ID or Password field fills in room, password, chat key and relay. Only the link's `#` fragment is read, so links on any domain work, including self-hosted relays when `sync.koalastuff.net` is unreachable. No clipboard permission and no extra page injection are required ([#47](https://github.com/Shik3i/KoalaSync/issues/47)).
+- **Shared video links (opt-in)** — With *Settings → Privacy → Share video link* enabled, clicking a participant's name opens their video in the selected tab or a new one. Off by default; the full URL including query string and fragment is shared end-to-end encrypted through the existing chat relay, without relay changes.
+- **Safe link opening** — Each participant row shows the destination host, and KoalaSync asks before replacing an already selected tab; a link that changed after it was shown is never opened.
+- **Link privacy** — Links are shared only while the selected tab shows a detected video and are withdrawn when sharing is turned off, the tab changes or navigates away, or you leave the room. Participants holding the invitation's chat secret exchange links only with each other.
+- **Relay compatibility note** — On a relay without encrypted chat, the setting explains that sharing is inactive there.
+- **Paste invite links** — Pasting an invite link into the popup's join view fills in room, password, chat key and relay. Only the link's `#` part is read, so links on any domain work, including self-hosted setups when `sync.koalastuff.net` is unreachable. No clipboard permission or extra page access is needed ([#47](https://github.com/Shik3i/KoalaSync/issues/47)).
 
 ### Fixed
-- **Extension: Chat available immediately after selecting a player** — The chat overlay now activates at once for top-level and embedded players instead of after a reselection or reload.
-- **Extension: Invite chat key kept after a failed room creation** — Joining from an invite right after a "Create New Room" attempt failed (for example, custom server without URL) no longer replaces the invitation's chat key with a new one.
+- **Chat on first selection** — The chat overlay now appears immediately for top-level and embedded players instead of after a reselection or reload.
+- **Invite chat after a failed "Create"** — Joining from an invite right after a failed room creation (for example, custom server without URL) keeps the invitation's chat key instead of generating a new one.
 
 ### Security
-- **Dependencies: Patched development tooling advisories** — Updated vitest, addons-linter, sharp, svgo, undici and the pinned brace-expansion, fast-uri, js-yaml and postcss overrides. `npm audit` reports no known vulnerabilities for the root and relay packages. The extension and relay runtime dependencies are unchanged.
+- **Relay dependencies** — Updates engine.io and proxy-addr to clear two published production advisories.
+- **Development dependencies** — Updates vitest, addons-linter, sharp, svgo and undici and raises the brace-expansion, fast-uri, js-yaml and postcss overrides to patched releases. The shipped extension is unaffected.
 
 ## [v3.2.0] — 2026-09-01
 
