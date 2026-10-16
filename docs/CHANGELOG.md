@@ -13,6 +13,7 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ### Fixed
 - **Extension: Chat available immediately after selecting a player** — The chat overlay now activates at once for top-level and embedded players instead of after a reselection or reload.
+- **Extension: Invite chat key kept after a failed room creation** — Joining from an invite right after a "Create New Room" attempt failed (for example, custom server without URL) no longer replaces the invitation's chat key with a new one.
 
 ### Security
 - **Dependencies: Patched development tooling advisories** — Updated vitest, addons-linter, sharp, svgo, undici and the pinned brace-expansion, fast-uri, js-yaml and postcss overrides. `npm audit` reports no known vulnerabilities for the root and relay packages. The extension and relay runtime dependencies are unchanged.
