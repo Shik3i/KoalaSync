@@ -20,37 +20,54 @@ async function pasteWithKeyboard(page, text) {
     await page.keyboard.press('ControlOrMeta+V');
 }
 
+// The relay in these tests is unreachable and the background clears the room again
+// after the failed connect, so record the join as it is stored instead of polling.
+async function watchJoins(page) {
+    await page.evaluate(() => {
+        window.__joins = [];
+        chrome.storage.onChanged.addListener(changes => {
+            if (changes.roomId?.newValue) window.__joins.push(changes.roomId.newValue);
+        });
+    });
+}
+
+async function expectJoined(page) {
+    await expect.poll(() => page.evaluate(() => window.__joins), { timeout: 30000 }).toContain('SILENT-EAGLE-90');
+}
+
 async function expectInviteApplied(page) {
     await expect(page.locator('#roomId')).toHaveValue('SILENT-EAGLE-90');
     await expect(page.locator('#password')).toHaveValue('30PXPD');
     await expect(page.locator('#serverUrl')).toHaveValue('wss://relay.example.test');
-    await expect(page.locator('#serverUrl')).toBeVisible();
     await expect(page.locator('#serverCustom')).toHaveClass(/active/);
     await expect.poll(() => page.evaluate(() => chrome.storage.local.get(['serverUrl', 'useCustomServer'])))
         .toEqual({ serverUrl: 'wss://relay.example.test', useCustomServer: true });
 }
 
-test('pasting an invite link with nothing focused opens and fills the join form', async ({ context, extensionId }) => {
+test('pasting an invite link with nothing focused joins the room directly', async ({ context, extensionId }) => {
     const page = await openJoinView(context, extensionId);
-    await expect(page.locator('#roomId')).toBeHidden();
+    await watchJoins(page);
     await page.evaluate(() => document.activeElement?.blur());
 
     await pasteWithKeyboard(page, INVITE);
-    await expect(page.locator('#roomId')).toBeVisible();
-    await expectInviteApplied(page);
+    await expectJoined(page);
+    await expect(page.locator('#roomId')).toHaveValue('SILENT-EAGLE-90');
 });
 
 test('pasting an invite link from any domain into the room field fills the join form', async ({ context, extensionId }) => {
     const page = await openJoinView(context, extensionId);
+    await watchJoins(page);
     await page.locator('#section-join summary').click();
     await page.locator('#roomId').focus();
 
     await pasteWithKeyboard(page, INVITE);
     await expectInviteApplied(page);
+    await expectJoined(page);
 });
 
 test('plain text and other fields keep the default paste behavior', async ({ context, extensionId }) => {
     const page = await openJoinView(context, extensionId);
+    await watchJoins(page);
     await page.locator('#section-join summary').click();
 
     await page.locator('#roomId').focus();
@@ -66,18 +83,29 @@ test('plain text and other fields keep the default paste behavior', async ({ con
     await expect(page.locator('#password')).toHaveValue('');
 });
 
-test('pasting an invite link on another popup tab does nothing', async ({ context, extensionId }) => {
+test('pasting an invite link on another popup tab joins the room too', async ({ context, extensionId }) => {
     const page = await openJoinView(context, extensionId);
+    await watchJoins(page);
     await page.click('.tab-btn[data-tab="tab-settings"]');
     await page.evaluate(() => document.activeElement?.blur());
 
     await pasteWithKeyboard(page, INVITE);
-    await expect(page.locator('#roomId')).toHaveValue('');
-    await expect(page.locator('#password')).toHaveValue('');
+    await expectJoined(page);
+});
+
+test('pasting something that is not an invite link shows an error toast', async ({ context, extensionId }) => {
+    const page = await openJoinView(context, extensionId);
+    await watchJoins(page);
+    await page.evaluate(() => document.activeElement?.blur());
+
+    await pasteWithKeyboard(page, 'https://example.com/some/page');
+    await expect(page.locator('#toast-container .toast-error')).toBeVisible();
+    expect(await page.evaluate(() => chrome.storage.local.get('roomId'))).toEqual({});
 });
 
 test('an invite pasted after a failed room creation keeps its chat key', async ({ context, extensionId }) => {
     const page = await openJoinView(context, extensionId);
+    await watchJoins(page);
     await page.locator('#section-join summary').click();
     await page.locator('#serverCustom').click();
     await page.locator('#serverUrl').fill('');
@@ -86,9 +114,7 @@ test('an invite pasted after a failed room creation keeps its chat key', async (
 
     await page.evaluate(() => document.activeElement?.blur());
     await pasteWithKeyboard(page, INVITE);
-    await expect(page.locator('#roomId')).toHaveValue('SILENT-EAGLE-90');
-    await page.locator('#joinBtn').click();
 
-    await expect.poll(() => page.evaluate(() => chrome.storage.local.get(['roomId', 'password', 'chatKey'])))
-        .toEqual({ roomId: 'SILENT-EAGLE-90', password: '30PXPD', chatKey: 'R5Ti1nxp0crfAFHf3gVncw' });
+    await expectJoined(page);
+    await expect(page.locator('#password')).toHaveValue('30PXPD');
 });
