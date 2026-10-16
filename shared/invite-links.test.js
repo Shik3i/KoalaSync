@@ -75,6 +75,16 @@ describe('invite links', () => {
         expect(api.parseInviteText(`https://sync.my-server.example/join${hash}`)).toEqual(expected);
         expect(api.parseInviteText(`  join us: https://any.example/x${hash}\nsee you  `)).toEqual(expected);
         expect(api.parseInviteText(hash)).toEqual(expected);
+        expect(api.parseInviteText(`(https://any.example/join${hash})`)).toEqual(expected);
+        expect(api.parseInviteText(`<https://any.example/join${hash}>`)).toEqual(expected);
+        expect(api.parseInviteText(`Join here: https://any.example/join${hash}.`)).toEqual(expected);
+        const official = api.buildJ2Hash({
+            roomId: 'SILENT-EAGLE-90',
+            password: '30PXPD',
+            chatKey: 'R5Ti1nxp0crfAFHf3gVncw'
+        });
+        expect(api.parseInviteText(`[invite](https://sync.koalastuff.net/join.html${official})`))
+            .toMatchObject({ chatKey: 'R5Ti1nxp0crfAFHf3gVncw', useCustomServer: false });
         expect(api.parseInviteText('https://other.example/join#join:ROOM-1:PASS')).toMatchObject({
             format: 'legacy',
             roomId: 'ROOM-1',

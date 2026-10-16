@@ -54,7 +54,7 @@ The easiest and safest way to install KoalaSync is directly through the official
 
 **How to use:**
 1. **Create a Room:** Click the Koala icon in your browser and hit `+ Create New Room`.
-2. **Invite Friends:** Share the auto-copied invite link. Once they click it, they automatically join.
+2. **Invite Friends:** Share the auto-copied invite link. Once they click it, they automatically join. They can also paste the link into the extension's Room ID field instead.
 3. **Pick a Video:** Navigate to the Sync Tab, select the tab playing your video, and grab some popcorn! 🍿
 
 ---

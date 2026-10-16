@@ -97,6 +97,11 @@ When your friend opens the link in their browser:
    - The page shows download links (Chrome Web Store / GitHub).
    - The user installs the extension, returns to the link, and the flow continues from step 3.
 
+5. **Alternative: paste the link into the popup**:
+   - Pasting a full invite link into the **Room ID** or **Password** field fills in room, password, chat key and server.
+   - Only the `#j2:` / `#join:` fragment is read, so the link's domain does not matter. This also works for links that point to a self-hosted page or to a blocked `sync.koalastuff.net`.
+   - The popup uses the regular paste event, so no clipboard permission is needed and no page is injected.
+
 ---
 
 ## Step 6: Selecting a Video Tab

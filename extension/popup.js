@@ -1655,6 +1655,10 @@ function applyInvite(invite) {
     setServerMode(invite.useCustomServer);
     chrome.storage.local.set({ serverUrl: invite.serverUrl, useCustomServer: invite.useCustomServer });
 
+    // The join fields live in the collapsed "Manual Connect" section.
+    const manualSection = elements.roomId.closest('details');
+    if (manualSection) manualSection.open = true;
+
     elements.joinBtn.style.boxShadow = '0 0 15px var(--accent)';
     setTimeout(() => elements.joinBtn.style.boxShadow = '', 2000);
 }
@@ -1674,9 +1678,16 @@ function checkInviteLink() {
     });
 }
 
-// Pasting a full invite link (any domain) into the room or password field
-// fills in everything. Uses the paste event, so no clipboard permission.
+// Pasting a full invite link (any domain) while the join view is open fills in
+// everything: into the room or password field, or with nothing focused. Other
+// text fields keep their normal paste. Uses the paste event, so no clipboard
+// permission is needed.
 function handleInvitePaste(event) {
+    if (!elements.sectionJoin || elements.sectionJoin.offsetParent === null) return;
+    const target = event.target;
+    const editable = !!target && typeof target.matches === 'function'
+        && (target.isContentEditable || target.matches('input, textarea, select'));
+    if (editable && target !== elements.roomId && target !== elements.password) return;
     const text = event.clipboardData ? event.clipboardData.getData('text') : '';
     const invite = globalThis.KoalaSyncInviteLinks.parseInviteText(text);
     if (!invite) return;
@@ -2061,8 +2072,7 @@ function showError(msg) {
 }
 
 // --- Action Handlers ---
-elements.roomId.addEventListener('paste', handleInvitePaste);
-elements.password.addEventListener('paste', handleInvitePaste);
+document.addEventListener('paste', handleInvitePaste);
 
 elements.roomId.addEventListener('input', () => {
     elements.roomId.value = normalizeRoomId(elements.roomId.value);

@@ -9,9 +9,13 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ### Added
 - **Extension: Optional shared video links** — Participants can opt in under Settings → Privacy → Share video link. Everyone in the room can then open a peer's page by clicking their name in the participant list, in the selected tab or a new one. URLs travel encrypted through the existing relay chat envelope, so no relay change is required; only HTTP(S) URLs up to 900 bytes are shared, including query string and fragment. Peers that share the invitation's chat secret exchange keys in a constant number of frames per participant and never fall back to the relay-trusted key exchange, so they share links only with each other; rooms without a chat secret use a pairwise exchange. A link is shared only while the selected tab shows a detected video, and a withdrawal is never delayed by chat traffic. The participant list shows each link's destination host (insecure `http://` and punycode look-alikes stay visible), and KoalaSync asks before replacing an already selected tab; a link that changed after it was displayed is never opened by an earlier confirmation.
+- **Extension: Paste invite links into the popup** — Pasting a full invite link into the Room ID or Password field fills in room, password, chat key and relay. Only the link's `#` fragment is read, so links on any domain work, including self-hosted relays when `sync.koalastuff.net` is unreachable. No clipboard permission and no extra page injection are required ([#47](https://github.com/Shik3i/KoalaSync/issues/47)).
 
 ### Fixed
 - **Extension: Chat available immediately after selecting a player** — The chat overlay now activates at once for top-level and embedded players instead of after a reselection or reload.
+
+### Security
+- **Dependencies: Patched development tooling advisories** — Updated vitest, addons-linter, sharp, svgo, undici and the pinned brace-expansion, fast-uri, js-yaml and postcss overrides. `npm audit` reports no known vulnerabilities for the root and relay packages. The extension and relay runtime dependencies are unchanged.
 
 ## [v3.2.0] — 2026-09-01
 

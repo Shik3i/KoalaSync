@@ -68,7 +68,11 @@
         for (const prefix of [J2_PREFIX, LEGACY_PREFIX]) {
             const start = text.indexOf(prefix);
             if (start === -1) continue;
-            const hash = text.slice(start).split(/\s/, 1)[0];
+            let hash = text.slice(start).split(/\s/, 1)[0];
+            // j2 values are form-encoded, so trailing brackets or punctuation
+            // come from the surrounding message ("(link)", "<link>", "link.").
+            // Legacy passwords are raw and keep their characters.
+            if (prefix === J2_PREFIX) hash = hash.replace(/[)\]}>"'.,;!?]+$/, '');
             const invite = parseInviteHash(hash);
             if (invite) return invite;
         }
