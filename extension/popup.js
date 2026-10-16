@@ -1650,6 +1650,9 @@ function applyInvite(invite) {
     elements.password.value = invite.password;
     pendingInviteRoomId = elements.roomId.value;
     pendingInviteChatKey = normalizeChatKey(invite.chatKey);
+    // An invite always joins an existing room, even after a failed "Create".
+    pendingRoomCreation = false;
+    window.justCreatedRoom = false;
 
     elements.serverUrl.value = invite.serverUrl;
     setServerMode(invite.useCustomServer);

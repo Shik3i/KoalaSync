@@ -75,3 +75,20 @@ test('pasting an invite link on another popup tab does nothing', async ({ contex
     await expect(page.locator('#roomId')).toHaveValue('');
     await expect(page.locator('#password')).toHaveValue('');
 });
+
+test('an invite pasted after a failed room creation keeps its chat key', async ({ context, extensionId }) => {
+    const page = await openJoinView(context, extensionId);
+    await page.locator('#section-join summary').click();
+    await page.locator('#serverCustom').click();
+    await page.locator('#serverUrl').fill('');
+    await page.locator('#createRoomBtn').click();
+    await expect(page.locator('#roomError')).toBeVisible();
+
+    await page.evaluate(() => document.activeElement?.blur());
+    await pasteWithKeyboard(page, INVITE);
+    await expect(page.locator('#roomId')).toHaveValue('SILENT-EAGLE-90');
+    await page.locator('#joinBtn').click();
+
+    await expect.poll(() => page.evaluate(() => chrome.storage.local.get(['roomId', 'password', 'chatKey'])))
+        .toEqual({ roomId: 'SILENT-EAGLE-90', password: '30PXPD', chatKey: 'R5Ti1nxp0crfAFHf3gVncw' });
+});
