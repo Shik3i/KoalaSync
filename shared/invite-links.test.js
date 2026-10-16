@@ -92,6 +92,26 @@ describe('invite links', () => {
         });
     });
 
+    it('skips broken fragments and unwraps wrapped legacy links', () => {
+        const api = globalThis.KoalaSyncInviteLinks;
+        const hash = api.buildJ2Hash({
+            roomId: 'SILENT-EAGLE-90',
+            password: '30PXPD',
+            chatKey: 'R5Ti1nxp0crfAFHf3gVncw'
+        });
+        expect(api.parseInviteText(`format is #j2:r=ROOM&p=PASS, mine: https://x.example/join${hash}`))
+            .toMatchObject({ roomId: 'SILENT-EAGLE-90', chatKey: 'R5Ti1nxp0crfAFHf3gVncw' });
+        expect(api.parseInviteText('#join:BROKEN then https://x.example/#join:ROOM-1:PASS'))
+            .toMatchObject({ roomId: 'ROOM-1', password: 'PASS' });
+
+        expect(api.parseInviteText('<https://example.com/#join:ROOM-1:PASS>')).toMatchObject({ password: 'PASS' });
+        expect(api.parseInviteText('(https://example.com/#join:ROOM-1:PASS)')).toMatchObject({ password: 'PASS' });
+        expect(api.parseInviteText('[invite](https://example.com/#join:ROOM-1:PASS)')).toMatchObject({ password: 'PASS' });
+        expect(api.parseInviteText('(#join:ROOM-1:PASS)')).toMatchObject({ password: 'PASS' });
+        expect(api.parseInviteText('https://example.com/#join:ROOM-1:pass!)')).toMatchObject({ password: 'pass!)' });
+        expect(api.parseInviteText('https://example.com/#join:ROOM-1:pass.')).toMatchObject({ password: 'pass.' });
+    });
+
     it('ignores pasted text without a valid invite', () => {
         const parse = globalThis.KoalaSyncInviteLinks.parseInviteText;
         expect(parse('SILENT-EAGLE-90')).toBeNull();

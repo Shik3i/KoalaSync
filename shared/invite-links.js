@@ -65,14 +65,22 @@
     // bare hash, or a message containing the link). Only the fragment counts.
     function parseInviteText(text) {
         if (typeof text !== 'string') return null;
-        for (const prefix of [J2_PREFIX, LEGACY_PREFIX]) {
-            const start = text.indexOf(prefix);
-            if (start === -1) continue;
-            let hash = text.slice(start).split(/\s/, 1)[0];
-            // j2 values are form-encoded, so trailing brackets or punctuation
-            // come from the surrounding message ("(link)", "<link>", "link.").
-            // Legacy passwords are raw and keep their characters.
-            if (prefix === J2_PREFIX) hash = hash.replace(/[)\]}>"'.,;!?]+$/, '');
+        const wrappers = { '(': ')', '<': '>', '[': ']', '{': '}', '"': '"', "'": "'" };
+        const candidates = /#(?:j2|join):/g;
+        let match;
+        // Try every fragment in text order, so a broken example earlier in the
+        // message does not hide the real link.
+        while ((match = candidates.exec(text)) !== null) {
+            let hash = text.slice(match.index).split(/\s/, 1)[0];
+            // Drop a closing delimiter only when the link itself was wrapped
+            // ("<link>", "(link)"), so raw legacy passwords keep punctuation.
+            const before = text.slice(0, match.index);
+            const linkStart = before.search(/(?:[a-z][a-z0-9+.-]*:\/\/\S*)?$/i);
+            const closer = wrappers[before[linkStart - 1]];
+            if (closer && hash.endsWith(closer)) hash = hash.slice(0, -1);
+            // j2 values are form-encoded, so any trailing brackets or
+            // punctuation come from the surrounding message ("link.").
+            if (hash.startsWith(J2_PREFIX)) hash = hash.replace(/[)\]}>"'.,;!?]+$/, '');
             const invite = parseInviteHash(hash);
             if (invite) return invite;
         }
