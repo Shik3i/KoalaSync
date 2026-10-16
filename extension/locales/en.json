@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://your-server:3000",
   "LABEL_ROOM_ID": "Room ID",
   "LABEL_ROOM_ID_TOOLTIP": "The unique identifier for your sync room",
-  "PLACEHOLDER_ROOM_ID": "Enter Room ID",
+  "PLACEHOLDER_ROOM_ID": "Room ID or invite link",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "The unique ID of the room you want to join",
   "LABEL_PASSWORD": "Password (Optional)",
   "LABEL_PASSWORD_TOOLTIP": "Optional password to restrict room access",

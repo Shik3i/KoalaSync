@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://sunucunuz:3000",
   "LABEL_ROOM_ID": "Oda Kimliği",
   "LABEL_ROOM_ID_TOOLTIP": "Senkronizasyon odanız için benzersiz kimlik",
-  "PLACEHOLDER_ROOM_ID": "Oda Kimliğini Girin",
+  "PLACEHOLDER_ROOM_ID": "Oda kimliği veya davet linki",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "Katılmak istediğiniz odanın benzersiz kimliği",
   "LABEL_PASSWORD": "Şifre (İsteğe Bağlı)",
   "LABEL_PASSWORD_TOOLTIP": "Oda erişimini kısıtlamak için isteğe bağlı şifre",

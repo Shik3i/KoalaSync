@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://twoj-serwer:3000",
   "LABEL_ROOM_ID": "ID pokoju",
   "LABEL_ROOM_ID_TOOLTIP": "Unikalny identyfikator pokoju synchronizacji",
-  "PLACEHOLDER_ROOM_ID": "Wpisz ID pokoju",
+  "PLACEHOLDER_ROOM_ID": "ID pokoju lub link do zaproszenia",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "Unikalny identyfikator pokoju, do którego chcesz dołączyć",
   "LABEL_PASSWORD": "Hasło (opcjonalnie)",
   "LABEL_PASSWORD_TOOLTIP": "Opcjonalne hasło ograniczające dostęp do pokoju",

@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://uw-server:3000",
   "LABEL_ROOM_ID": "Kamer-ID",
   "LABEL_ROOM_ID_TOOLTIP": "De unieke identificatie voor uw synchronisatiekamer",
-  "PLACEHOLDER_ROOM_ID": "Voer kamer-ID in",
+  "PLACEHOLDER_ROOM_ID": "Kamer-ID of uitnodigingslink",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "Het unieke ID van de kamer waar u aan wilt deelnemen",
   "LABEL_PASSWORD": "Wachtwoord (optioneel)",
   "LABEL_PASSWORD_TOOLTIP": "Optioneel wachtwoord om toegang tot de kamer te beperken",

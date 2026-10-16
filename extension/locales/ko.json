@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://your-server:3000",
   "LABEL_ROOM_ID": "방 ID",
   "LABEL_ROOM_ID_TOOLTIP": "동기화 방의 고유 식별자",
-  "PLACEHOLDER_ROOM_ID": "방 ID 입력",
+  "PLACEHOLDER_ROOM_ID": "방 ID 또는 초대 링크",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "참여하려는 방의 고유 ID",
   "LABEL_PASSWORD": "비밀번호 (선택사항)",
   "LABEL_PASSWORD_TOOLTIP": "방 액세스를 제한하기 위한 선택적 비밀번호",

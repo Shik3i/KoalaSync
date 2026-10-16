@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://o-teu-servidor:3000",
   "LABEL_ROOM_ID": "ID da sala",
   "LABEL_ROOM_ID_TOOLTIP": "O identificador exclusivo para a tua sala",
-  "PLACEHOLDER_ROOM_ID": "Introduzir ID da sala",
+  "PLACEHOLDER_ROOM_ID": "ID da sala ou link de convite",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "O ID da sala à qual queres aceder",
   "LABEL_PASSWORD": "Palavra-passe (opcional)",
   "LABEL_PASSWORD_TOOLTIP": "Palavra-passe para restringir o acesso à sala",

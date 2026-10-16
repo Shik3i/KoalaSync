@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://tuo-server:3000",
   "LABEL_ROOM_ID": "ID stanza",
   "LABEL_ROOM_ID_TOOLTIP": "L'identificatore univoco per la tua stanza",
-  "PLACEHOLDER_ROOM_ID": "Inserisci ID stanza",
+  "PLACEHOLDER_ROOM_ID": "ID stanza o link di invito",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "L'ID della stanza a cui vuoi unirti",
   "LABEL_PASSWORD": "Password (opzionale)",
   "LABEL_PASSWORD_TOOLTIP": "Password per limitare l'accesso alla stanza",

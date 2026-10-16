@@ -61,6 +61,32 @@
         return parseJ2Hash(hash) || parseLegacyHash(hash);
     }
 
+    // Pulls an invite out of arbitrary pasted text (full link on any domain,
+    // bare hash, or a message containing the link). Only the fragment counts.
+    function parseInviteText(text) {
+        if (typeof text !== 'string') return null;
+        const wrappers = { '(': ')', '<': '>', '[': ']', '{': '}', '"': '"', "'": "'" };
+        const candidates = /#(?:j2|join):/g;
+        let match;
+        // Try every fragment in text order, so a broken example earlier in the
+        // message does not hide the real link.
+        while ((match = candidates.exec(text)) !== null) {
+            let hash = text.slice(match.index).split(/\s/, 1)[0];
+            // Drop a closing delimiter only when the link itself was wrapped
+            // ("<link>", "(link)"), so raw legacy passwords keep punctuation.
+            const before = text.slice(0, match.index);
+            const linkStart = before.search(/(?:[a-z][a-z0-9+.-]*:\/\/\S*)?$/i);
+            const closer = wrappers[before[linkStart - 1]];
+            if (closer && hash.endsWith(closer)) hash = hash.slice(0, -1);
+            // j2 values are form-encoded, so any trailing brackets or
+            // punctuation come from the surrounding message ("link.").
+            if (hash.startsWith(J2_PREFIX)) hash = hash.replace(/[)\]}>"'.,;!?]+$/, '');
+            const invite = parseInviteHash(hash);
+            if (invite) return invite;
+        }
+        return null;
+    }
+
     function buildJ2Hash({ roomId, password, chatKey, serverUrl = '' }) {
         if (!roomId || !password || !chatKey) throw new TypeError('roomId, password, and chatKey are required');
         const params = new URLSearchParams({ r: roomId, p: password, k: chatKey });
@@ -72,6 +98,7 @@
         J2_PREFIX,
         LEGACY_PREFIX,
         parseInviteHash,
+        parseInviteText,
         buildJ2Hash
     });
 })(globalThis);

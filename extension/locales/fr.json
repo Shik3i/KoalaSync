@@ -20,7 +20,7 @@
   "PLACEHOLDER_SERVER_URL": "wss://votre-serveur:3000",
   "LABEL_ROOM_ID": "ID du salon",
   "LABEL_ROOM_ID_TOOLTIP": "L'identifiant unique de votre salon de synchronisation",
-  "PLACEHOLDER_ROOM_ID": "Entrer l'ID du salon",
+  "PLACEHOLDER_ROOM_ID": "ID du salon ou lien d'invitation",
   "PLACEHOLDER_ROOM_ID_TOOLTIP": "L'ID unique du salon que vous souhaitez rejoindre",
   "LABEL_PASSWORD": "Mot de passe (Optionnel)",
   "LABEL_PASSWORD_TOOLTIP": "Mot de passe optionnel pour restreindre l'accès au salon",
