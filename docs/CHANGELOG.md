@@ -5,7 +5,7 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
-## [Unreleased]
+## [v3.3.1] — 2026-10-17
 
 ### Changed
 - **Paste invite links joins directly** — Pasting an invite link (Ctrl+V) now works on any popup tab, joins the room immediately and confirms with a toast. Anything else pasted shows an "invalid invite link" toast; while already in a room, a hint to leave first appears.
