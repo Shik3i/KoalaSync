@@ -23,6 +23,9 @@ import { normalizeTabId, requestOriginPermission } from './host-access.js';
 
 let pendingInviteRoomId = '';
 let pendingInviteChatKey = '';
+let pendingInviteJoinRoom = '';
+let queuedInviteJoin = false;
+let pendingInviteJoinTimer = null;
 let pendingRoomCreation = false;
 
 function normalizeChatKey(value) {
@@ -1524,6 +1527,10 @@ function applyConnectionStatus(status) {
         } else {
             elements.joinBtn.disabled = false;
             elements.joinBtn.textContent = getMessage('BTN_JOIN_ROOM');
+            if (queuedInviteJoin) {
+                queuedInviteJoin = false;
+                elements.joinBtn.click();
+            }
         }
     }
 
@@ -1681,21 +1688,45 @@ function checkInviteLink() {
     });
 }
 
-// Pasting a full invite link (any domain) while the join view is open fills in
-// everything: into the room or password field, or with nothing focused. Other
-// text fields keep their normal paste. Uses the paste event, so no clipboard
-// permission is needed.
+// Pasting a full invite link (any domain) anywhere in the popup joins that room
+// right away and confirms with a toast; anything else that is pasted with nothing
+// focused gets an "invalid invite" toast. Pastes into text fields keep their
+// normal behavior (the room and password fields still accept an invite link).
+// Uses the paste event, so no clipboard permission is needed.
 function handleInvitePaste(event) {
-    if (!elements.sectionJoin || elements.sectionJoin.offsetParent === null) return;
+    const overlay = document.getElementById('onboarding-overlay');
+    if (overlay && overlay.offsetParent !== null) return;
     const target = event.target;
     const editable = !!target && typeof target.matches === 'function'
         && (target.isContentEditable || target.matches('input, textarea, select'));
     if (editable && target !== elements.roomId && target !== elements.password) return;
     const text = event.clipboardData ? event.clipboardData.getData('text') : '';
     const invite = globalThis.KoalaSyncInviteLinks.parseInviteText(text);
-    if (!invite) return;
+    if (!invite) {
+        if (!editable && text.trim()) showToast(getMessage('TOAST_INVITE_INVALID'), 'error');
+        return;
+    }
     event.preventDefault();
+    if (!elements.sectionJoin || elements.sectionJoin.style.display === 'none') {
+        showToast(getMessage('TOAST_INVITE_IN_ROOM'), 'warning', 4000);
+        return;
+    }
+    if (isProcessingConnection) {
+        showToast(getMessage('TOAST_INVITE_IN_ROOM'), 'warning', 4000);
+        return;
+    }
     applyInvite(invite);
+    pendingInviteJoinRoom = elements.roomId.value;
+    if (pendingInviteJoinTimer) clearTimeout(pendingInviteJoinTimer);
+    pendingInviteJoinTimer = setTimeout(() => {
+        pendingInviteJoinRoom = '';
+        queuedInviteJoin = false;
+        pendingInviteJoinTimer = null;
+    }, 20000);
+    // While a connection attempt is running the button is disabled; join as soon
+    // as it is released again (see applyConnectionStatus).
+    if (elements.joinBtn.disabled) queuedInviteJoin = true;
+    else elements.joinBtn.click();
 }
 
 function setServerMode(custom) {
@@ -2687,6 +2718,10 @@ chrome.runtime.onMessage.addListener((msg) => {
         }
         if (msg.status === 'connected') {
             clearConnectionErrorTimer();
+            if (pendingInviteJoinRoom) {
+                showToast(getMessage('TOAST_INVITE_JOINED', { room: pendingInviteJoinRoom }), 'success');
+                pendingInviteJoinRoom = '';
+            }
         }
         if (msg.status !== 'reconnecting') {
             applyConnectionStatus(msg.status);
@@ -2702,6 +2737,7 @@ chrome.runtime.onMessage.addListener((msg) => {
             });
         }
         if (msg.status === 'disconnected') {
+            pendingInviteJoinRoom = '';
             elements.joinBtn.disabled = false;
             elements.joinBtn.textContent = getMessage('BTN_JOIN_ROOM');
         }
