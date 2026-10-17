@@ -25,6 +25,7 @@ let pendingInviteRoomId = '';
 let pendingInviteChatKey = '';
 let pendingInviteJoinRoom = '';
 let queuedInviteJoin = false;
+let pendingInviteJoinTimer = null;
 let pendingRoomCreation = false;
 
 function normalizeChatKey(value) {
@@ -1710,10 +1711,18 @@ function handleInvitePaste(event) {
         showToast(getMessage('TOAST_INVITE_IN_ROOM'), 'warning', 4000);
         return;
     }
-    if (isProcessingConnection) return;
+    if (isProcessingConnection) {
+        showToast(getMessage('TOAST_INVITE_IN_ROOM'), 'warning', 4000);
+        return;
+    }
     applyInvite(invite);
     pendingInviteJoinRoom = elements.roomId.value;
-    setTimeout(() => { pendingInviteJoinRoom = ''; queuedInviteJoin = false; }, 20000);
+    if (pendingInviteJoinTimer) clearTimeout(pendingInviteJoinTimer);
+    pendingInviteJoinTimer = setTimeout(() => {
+        pendingInviteJoinRoom = '';
+        queuedInviteJoin = false;
+        pendingInviteJoinTimer = null;
+    }, 20000);
     // While a connection attempt is running the button is disabled; join as soon
     // as it is released again (see applyConnectionStatus).
     if (elements.joinBtn.disabled) queuedInviteJoin = true;
