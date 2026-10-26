@@ -9,7 +9,6 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ### Security
 - **Development dependencies** — Raised `fast-uri` override to `>=3.1.9` in `package.json` to resolve Dependabot advisories #49, #50, #51, and #52 ([GHSA-j55m-48p2-h2v8](https://github.com/advisories/GHSA-j55m-48p2-h2v8)).
-- **Build & CI** — Verified full test suite (391 unit tests, AMO extension validation, website build) and published multi-arch relay server Docker image `ghcr.io/shik3i/koalasync:v3.3.3`.
 
 ---
 
