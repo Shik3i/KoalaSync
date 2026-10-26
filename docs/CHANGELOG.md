@@ -5,12 +5,19 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
+## [v3.3.3] — 2026-10-26
+
+### Security
+- **Development dependencies** — Raised `fast-uri` override to `>=3.1.9` in `package.json` to resolve Dependabot advisories #49, #50, #51, and #52 ([GHSA-j55m-48p2-h2v8](https://github.com/advisories/GHSA-j55m-48p2-h2v8)).
+- **Build & CI** — Verified full test suite (391 unit tests, AMO extension validation, website build) and published multi-arch relay server Docker image `ghcr.io/shik3i/koalasync:v3.3.3`.
+
+---
+
 ## [v3.3.2] — 2026-10-26
 
 ### Security
 - **Patch CVE-2026-111497 (Brotli / "Node2Shell")** — Enforced Brotli dependency overrides to `>=1.2.1` in `package.json` to mitigate the out-of-bounds write / remote code execution vulnerability in the native Brotli C-decoder ([CVE-2026-111497](https://www.aikido.dev/blog/python-packages-vulnerable-node2shell-brotli-cve-2026-111497)). Also pinned `brotli>=1.2.1` in `website/tools/subset-flag-font.mjs` and `subset_flag_font.py`.
 - **Relay server dependencies** — Resolved `body-parser` advisory in relay server (`server/package-lock.json`).
-- **Development dependencies** — Raised `fast-uri` override to `>=3.1.9` in `package.json` to resolve Dependabot advisories #49, #50, #51, and #52.
 
 ---
 
