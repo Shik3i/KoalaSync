@@ -38,7 +38,7 @@ try {
     execFileSync(python, ['-c', 'import fontTools.subset, brotli'], { stdio: 'pipe' });
 } catch {
     console.error(`error: ${python} lacks fonttools/brotli.`);
-    console.error('Install them (e.g. "pip3 install fonttools brotli") or point PYTHON at an interpreter that has them:');
+    console.error('Install them (e.g. "pip3 install fonttools \\"brotli>=1.2.1\\"") or point PYTHON at an interpreter that has them:');
     console.error('  PYTHON=/path/to/venv/bin/python npm run subset-flags');
     process.exit(1);
 }

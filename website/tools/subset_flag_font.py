@@ -3,7 +3,7 @@
 Invoked by subset-flag-font.mjs — do not run directly unless debugging:
     python3 subset_flag_font.py <source.woff2> <output.woff2> DE,FR,GB,...
 
-Requires: fonttools, brotli (pip install fonttools brotli).
+Requires: fonttools, brotli>=1.2.1 (pip install fonttools "brotli>=1.2.1").
 
 harfbuzz-based JS subsetters (subset-font/harfbuzzjs) silently drop the
 COLR/CPAL color tables of this font, producing invisible flags — fontTools
