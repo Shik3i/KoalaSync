@@ -1745,6 +1745,15 @@
                 name: 'twitch-player-buttons',
                 urls: ['twitch.tv'],
                 playPauseButtonSelector: '[data-a-target="player-play-pause-button"]'
+            },
+            // Apple TV+ re-pauses video.play() within milliseconds (its MediaKit
+            // controller rejects playback it did not initiate, see issue #51), so
+            // drive the player's own controls instead of the native HTML5 API.
+            {
+                name: 'appletv-player-buttons',
+                urls: ['tv.apple.com'],
+                playButtonSelector: '.playback-play__play',
+                pauseButtonSelector: '.playback-play__pause'
             }
         ];
     }
@@ -1755,16 +1764,28 @@
 
     function tryPlayerActionFix(fix, action, video, data) {
         if (!fix) return false;
-        const button = document.querySelector(fix.playPauseButtonSelector);
+
+        // Toggle players (YouTube, Twitch) expose one play/pause button; players
+        // with separate buttons (Apple TV+) expose both and keep native seeking.
+        const toggleSelector = fix.playPauseButtonSelector || null;
+        if (action === EVENTS.SEEK) {
+            if (!toggleSelector) return false;
+            const seekButton = document.querySelector(toggleSelector);
+            if (!seekButton) return false;
+            seekVideo(video, data.targetTime, data.delta);
+            return true;
+        }
+
+        const selector = toggleSelector
+            || (action === EVENTS.PLAY ? fix.playButtonSelector : null)
+            || (action === EVENTS.PAUSE ? fix.pauseButtonSelector : null);
+        const button = selector ? document.querySelector(selector) : null;
         if (!button) return false;
 
         const isCurrentlyPlaying = !video.paused;
         if ((action === EVENTS.PLAY && !isCurrentlyPlaying) || (action === EVENTS.PAUSE && isCurrentlyPlaying)) {
             _setSuppress(action === EVENTS.PLAY ? 'playing' : 'paused');
             button.click();
-        }
-        if (action === EVENTS.SEEK) {
-            seekVideo(video, data.targetTime, data.delta);
         }
         return true;
     }
