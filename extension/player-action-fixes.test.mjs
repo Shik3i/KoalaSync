@@ -7,18 +7,43 @@ import { EVENTS } from '../shared/constants.js';
 const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 const contentSource = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
 
-function extractFunction(source, name) {
-    const start = source.indexOf(`function ${name}(`);
+function extractBlock(source, declarationPrefix) {
+    const start = source.indexOf(declarationPrefix);
     expect(start).toBeGreaterThan(-1);
     const bodyStart = source.indexOf('{', start);
     let depth = 0;
     for (let index = bodyStart; index < source.length; index++) {
         if (source[index] === '{') depth++;
         if (source[index] === '}') depth--;
-        if (depth === 0) return source.slice(start, index + 1);
+        if (depth === 0) {
+            const tail = source[index + 1] === ';' ? index + 2 : index + 1;
+            return source.slice(start, tail);
+        }
     }
-    throw new Error(`${name} body did not terminate`);
+    throw new Error(`${declarationPrefix} body did not terminate`);
 }
+
+function extractFunction(source, name) {
+    return extractBlock(source, `function ${name}(`);
+}
+
+function extractConstArrow(source, name) {
+    return extractBlock(source, `const ${name} =`);
+}
+
+function extractWatchdogWindowDeclaration(source) {
+    const match = source.match(/const APPLE_PLAY_WATCHDOG_WINDOW_MS = (\d+);/);
+    expect(match).not.toBeNull();
+    return {
+        declaration: match[0],
+        windowMs: Number(match[1])
+    };
+}
+
+const {
+    declaration: WATCHDOG_WINDOW_DECLARATION,
+    windowMs: APPLE_PLAY_WATCHDOG_WINDOW_MS
+} = extractWatchdogWindowDeclaration(contentSource);
 
 function loadPlayerActionFixes() {
     return Function(
@@ -39,17 +64,30 @@ function loadActivePlayerActionFix(hostname) {
     )({ location: { hostname } });
 }
 
-function createTryFixHarness({ buttons = {}, paused = true, timers = 'recorded' } = {}) {
+function createTryFixHarness({
+    hostname = 'tv.apple.com',
+    buttons = {},
+    paused = true,
+    currentTime = 12,
+    timers = 'recorded'
+} = {}) {
     const clicked = [];
     const suppressed = [];
     const seekCalls = [];
     const logs = [];
     const pendingTimers = [];
+    const relayedEvents = [];
+    const runtimeMessages = [];
+    let proactiveHeartbeats = 0;
+
     const makeButton = (selector, spec) => ({
         selector,
         ...(typeof spec === 'object' && spec ? spec : {}),
         click() {
             clicked.push(selector);
+            if (typeof spec === 'object' && spec && typeof spec.onClick === 'function') {
+                spec.onClick();
+            }
         }
     });
     const fakeDocument = {
@@ -58,50 +96,134 @@ function createTryFixHarness({ buttons = {}, paused = true, timers = 'recorded' 
             return makeButton(selector, buttons[selector]);
         }
     };
-    const video = { paused, isConnected: true };
+    const fakeWindow = { location: { hostname } };
+    const listeners = new Map();
+    const video = {
+        paused,
+        currentTime,
+        isConnected: true,
+        addEventListener(type, handler) {
+            listeners.set(type, handler);
+        },
+        dispatch(type) {
+            const handler = listeners.get(type);
+            if (handler) handler({ currentTarget: video });
+        },
+        play: vi.fn(() => Promise.resolve()),
+        pause: vi.fn(() => {
+            video.paused = true;
+        })
+    };
+
     const source = [
-        'const APPLE_PLAY_WATCHDOG_WINDOW_MS = 1000;',
+        WATCHDOG_WINDOW_DECLARATION,
         'let applePlayWatchdog = null;',
         'let hcmLastUserGestureAt = 0;',
+        'let activeVideo = video;',
+        'const lifecycleTimeouts = new Set();',
+        'const _suppressTimers = { playing: null, paused: null, seek: null };',
+        'function _setSuppress(state) { recordSuppress(state); if (_suppressTimers[state]) clearTimeout(_suppressTimers[state]); _suppressTimers[state] = scheduleSuppressTimeout(() => { _suppressTimers[state] = null; }, 300); }',
+        'function _clearSuppress(state) { if (_suppressTimers[state]) { clearTimeout(_suppressTimers[state]); _suppressTimers[state] = null; } }',
+        'function reportEvent(action) { const eventState = action === EVENTS.PLAY ? "playing" : (action === EVENTS.PAUSE ? "paused" : (action === EVENTS.SEEK ? "seek" : null)); if (eventState && _suppressTimers[eventState]) { _clearSuppress(eventState); return; } recordRelayedEvent(action); }',
+        extractFunction(contentSource, 'hostMatchesUrl'),
+        extractFunction(contentSource, 'matchesPlayerUrls'),
+        extractFunction(contentSource, 'getPlayerActionFixes'),
+        extractFunction(contentSource, 'getActivePlayerActionFix'),
         extractFunction(contentSource, 'newCorrelationId'),
+        extractFunction(contentSource, 'sanitizeLogToken'),
         extractFunction(contentSource, 'isButtonOperable'),
         extractFunction(contentSource, 'cancelApplePlayWatchdog'),
         extractFunction(contentSource, 'startApplePlayWatchdog'),
         extractFunction(contentSource, 'noteApplePlayEvent'),
+        extractFunction(contentSource, 'consumeApplePlayEcho'),
         extractFunction(contentSource, 'consumeApplePlayRejection'),
-        extractFunction(contentSource, 'tryPlayerActionFix')
+        extractFunction(contentSource, 'tryPlayerActionFix'),
+        extractFunction(contentSource, 'tryMediaAction'),
+        extractFunction(contentSource, 'applyServerMediaAction'),
+        extractFunction(contentSource, 'isCurrentVideoEvent'),
+        extractConstArrow(contentSource, 'handlePlay'),
+        extractConstArrow(contentSource, 'handlePlaying'),
+        extractConstArrow(contentSource, 'handlePause'),
+        'video.addEventListener("play", handlePlay);',
+        'video.addEventListener("playing", handlePlaying);',
+        'video.addEventListener("pause", handlePause);'
     ].join('\n');
+
     const scheduler = timers === 'real'
         ? (callback, delay) => setTimeout(callback, delay)
         : (callback, delay) => {
             pendingTimers.push({ callback, delay });
             return pendingTimers.length;
         };
+
     const api = Function(
+        'window',
         'document',
+        'video',
         'EVENTS',
-        '_setSuppress',
+        'recordSuppress',
+        'scheduleSuppressTimeout',
+        'recordRelayedEvent',
+        'findVideo',
+        'getSyncCurrentTime',
+        'pageApiActionRequired',
+        'requestPageApiAction',
         'seekVideo',
         'reportLog',
+        'runtimeMessage',
+        'scheduleProactiveHeartbeat',
         'scheduleLifecycleTimeout',
         `'use strict'; ${source}; return {
             tryPlayerActionFix,
+            tryMediaAction,
+            applyServerMediaAction,
             startApplePlayWatchdog,
             cancelApplePlayWatchdog,
             noteApplePlayEvent,
+            consumeApplePlayEcho,
             consumeApplePlayRejection,
             isButtonOperable,
+            sanitizeLogToken,
             setUserGestureAt: timestamp => { hcmLastUserGestureAt = timestamp; }
         };`
     )(
+        fakeWindow,
         fakeDocument,
+        video,
         EVENTS,
         state => suppressed.push(state),
-        (_video, targetTime) => seekCalls.push(targetTime),
+        scheduler,
+        action => relayedEvents.push(action),
+        () => (video.isConnected === false ? null : video),
+        targetVideo => (Number.isFinite(targetVideo?.currentTime) ? targetVideo.currentTime : null),
+        () => false,
+        () => Promise.resolve(false),
+        (_video, targetTime) => {
+            seekCalls.push(targetTime);
+            return true;
+        },
         message => logs.push(message),
+        payload => {
+            runtimeMessages.push(payload);
+            return Promise.resolve({ ok: true });
+        },
+        () => { proactiveHeartbeats++; },
         scheduler
     );
-    return { ...api, tryFix: api.tryPlayerActionFix, video, clicked, suppressed, seekCalls, logs, pendingTimers };
+
+    return {
+        ...api,
+        tryFix: api.tryPlayerActionFix,
+        video,
+        clicked,
+        suppressed,
+        seekCalls,
+        logs,
+        pendingTimers,
+        relayedEvents,
+        runtimeMessages,
+        getProactiveHeartbeats: () => proactiveHeartbeats
+    };
 }
 
 const APPLE_PLAY_SELECTOR = '.playback-play__play';
@@ -158,6 +280,31 @@ describe('player action fixes', () => {
         expect(harness.suppressed).toEqual([]);
     });
 
+    it('treats redundant Apple TV+ play/pause as applied even when the inactive control is hidden', () => {
+        const fix = loadActivePlayerActionFix('tv.apple.com');
+        const playingHarness = createTryFixHarness({
+            buttons: {
+                [APPLE_PLAY_SELECTOR]: { getClientRects: () => [] },
+                [APPLE_PAUSE_SELECTOR]: true
+            },
+            paused: false
+        });
+        expect(playingHarness.tryFix(fix, EVENTS.PLAY, playingHarness.video, null, { cmdId: 'cmd2b' })).toBe(true);
+        expect(playingHarness.clicked).toEqual([]);
+        expect(playingHarness.logs.some(message => message.includes('not operable'))).toBe(false);
+
+        const pausedHarness = createTryFixHarness({
+            buttons: {
+                [APPLE_PLAY_SELECTOR]: true,
+                [APPLE_PAUSE_SELECTOR]: { getClientRects: () => [] }
+            },
+            paused: true
+        });
+        expect(pausedHarness.tryFix(fix, EVENTS.PAUSE, pausedHarness.video, null, { cmdId: 'cmd2c' })).toBe(true);
+        expect(pausedHarness.clicked).toEqual([]);
+        expect(pausedHarness.logs.some(message => message.includes('not operable'))).toBe(false);
+    });
+
     it('drives Apple TV+ pause with the site pause button and suppresses the echo', () => {
         const fix = loadActivePlayerActionFix('tv.apple.com');
         const harness = createTryFixHarness({ buttons: APPLE_BUTTONS, paused: false });
@@ -194,6 +341,7 @@ describe('player action fixes', () => {
     it('keeps the YouTube toggle click for state changes only', () => {
         const fix = loadActivePlayerActionFix('www.youtube.com');
         const pausedHarness = createTryFixHarness({
+            hostname: 'www.youtube.com',
             buttons: { '.ytp-play-button': true },
             paused: true
         });
@@ -202,6 +350,7 @@ describe('player action fixes', () => {
         expect(pausedHarness.suppressed).toEqual(['playing']);
 
         const playingHarness = createTryFixHarness({
+            hostname: 'www.youtube.com',
             buttons: { '.ytp-play-button': true },
             paused: false
         });
@@ -212,6 +361,7 @@ describe('player action fixes', () => {
     it('keeps YouTube seeking through the toggle fix', () => {
         const fix = loadActivePlayerActionFix('www.youtube.com');
         const harness = createTryFixHarness({
+            hostname: 'www.youtube.com',
             buttons: { '.ytp-play-button': true },
             paused: true
         });
@@ -272,7 +422,7 @@ describe('Apple TV+ play watchdog', () => {
             expect(harness.clicked).toEqual([APPLE_PLAY_SELECTOR]);
             // The player rejects the start before playback begins.
             expect(harness.consumeApplePlayRejection(harness.video)).toBe(true);
-            await vi.advanceTimersByTimeAsync(1000);
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS);
             expect(await result).toBe(false);
             expect(harness.logs.some(message => message.includes('watchdog window closed: no_playback'))).toBe(true);
         } finally {
@@ -288,7 +438,7 @@ describe('Apple TV+ play watchdog', () => {
             expect(harness.consumeApplePlayRejection(harness.video)).toBe(true);
             harness.video.paused = false;
             harness.noteApplePlayEvent(harness.video);
-            await vi.advanceTimersByTimeAsync(1000);
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS);
             expect(await result).toBe(true);
             expect(harness.logs.some(message => message.includes('watchdog window closed: confirmed'))).toBe(true);
         } finally {
@@ -303,12 +453,12 @@ describe('Apple TV+ play watchdog', () => {
             const result = harness.tryFix(fix, EVENTS.PLAY, harness.video, null, { cmdId: 'wd3' });
             let settled = false;
             result.then(() => { settled = true; });
-            await vi.advanceTimersByTimeAsync(500);
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS / 2);
             await Promise.resolve();
             expect(settled).toBe(false);
             harness.video.paused = false;
             harness.noteApplePlayEvent(harness.video);
-            await vi.advanceTimersByTimeAsync(500);
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS / 2);
             expect(await result).toBe(true);
         } finally {
             vi.useRealTimers();
@@ -344,5 +494,164 @@ describe('Apple TV+ play watchdog', () => {
         harness.setUserGestureAt(Date.now() + 1);
         expect(harness.consumeApplePlayRejection(harness.video)).toBe(false);
         expect(await result).toBe(true);
+    });
+
+    it('suppresses both play and pre-playback rejection pause on the real listener path', async () => {
+        vi.useFakeTimers();
+        try {
+            const harness = createTryFixHarness({ buttons: APPLE_BUTTONS, paused: true, timers: 'real' });
+            const result = harness.tryFix(fix, EVENTS.PLAY, harness.video, null, { cmdId: 'wd7' });
+            // HTML5 media spec: clicking play transitions paused->false and fires `play`,
+            // then MediaKit rejects before `playing` and transitions back to paused, firing `pause`.
+            harness.video.paused = false;
+            harness.video.dispatch('play');
+            harness.video.paused = true;
+            harness.video.dispatch('pause');
+
+            expect(harness.relayedEvents).toEqual([]);
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS);
+            expect(await result).toBe(false);
+            expect(harness.logs.some(message => message.includes('auto-pause artifact suppressed'))).toBe(true);
+            expect(harness.logs.some(message => message.includes('watchdog window closed: no_playback'))).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('suppresses late programmatic play echoes after 300ms while relaying user-gesture play during the window', async () => {
+        vi.useFakeTimers();
+        try {
+            const harness = createTryFixHarness({ buttons: APPLE_BUTTONS, paused: true, timers: 'real' });
+            const result = harness.tryFix(fix, EVENTS.PLAY, harness.video, null, { cmdId: 'wd8' });
+
+            // Advance past the 300ms _setSuppress('playing') window; a delayed programmatic
+            // `play` event inside the 1000ms watchdog window must still be suppressed.
+            await vi.advanceTimersByTimeAsync(400);
+            harness.video.dispatch('play');
+            expect(harness.relayedEvents).toEqual([]);
+
+            // A user gesture strictly after dispatch cancels the watchdog and relays PLAY.
+            harness.setUserGestureAt(Date.now() + 1);
+            harness.video.dispatch('play');
+            expect(harness.relayedEvents).toEqual([EVENTS.PLAY]);
+            expect(await result).toBe(false);
+            expect(harness.logs.some(message => message.includes('watchdog stopped (user_play_during_window)'))).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('relays a non-gesture pause after playing started and resolves false (ended_after_play) if still paused at window close', async () => {
+        vi.useFakeTimers();
+        try {
+            const harness = createTryFixHarness({ buttons: APPLE_BUTTONS, paused: true, timers: 'real' });
+            const result = harness.tryFix(fix, EVENTS.PLAY, harness.video, null, { cmdId: 'wd9' });
+
+            harness.video.paused = false;
+            harness.video.dispatch('play');
+            harness.video.dispatch('playing');
+            harness.video.paused = true;
+            harness.video.dispatch('pause');
+
+            expect(harness.relayedEvents).toEqual([EVENTS.PAUSE]);
+            expect(harness.logs.some(message => message.includes('stop after confirmed playback - relaying'))).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS);
+            expect(await result).toBe(false);
+            expect(harness.logs.some(message => message.includes('watchdog window closed: ended_after_play'))).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('gates CMD_ACK in applyServerMediaAction on the Apple TV+ watchdog outcome and supersedes on newer commands', async () => {
+        vi.useFakeTimers();
+        try {
+            const harness = createTryFixHarness({ buttons: APPLE_BUTTONS, paused: true, timers: 'real' });
+
+            // 1. Rejected remote PLAY -> no CMD_ACK sent.
+            harness.applyServerMediaAction(
+                EVENTS.PLAY,
+                { targetTime: 12 },
+                { actionTimestamp: 101, commandSenderId: 'peer-a' }
+            );
+            harness.video.paused = false;
+            harness.video.dispatch('play');
+            harness.video.paused = true;
+            harness.video.dispatch('pause');
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS);
+            await Promise.resolve();
+            expect(harness.runtimeMessages).toEqual([]);
+            expect(harness.logs.some(message => message.includes('Remote play was not applied'))).toBe(true);
+
+            // 2. Confirmed remote PLAY -> CMD_ACK sent only after the watchdog window closes.
+            harness.applyServerMediaAction(
+                EVENTS.PLAY,
+                { targetTime: 12 },
+                { actionTimestamp: 102, commandSenderId: 'peer-b' }
+            );
+            harness.video.paused = false;
+            harness.video.dispatch('play');
+            harness.video.dispatch('playing');
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS / 2);
+            await Promise.resolve();
+            expect(harness.runtimeMessages).toEqual([]);
+
+            await vi.advanceTimersByTimeAsync(APPLE_PLAY_WATCHDOG_WINDOW_MS / 2);
+            await Promise.resolve();
+            expect(harness.runtimeMessages).toEqual([
+                { type: 'CMD_ACK', actionTimestamp: 102, commandSenderId: 'peer-b' }
+            ]);
+            expect(harness.getProactiveHeartbeats()).toBe(1);
+
+            // 3. In-flight remote PLAY superseded by a newer PAUSE command -> only PAUSE ACKs.
+            harness.video.paused = true;
+            harness.applyServerMediaAction(
+                EVENTS.PLAY,
+                { targetTime: 12 },
+                { actionTimestamp: 103, commandSenderId: 'peer-c' }
+            );
+            harness.video.paused = false;
+            harness.applyServerMediaAction(
+                EVENTS.PAUSE,
+                { targetTime: 12 },
+                { actionTimestamp: 104, commandSenderId: 'peer-d' }
+            );
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(harness.runtimeMessages).toEqual([
+                { type: 'CMD_ACK', actionTimestamp: 102, commandSenderId: 'peer-b' },
+                { type: 'CMD_ACK', actionTimestamp: 104, commandSenderId: 'peer-d' }
+            ]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('cancels a pending play watchdog when tryMediaAction executes a non-play action', async () => {
+        const harness = createTryFixHarness({ buttons: APPLE_BUTTONS, paused: true });
+        const playPromise = harness.tryMediaAction(EVENTS.PLAY, null, { cmdId: 'wd10' });
+        expect(playPromise).toBeInstanceOf(Promise);
+        harness.video.paused = false;
+        expect(harness.tryMediaAction(EVENTS.PAUSE, null, { cmdId: 'wd11' })).toBe(true);
+        expect(await playPromise).toBe(false);
+        expect(harness.logs.some(message => message.includes('watchdog stopped (superseded_by_action)'))).toBe(true);
+    });
+
+    it('sanitizes untrusted command log tokens and formats unknown sync time as ?s', () => {
+        const harness = createTryFixHarness({
+            buttons: APPLE_BUTTONS,
+            paused: false,
+            currentTime: Number.NaN
+        });
+        harness.applyServerMediaAction(
+            EVENTS.PLAY,
+            {},
+            { actionTimestamp: 'bad-ts', commandSenderId: 'peer\nwith\r\tinjection' }
+        );
+        const traceLog = harness.logs.find(message => message.includes('play from'));
+        expect(traceLog).toBeDefined();
+        expect(traceLog).toContain('from peer with injection (t=-) local=playing@?s');
+        expect(traceLog).not.toMatch(/[\r\n\t]/);
     });
 });
