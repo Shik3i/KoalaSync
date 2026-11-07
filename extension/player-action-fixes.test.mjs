@@ -703,7 +703,8 @@ describe('Apple TV+ play watchdog', () => {
             'document',
             'elements',
             'renderEmpty',
-            `"use strict";\n${refreshLogsCode}\nreturn refreshLogs();`
+            'options',
+            `"use strict";\n${refreshLogsCode}\nreturn refreshLogs(options);`
         );
 
         await runRefreshLogs(chromeMock, documentMock, { logList }, vi.fn());
@@ -713,6 +714,18 @@ describe('Apple TV+ play watchdog', () => {
             '[12:00:02] Middle entry',
             '[12:00:03] Newest entry'
         ]);
+        expect(logList.scrollTop).toBe(240);
+
+        // When the user scrolls up to inspect older logs, background refreshes preserve their position.
+        logList.clientHeight = 100;
+        logList.scrollHeight = 240;
+        logList.scrollTop = 40;
+        logList.querySelector = () => ({});
+        await runRefreshLogs(chromeMock, documentMock, { logList }, vi.fn());
+        expect(logList.scrollTop).toBe(40);
+
+        // Explicitly opening the Status tab forces scrolling to the latest entry at the bottom.
+        await runRefreshLogs(chromeMock, documentMock, { logList }, vi.fn(), { forceScrollToBottom: true });
         expect(logList.scrollTop).toBe(240);
     });
 });

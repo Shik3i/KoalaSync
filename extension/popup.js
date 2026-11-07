@@ -2020,7 +2020,7 @@ elements.tabs.forEach(btn => {
         isDevTabVisible = btn.dataset.tab === 'tab-dev';
         if (isDevTabVisible) {
             if (elements.logList) elements.logList.scrollTop = elements.logList.scrollHeight;
-            refreshLogs();
+            refreshLogs({ forceScrollToBottom: true });
         }
         if (btn.dataset.tab === 'tab-sync') refreshHistory();
         
@@ -2614,13 +2614,25 @@ if (elements.cancelLobbyBtn) {
 }
 
 // --- Logs & Status ---
-async function refreshLogs() {
+async function refreshLogs(options) {
     chrome.runtime.sendMessage({ type: 'GET_LOGS' }, (logs) => {
         if (elements.logList) {
             if (!logs || logs.length === 0) {
                 renderEmpty(elements.logList, 'logs');
                 return;
             }
+            const prevScrollTop = elements.logList.scrollTop || 0;
+            const prevScrollHeight = elements.logList.scrollHeight || 0;
+            const prevClientHeight = elements.logList.clientHeight || 0;
+            const hasEntries = typeof elements.logList.querySelector === 'function'
+                ? Boolean(elements.logList.querySelector('.log-entry'))
+                : false;
+            const wasAtBottom = Boolean(options && options.forceScrollToBottom)
+                || !hasEntries
+                || prevScrollHeight === 0
+                || prevClientHeight === 0
+                || (prevScrollHeight - prevScrollTop - prevClientHeight <= 8);
+
             elements.logList.innerHTML = '';
             [...logs].reverse().forEach(log => {
                 const entry = document.createElement('div');
@@ -2629,7 +2641,7 @@ async function refreshLogs() {
                 entry.textContent = `[${timeStr}] ${log.message}`;
                 elements.logList.appendChild(entry);
             });
-            elements.logList.scrollTop = elements.logList.scrollHeight;
+            elements.logList.scrollTop = wasAtBottom ? elements.logList.scrollHeight : prevScrollTop;
         }
     });
 }
