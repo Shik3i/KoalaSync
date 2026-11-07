@@ -77,7 +77,7 @@ The following features are critical and must not be removed or fundamentally alt
     - **Content Heartbeat (15s)**: Transmits current video metadata (time, title).
 - **Dead Peer Pruning**: Server "Reaper" disconnects peers after 5 minutes of total silence (no heartbeats or events).
 - **Deduplication**: Server kills old sockets if a user re-joins with the same `peerId` to prevent ghosts.
-- **Platform Specifics**: Specialized click-logic for YouTube (`.ytp-play-button`) and Twitch.
+- **Platform Specifics**: Specialized click-logic for YouTube (`.ytp-play-button`), Twitch, and Apple TV+ (`.playback-play__play` / `.playback-play__pause` with post-play watchdog).
 - **pollSeekReady()**: Polling mechanism that checks `video.readyState` before acknowledging sync.
 - **SW Keep-alive**: Use of `chrome.alarms` to prevent the Manifest V3 Service Worker from suspending.
 - **Diagnostics**: The visible **Status** tab provides real-time access to connection state, ping, logs, history, and underlying `<video>` state for troubleshooting.

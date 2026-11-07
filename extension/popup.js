@@ -2018,7 +2018,10 @@ elements.tabs.forEach(btn => {
         targetContent.classList.add('tab-active-animate');
         
         isDevTabVisible = btn.dataset.tab === 'tab-dev';
-        if (isDevTabVisible) refreshLogs();
+        if (isDevTabVisible) {
+            if (elements.logList) elements.logList.scrollTop = elements.logList.scrollHeight;
+            refreshLogs();
+        }
         if (btn.dataset.tab === 'tab-sync') refreshHistory();
         
         chrome.storage.local.set({ activeTab: btn.dataset.tab });
@@ -2619,13 +2622,14 @@ async function refreshLogs() {
                 return;
             }
             elements.logList.innerHTML = '';
-            logs.forEach(log => {
+            [...logs].reverse().forEach(log => {
                 const entry = document.createElement('div');
                 entry.className = `log-entry log-${log.type}`;
                 const timeStr = log.timestamp?.split('T')?.[1]?.split('.')[0] || '?';
                 entry.textContent = `[${timeStr}] ${log.message}`;
                 elements.logList.appendChild(entry);
             });
+            elements.logList.scrollTop = elements.logList.scrollHeight;
         }
     });
 }

@@ -20,6 +20,7 @@ This document tracks which streaming platforms and media servers are supported b
 | **Disney+** | ✅ Full | ⚠️ Partial | ❌ | — | — | — | Series title only (e.g. "The Simpsons"), no episode info. |
 | **Prime Video** | ✅ Full  | ✅ Full  | ❌ | — | — | — | — |
 | **HBO Max / Max** | Not tested | Not tested | Not tested | — | — | — | — |
+| **Apple TV+** (`tv.apple.com`) | Not tested | Not tested | Not tested | — | — | — | The player rejects native `video.play()` calls and re-pauses them, so KoalaSync drives the site's own play/pause controls (issue #51). |
 | **Crunchyroll** (`crunchyroll.com`) | ✅ Full | ⚠️ Partial | ❌ | 2026-08-21 | Shik3i | v3.1.4 | Manual testing on the live service confirmed playback synchronization with its top-level Bitmovin HTML5 player. The Media Session exposes the episode as `E1 - Prologue` and the series as artist metadata, but the current episode parser does not recognize the abbreviated `E1` form for episode auto-sync. |
 | **Vimeo** | Not tested | Not tested | Not tested | — | — | — | — |
 | **Dailymotion** | Not tested | Not tested | Not tested | — | — | — | — |
