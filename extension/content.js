@@ -1734,6 +1734,9 @@
         return state.executePromise;
     }
 
+    /**
+     * Returns the registered site-specific player control adapters.
+     */
     function getPlayerActionFixes() {
         return [
             {
@@ -1745,34 +1748,224 @@
                 name: 'twitch-player-buttons',
                 urls: ['twitch.tv'],
                 playPauseButtonSelector: '[data-a-target="player-play-pause-button"]'
+            },
+            // Apple TV+ re-pauses video.play() within milliseconds (its MediaKit
+            // controller rejects playback it did not initiate, see issue #51), so
+            // drive the player's own controls instead of the native HTML5 API.
+            {
+                name: 'appletv-player-buttons',
+                urls: ['tv.apple.com'],
+                playButtonSelector: '.playback-play__play',
+                pauseButtonSelector: '.playback-play__pause'
             }
         ];
     }
 
+    /**
+     * Resolves the player-action adapter matching the current page hostname.
+     */
     function getActivePlayerActionFix() {
         return getPlayerActionFixes().find(fix => matchesPlayerUrls(fix.urls)) || null;
     }
 
-    function tryPlayerActionFix(fix, action, video, data) {
-        if (!fix) return false;
-        const button = document.querySelector(fix.playPauseButtonSelector);
-        if (!button) return false;
+    // --- Apple TV+ post-play watchdog (issue #51) ---
+    // The Apple player may silently re-pause a programmatic start (its MediaKit
+    // controller rejects playback it did not initiate). That rejection emits a
+    // `pause` event that must not be relayed, and the command must not be ACKed
+    // unless playback actually stuck. The watchdog observes the element for a
+    // bounded window after a dispatched play and resolves true only if the
+    // player is still playing at window end — or a user pause is observed
+    // after playback started, which still confirms the start.
+    const APPLE_PLAY_WATCHDOG_WINDOW_MS = 1000;
+    let applePlayWatchdog = null; // { video, cmdId, startedAt, sawPlayEvent, timer, settle, resolve }
 
-        const isCurrentlyPlaying = !video.paused;
-        if ((action === EVENTS.PLAY && !isCurrentlyPlaying) || (action === EVENTS.PAUSE && isCurrentlyPlaying)) {
-            _setSuppress(action === EVENTS.PLAY ? 'playing' : 'paused');
-            button.click();
-        }
-        if (action === EVENTS.SEEK) {
-            seekVideo(video, data.targetTime, data.delta);
+    /**
+     * Generates a short local correlation ID for command trace logs.
+     */
+    function newCorrelationId() {
+        return Math.random().toString(36).slice(2, 8);
+    }
+
+    /**
+     * Normalizes an untrusted peer/log token into a bounded single-line string.
+     */
+    function sanitizeLogToken(value, fallback = '-') {
+        if (value === undefined || value === null || value === '') return fallback;
+        const clean = String(value).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 64);
+        return clean || fallback;
+    }
+
+    /**
+     * Verifies that a DOM button element is attached, enabled, and rendered.
+     */
+    function isButtonOperable(button) {
+        if (!button) return false;
+        if (typeof button.getClientRects === 'function' && button.getClientRects().length === 0) return false;
+        if (button.disabled) return false;
+        if (typeof button.getAttribute === 'function' && button.getAttribute('aria-disabled') === 'true') return false;
+        try {
+            if (typeof window !== 'undefined' && window.getComputedStyle) {
+                const style = window.getComputedStyle(button);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+            }
+        } catch (_e) { /* element detached mid-check */ }
+        return true;
+    }
+
+    /**
+     * Starts a bounded post-play observation window for Apple TV+ play actions.
+     */
+    function startApplePlayWatchdog(video, cmdId) {
+        cancelApplePlayWatchdog('superseded_by_dispatch');
+        let settled = false;
+        const watchdog = { video, cmdId, startedAt: Date.now(), sawPlayEvent: false, timer: null, settle: null, resolve: null };
+        watchdog.settle = applied => {
+            if (settled) return;
+            settled = true;
+            if (watchdog.timer !== null) {
+                clearTimeout(watchdog.timer);
+                lifecycleTimeouts.delete(watchdog.timer);
+                watchdog.timer = null;
+            }
+            watchdog.resolve(applied);
+            if (applePlayWatchdog === watchdog) applePlayWatchdog = null;
+        };
+        watchdog.timer = scheduleLifecycleTimeout(() => {
+            if (settled) return;
+            watchdog.timer = null;
+            const stillPlaying = video.isConnected !== false && !video.paused;
+            watchdog.settle(stillPlaying);
+            const outcome = stillPlaying ? 'confirmed' : (watchdog.sawPlayEvent ? 'ended_after_play' : 'no_playback');
+            reportLog(`[Cmd ${cmdId}] [ApplePlay] watchdog window closed: ${outcome}`, stillPlaying ? 'info' : 'warn');
+        }, APPLE_PLAY_WATCHDOG_WINDOW_MS);
+        applePlayWatchdog = watchdog;
+        return new Promise(resolve => { watchdog.resolve = resolve; });
+    }
+
+    /**
+     * Cancels an active Apple TV+ play watchdog and settles its promise to false.
+     */
+    function cancelApplePlayWatchdog(reason) {
+        const watchdog = applePlayWatchdog;
+        if (!watchdog) return;
+        watchdog.settle(false);
+        reportLog(`[Cmd ${watchdog.cmdId}] [ApplePlay] watchdog stopped (${reason})`, 'info');
+    }
+
+    /**
+     * Records that actual media playback (`playing`) began during the watchdog window.
+     */
+    function noteApplePlayEvent(video) {
+        const watchdog = applePlayWatchdog;
+        if (watchdog && watchdog.video === video) watchdog.sawPlayEvent = true;
+    }
+
+    /**
+     * Gates `play` event relay for the full Apple TV+ watchdog window while
+     * preserving relay of newer user-gesture events.
+     */
+    function consumeApplePlayEcho(video) {
+        const watchdog = applePlayWatchdog;
+        if (!watchdog || watchdog.video !== video) return false;
+        _clearSuppress('playing');
+        if (hcmLastUserGestureAt > watchdog.startedAt) {
+            cancelApplePlayWatchdog('user_play_during_window');
+            return false;
         }
         return true;
     }
 
-    // --- Helper: site-specific player actions, then native HTML5 fallback ---
-    function tryMediaAction(action, data) {
+    /**
+     * Classifies a `pause` event during the Apple TV+ play watchdog window.
+     * Returns true when the pause is an automatic pre-playback rejection artifact
+     * that must be suppressed.
+     */
+    function consumeApplePlayRejection(video) {
+        const watchdog = applePlayWatchdog;
+        if (!watchdog || watchdog.video !== video) return false;
+        if (hcmLastUserGestureAt > watchdog.startedAt) {
+            // Real user input after the dispatch: this pause is the user's —
+            // relay it. The play counts as applied only if playback had started.
+            watchdog.settle(watchdog.sawPlayEvent);
+            reportLog(`[Cmd ${watchdog.cmdId}] [ApplePlay] user pause during watchdog window - relaying`, 'info');
+            return false;
+        }
+        if (watchdog.sawPlayEvent) {
+            // Playback had started; a stop without user input is still a real
+            // state change for the room. Keep the watchdog open until window
+            // end so CMD_ACK depends on the actual settled player state.
+            reportLog(`[Cmd ${watchdog.cmdId}] [ApplePlay] stop after confirmed playback - relaying`, 'info');
+            return false;
+        }
+        // Pause before any playback inside the window: the rejection artifact.
+        // The watchdog keeps running — a delayed start may still arrive.
+        reportLog(`[Cmd ${watchdog.cmdId}] [ApplePlay] auto-pause artifact suppressed (no playback observed yet)`, 'info');
+        return true;
+    }
+
+    /**
+     * Applies a play/pause/seek command through a site-specific player adapter.
+     * Returns false when unhandled/failed, true on synchronous completion, or a
+     * Promise<boolean> when post-play watchdog confirmation is required.
+     */
+    function tryPlayerActionFix(fix, action, video, data, meta) {
+        if (!fix) return false;
+        const cmdId = (meta && meta.cmdId) || newCorrelationId();
+
+        // Toggle players (YouTube, Twitch) expose one play/pause button; players
+        // with separate buttons (Apple TV+) expose both and keep native seeking.
+        const toggleSelector = fix.playPauseButtonSelector || null;
+        if (action === EVENTS.SEEK) {
+            if (!toggleSelector) return false;
+            const seekButton = document.querySelector(toggleSelector);
+            if (!seekButton) return false;
+            seekVideo(video, data.targetTime, data.delta);
+            return true;
+        }
+
+        const selector = toggleSelector
+            || (action === EVENTS.PLAY ? fix.playButtonSelector : null)
+            || (action === EVENTS.PAUSE ? fix.pauseButtonSelector : null);
+        if (!selector) return false;
+        const button = document.querySelector(selector);
+        if (!button) {
+            if (!toggleSelector) {
+                reportLog(`[Cmd ${cmdId}] [ApplePlay] ${action} control not found (${selector}) - player UI may have changed`, 'warn');
+            }
+            return false;
+        }
+
+        const isCurrentlyPlaying = !video.paused;
+        const stateChanged = (action === EVENTS.PLAY && !isCurrentlyPlaying) || (action === EVENTS.PAUSE && isCurrentlyPlaying);
+        if (!stateChanged) return true;
+
+        // A detached or hidden control still matches the selector but its click
+        // is a no-op — detect that instead of dispatching an ineffective action.
+        if (!toggleSelector && !isButtonOperable(button)) {
+            reportLog(`[Cmd ${cmdId}] [ApplePlay] ${action} control present but not operable (${selector})`, 'warn');
+            return false;
+        }
+
+        _setSuppress(action === EVENTS.PLAY ? 'playing' : 'paused');
+        button.click();
+        // A dispatched play on a separate-button player only counts as applied
+        // once the watchdog confirms playback actually stuck (issue #51).
+        if (!toggleSelector && action === EVENTS.PLAY) {
+            return startApplePlayWatchdog(video, cmdId);
+        }
+        return true;
+    }
+
+    /**
+     * Executes a media action via page API bridge, site control adapter, or
+     * native HTML5 fallback.
+     */
+    function tryMediaAction(action, data, meta) {
         const video = findVideo();
         if (!video) return false;
+        if (action !== EVENTS.PLAY) {
+            cancelApplePlayWatchdog('superseded_by_action');
+        }
 
         if (action === EVENTS.SEEK) {
             const target = data ? (data.targetTime !== undefined ? data.targetTime : data.currentTime) : undefined;
@@ -1796,12 +1989,21 @@
             }
 
             const actionFix = getActivePlayerActionFix();
-            if (tryPlayerActionFix(actionFix, action, video, data)) {
-                return true;
+            const fixResult = tryPlayerActionFix(actionFix, action, video, data, meta);
+            if (fixResult) {
+                return fixResult;
             }
 
             // Fallback for native HTML5
             if (action === EVENTS.PLAY) {
+                // On separate-button platforms the native play API is rejected by
+                // the player's own controller (issue #51) — a controlled no-op
+                // with a diagnostic beats an action that silently reverts.
+                if (actionFix && !actionFix.playPauseButtonSelector && actionFix.playButtonSelector) {
+                    const cmdId = (meta && meta.cmdId) || '-';
+                    reportLog(`[Cmd ${cmdId}] [ApplePlay] native video.play() fallback skipped - known unreliable on this platform`, 'warn');
+                    return false;
+                }
                 _setSuppress('playing');
                 const playResult = video.play();
                 if (playResult && typeof playResult.then === 'function') {
@@ -1826,10 +2028,27 @@
         }
     }
 
+    /**
+     * Applies a server-relayed media command and emits CMD_ACK only once the
+     * action is confirmed applied.
+     */
     function applyServerMediaAction(action, payload, message) {
-        Promise.resolve(tryMediaAction(action, payload)).then(applied => {
+        const cmdId = newCorrelationId();
+        const video = findVideo();
+        const currentTime = video ? getSyncCurrentTime(video) : null;
+        const timeLabel = currentTime !== null ? `${currentTime}s` : '?s';
+        const localState = video ? `${video.paused ? 'paused' : 'playing'}@${timeLabel}` : 'no-video';
+        const senderLabel = sanitizeLogToken(message && message.commandSenderId, 'local');
+        const timestampLabel = Number.isFinite(message && message.actionTimestamp) ? message.actionTimestamp : '-';
+        // Incoming-command trace: correlates the command with the button action,
+        // the watchdog outcome and the ACK below (no URL or media title).
+        reportLog(`[Cmd ${cmdId}] ${action} from ${senderLabel} (t=${timestampLabel}) local=${localState}`, 'info');
+        // A newer command supersedes any pending play confirmation.
+        cancelApplePlayWatchdog('superseded_by_command');
+        const meta = { cmdId };
+        Promise.resolve(tryMediaAction(action, payload, meta)).then(applied => {
             if (!applied) {
-                reportLog(`Remote ${action} was not applied`, 'warn');
+                reportLog(`[Cmd ${cmdId}] Remote ${action} was not applied`, 'warn');
                 return;
             }
             runtimeMessage({
@@ -1839,7 +2058,7 @@
             }).catch(() => {});
             scheduleProactiveHeartbeat();
         }).catch(error => {
-            reportLog(`Remote ${action} failed: ${error.message}`, 'warn');
+            reportLog(`[Cmd ${cmdId}] Remote ${action} failed: ${error.message}`, 'warn');
         });
     }
 
@@ -2340,6 +2559,7 @@
                 if (h === 'netflix.com' || h.endsWith('.netflix.com')) return 'Netflix';
                 if (h === 'primevideo.com' || h.endsWith('.primevideo.com') || /(^|\.)amazon\.(com\.[a-z]{2}|co\.[a-z]{2}|[a-z]{2,})$/.test(h)) return 'Prime Video';
                 if (h === 'disneyplus.com' || h.endsWith('.disneyplus.com')) return 'Disney+';
+                if (h === 'tv.apple.com' || h.endsWith('.tv.apple.com')) return 'Apple TV+';
                 if (h === 'hulu.com' || h.endsWith('.hulu.com')) return 'Hulu';
                 if (h === 'hbomax.com' || h.endsWith('.hbomax.com') || h === 'max.com' || h.endsWith('.max.com')) return 'Max/HBO';
                 if (h === 'vimeo.com' || h.endsWith('.vimeo.com')) return 'Vimeo';
@@ -2800,10 +3020,18 @@
     }
 
     const handlePlay = event => {
-        if (isCurrentVideoEvent(event)) reportEvent(EVENTS.PLAY);
+        if (!isCurrentVideoEvent(event)) return;
+        if (consumeApplePlayEcho(event.currentTarget)) return;
+        reportEvent(EVENTS.PLAY);
+    };
+    const handlePlaying = event => {
+        if (!isCurrentVideoEvent(event)) return;
+        noteApplePlayEvent(event.currentTarget);
     };
     const handlePause = event => {
-        if (isCurrentVideoEvent(event)) reportEvent(EVENTS.PAUSE);
+        if (!isCurrentVideoEvent(event)) return;
+        if (consumeApplePlayRejection(event.currentTarget)) return;
+        reportEvent(EVENTS.PAUSE);
     };
     // Host Control Mode: a 'waiting' (buffering) event opens a grace window so the
     // pause it may trigger isn't misread as a deliberate guest action (EC-1).
@@ -2864,6 +3092,9 @@
             const finalDeltaStr = finalDelta !== null ? `Δ${finalDelta.toFixed(2)}s` : 'Δ?';
             lastReportedSeekTime = settled;
             reportLog(`[Seek] Relayed @ ${settled.toFixed(2)}s (${finalDeltaStr})`, 'info');
+            // A relayed seek while a play watchdog is pending means the player
+            // state moved on — the pending play can no longer be confirmed.
+            cancelApplePlayWatchdog('seek_during_window');
             reportEvent(EVENTS.SEEK);
         }, 300);
     };
@@ -2910,11 +3141,15 @@
         });
     };
 
+    /**
+     * Removes KoalaSync media event listeners from a detached or replaced video element.
+     */
     function detachVideoListeners(video) {
         if (!video) return;
         const handlers = video._koalaHandlers;
         if (handlers) {
             video.removeEventListener('play', handlers.play);
+            if (handlers.playing) video.removeEventListener('playing', handlers.playing);
             video.removeEventListener('pause', handlers.pause);
             if (handlers.seeking) video.removeEventListener('seeking', handlers.seeking);
             video.removeEventListener('seeked', handlers.seeked);
@@ -2930,15 +3165,22 @@
         if (activeVideo === video) activeVideo = null;
     }
 
+    /**
+     * Cancels pending debounce, coalescing, quarantine, and watchdog timers for the current video.
+     */
     function cancelPendingVideoEvents() {
         if (seekDebounceTimer) { clearTimeout(seekDebounceTimer); seekDebounceTimer = null; }
         cancelPlayPauseCoalesce();
+        cancelApplePlayWatchdog('video_events_cancelled');
         discardEpisodeTransitionQuarantine();
         clearEpisodeTransitionCandidate();
         episodeTransitionNoiseVideo = null;
         episodeTransitionNoiseUntil = 0;
     }
 
+    /**
+     * Attaches media event listeners to the currently selected video element.
+     */
     function setupListeners() {
         if (destroyed) return;
         const video = findVideo();
@@ -2958,6 +3200,7 @@
             activeVideo = video;
             video._koalaHandlers = {
                 play: handlePlay,
+                playing: handlePlaying,
                 pause: handlePause,
                 seeking: handleSeeking,
                 seeked: handleSeeked,
@@ -2968,6 +3211,7 @@
                 waiting: handleWaiting
             };
             video.addEventListener('play', handlePlay);
+            video.addEventListener('playing', handlePlaying);
             video.addEventListener('pause', handlePause);
             video.addEventListener('seeking', handleSeeking);
             video.addEventListener('seeked', handleSeeked);
