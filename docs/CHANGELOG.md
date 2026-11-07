@@ -5,6 +5,17 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ---
 
+## [v3.4.0] — 2026-11-07
+
+### Added
+- **Apple TV+ playback sync** — Remote play, pause, and seek commands now work reliably on Apple TV+ by routing actions through the player's controls and verifying playback progress.
+
+### Fixed
+- **Popup activity log scrolling** — Logs in the Status tab now appear in chronological order and automatically scroll to the latest entry while keeping your scroll position when reading older entries.
+- **Remote control button icons** — Removed the duplicate play/pause icon shown while a remote playback action is in progress.
+
+---
+
 ## [v3.3.3] — 2026-10-26
 
 ### Security
