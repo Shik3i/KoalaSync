@@ -654,4 +654,65 @@ describe('Apple TV+ play watchdog', () => {
         expect(traceLog).toContain('from peer with injection (t=-) local=playing@?s');
         expect(traceLog).not.toMatch(/[\r\n\t]/);
     });
+
+    it('keeps play/pause button state labels free of duplicate leading icon glyphs across all locales', () => {
+        const localesDir = path.join(extensionDir, 'locales');
+        const localeFiles = fs.readdirSync(localesDir).filter(file => file.endsWith('.json'));
+        expect(localeFiles.length).toBeGreaterThan(0);
+
+        for (const file of localeFiles) {
+            const dict = JSON.parse(fs.readFileSync(path.join(localesDir, file), 'utf8'));
+            for (const key of ['BTN_PLAY', 'BTN_PAUSE', 'BTN_STATE_PLAYING', 'BTN_STATE_PAUSING']) {
+                expect(dict[key], `${file}:${key}`).toBeTypeOf('string');
+                expect(dict[key], `${file}:${key} should not prefix duplicate ▶/⏸ glyphs`).not.toMatch(/^[▶⏸]/u);
+            }
+        }
+    });
+
+    it('renders popup logs chronologically and auto-scrolls logList to the newest entry', async () => {
+        const popupSource = fs.readFileSync(path.join(extensionDir, 'popup.js'), 'utf8');
+        const refreshLogsCode = extractBlock(popupSource, 'async function refreshLogs(');
+        const appended = [];
+        const logList = {
+            innerHTML: 'stale',
+            scrollTop: 0,
+            scrollHeight: 240,
+            appendChild(node) {
+                appended.push(node.textContent);
+            }
+        };
+        const chromeMock = {
+            runtime: {
+                sendMessage(msg, cb) {
+                    expect(msg).toEqual({ type: 'GET_LOGS' });
+                    cb([
+                        { timestamp: '2026-11-07T12:00:03.000Z', message: 'Newest entry', type: 'info' },
+                        { timestamp: '2026-11-07T12:00:02.000Z', message: 'Middle entry', type: 'info' },
+                        { timestamp: '2026-11-07T12:00:01.000Z', message: 'Oldest entry', type: 'info' }
+                    ]);
+                }
+            }
+        };
+        const documentMock = {
+            createElement() {
+                return { className: '', textContent: '' };
+            }
+        };
+        const runRefreshLogs = new Function(
+            'chrome',
+            'document',
+            'elements',
+            'renderEmpty',
+            `"use strict";\n${refreshLogsCode}\nreturn refreshLogs();`
+        );
+
+        await runRefreshLogs(chromeMock, documentMock, { logList }, vi.fn());
+
+        expect(appended).toEqual([
+            '[12:00:01] Oldest entry',
+            '[12:00:02] Middle entry',
+            '[12:00:03] Newest entry'
+        ]);
+        expect(logList.scrollTop).toBe(240);
+    });
 });
