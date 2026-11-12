@@ -20,6 +20,13 @@ import { TITLE_PRIVACY_MODES, normalizeSendTabTitle, normalizeTabTitle } from '.
 import { normalizeRoomId } from './chat-session.js';
 import './shared/invite-links.js';
 import { normalizeTabId, requestOriginPermission } from './host-access.js';
+import {
+    CHANGELOG_SYNC_KEY,
+    CHANGELOG_URL,
+    RELEASE_CHANGELOG,
+    resolveChangelogVersion,
+    shouldAutoShowChangelog
+} from './changelog.js';
 
 let pendingInviteRoomId = '';
 let pendingInviteChatKey = '';
@@ -367,7 +374,7 @@ function setRoomRefreshCooldown() {
 // --- Initialization ---
 async function init() {
     // Local-only by design — settings and room credentials never come from
-    // storage.sync (only onboardingComplete + dismissedHints live there).
+    // storage.sync (only onboardingComplete, dismissedHints, and lastReadChangelogVersion live there).
     const localData = await chrome.storage.local.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey', 'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username', 'filterNoise', 'autoSyncNextEpisode', 'sendTabTitle', 'shareVideoUrl', 'mediaTitlePrivacyMode', 'titlePrivacyMode', 'forceSyncMode', 'browserNotifications', 'autoCopyInvite', 'locale', 'audioSettings', 'activeTab', 'themeMode', 'themePalette']);
 
     let activeLang = localData.locale;
@@ -378,6 +385,7 @@ async function init() {
 
     await loadLocale(activeLang);
     translateDOM();
+    renderChangelogModalContent();
     localizeThemeSelector(activeLang);
     
     if (elements.langSelector) elements.langSelector.value = activeLang;
@@ -507,9 +515,20 @@ async function init() {
     // Debug Info Refresh
     popupIntervals.push(setInterval(refreshDebugInfo, 2000));
 
-    // Show onboarding on first visit
-    chrome.storage.sync.get(['onboardingComplete'], (data) => {
-        if (!data.onboardingComplete) showOnboarding();
+    // Show onboarding on first visit; otherwise show release changelog once per version
+    chrome.storage.sync.get(['onboardingComplete', CHANGELOG_SYNC_KEY], (data) => {
+        if (!data.onboardingComplete) {
+            showOnboarding();
+            return;
+        }
+        const currentVersion = chrome.runtime.getManifest().version;
+        if (shouldAutoShowChangelog({
+            onboardingComplete: true,
+            lastReadChangelogVersion: data[CHANGELOG_SYNC_KEY],
+            currentVersion
+        })) {
+            showChangelogModal();
+        }
     });
 }
 
@@ -1696,6 +1715,8 @@ function checkInviteLink() {
 function handleInvitePaste(event) {
     const overlay = document.getElementById('onboarding-overlay');
     if (overlay && overlay.offsetParent !== null) return;
+    const changelogOverlay = document.getElementById('changelog-overlay');
+    if (changelogOverlay && changelogOverlay.offsetParent !== null) return;
     const target = event.target;
     const editable = !!target && typeof target.matches === 'function'
         && (target.isContentEditable || target.matches('input, textarea, select'));
@@ -1923,6 +1944,7 @@ if (elements.langSelector) {
         await chrome.storage.local.set({ locale: selectedLang });
         await loadLocale(selectedLang);
         translateDOM();
+        renderChangelogModalContent();
         localizeThemeSelector(selectedLang);
         configureFooterLinks();
         await updateFeatureHints();
@@ -3531,12 +3553,128 @@ function completeOnboarding() {
     setTimeout(() => {
         if (overlay) overlay.style.display = 'none';
         document.body.style.minHeight = '';
-        chrome.storage.sync.set({ onboardingComplete: true });
+        const currentVersion = resolveChangelogVersion(chrome.runtime.getManifest().version);
+        const syncPayload = { onboardingComplete: true };
+        if (currentVersion) syncPayload[CHANGELOG_SYNC_KEY] = currentVersion;
+        chrome.storage.sync.set(syncPayload);
         
         const inRoom = elements.sectionActive && elements.sectionActive.style.display === 'block';
         toggleUIState(inRoom);
     }, 300);
 }
+
+function renderChangelogModalContent() {
+    const manifestVersion = chrome.runtime.getManifest().version;
+    const pillEl = document.getElementById('changelogVersionPill');
+    if (pillEl) pillEl.textContent = `v${manifestVersion}`;
+
+    const githubLink = document.getElementById('changelogGithubLink');
+    if (githubLink) githubLink.href = CHANGELOG_URL;
+
+    const closeBtn = document.getElementById('changelogCloseBtn');
+    if (closeBtn) {
+        const closeLabel = getMessage('CHANGELOG_CLOSE_BTN');
+        closeBtn.setAttribute('aria-label', closeLabel);
+        closeBtn.setAttribute('title', closeLabel);
+    }
+
+    const listEl = document.getElementById('changelogList');
+    if (!listEl) return;
+    listEl.replaceChildren();
+
+    for (const item of RELEASE_CHANGELOG.items) {
+        const card = document.createElement('div');
+        card.className = 'changelog-item';
+
+        const header = document.createElement('div');
+        header.className = 'changelog-item-header';
+
+        if (item.badgeKey) {
+            const badge = document.createElement('span');
+            badge.className = 'changelog-badge';
+            badge.textContent = getMessage(item.badgeKey);
+            header.appendChild(badge);
+        }
+
+        const title = document.createElement('span');
+        title.className = 'changelog-item-title';
+        title.textContent = getMessage(item.titleKey);
+        header.appendChild(title);
+
+        const desc = document.createElement('p');
+        desc.className = 'changelog-item-desc';
+        desc.textContent = getMessage(item.descKey);
+
+        card.append(header, desc);
+        listEl.appendChild(card);
+    }
+}
+
+function showChangelogModal({ manual = false } = {}) {
+    const onboardingOverlay = document.getElementById('onboarding-overlay');
+    if (!manual && onboardingOverlay && onboardingOverlay.offsetParent !== null) return;
+
+    const overlay = document.getElementById('changelog-overlay');
+    if (!overlay) return;
+
+    renderChangelogModalContent();
+    document.body.style.minHeight = '420px';
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+
+    const dismissBtn = document.getElementById('changelogDismissBtn');
+    dismissBtn?.focus();
+}
+
+function closeChangelogModal({ restoreFocus = false } = {}) {
+    const overlay = document.getElementById('changelog-overlay');
+    if (!overlay || !overlay.classList.contains('open')) return;
+
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+
+    const onboardingOverlay = document.getElementById('onboarding-overlay');
+    if (!onboardingOverlay || onboardingOverlay.offsetParent === null) {
+        document.body.style.minHeight = '';
+    }
+
+    const currentVersion = resolveChangelogVersion(chrome.runtime.getManifest().version);
+    if (currentVersion) {
+        chrome.storage.sync.set({ [CHANGELOG_SYNC_KEY]: currentVersion });
+    }
+
+    if (restoreFocus) {
+        document.getElementById('popupVersionBtn')?.focus();
+    }
+}
+
+document.getElementById('popupVersionBtn')?.addEventListener('click', () => {
+    showChangelogModal({ manual: true });
+});
+
+document.getElementById('changelogDismissBtn')?.addEventListener('click', () => {
+    closeChangelogModal({ restoreFocus: true });
+});
+
+document.getElementById('changelogCloseBtn')?.addEventListener('click', () => {
+    closeChangelogModal({ restoreFocus: true });
+});
+
+document.getElementById('changelog-overlay')?.addEventListener('click', (e) => {
+    if (e.target.id === 'changelog-overlay') {
+        closeChangelogModal({ restoreFocus: true });
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const changelogOverlay = document.getElementById('changelog-overlay');
+        if (changelogOverlay?.classList.contains('open')) {
+            e.stopPropagation();
+            closeChangelogModal({ restoreFocus: true });
+        }
+    }
+});
 
 document.getElementById('onboarding-next')?.addEventListener('click', () => {
     onboardingStep++;
@@ -3554,6 +3692,7 @@ document.getElementById('onboarding-overlay')?.addEventListener('click', (e) => 
 });
 
 elements.restartTourBtn?.addEventListener('click', () => {
+    closeChangelogModal();
     onboardingStep = 0;
     showOnboarding();
 });

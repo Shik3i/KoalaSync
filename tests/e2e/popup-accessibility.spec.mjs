@@ -58,3 +58,41 @@ test('popup root remains 360px when a dynamic child overflows', async ({ context
         probeWidth: 1200
     });
 });
+
+test('changelog modal stays suppressed during onboarding, opens once on version update, and reopens on version click', async ({ context, extensionId }) => {
+    const page = await openPopup(context, extensionId, { openEditor: false });
+
+    // 1. Fresh install before onboarding completes: changelog must remain hidden.
+    await expect(page.locator('#changelog-overlay')).toBeHidden();
+
+    // 2. Simulate an existing user (onboardingComplete: true) upgrading from an older version.
+    await page.evaluate(() => new Promise(resolve => {
+        chrome.storage.sync.set({ onboardingComplete: true, lastReadChangelogVersion: '0.0.1' }, resolve);
+    }));
+    await page.reload();
+    await expect(page.locator('#changelog-overlay')).toBeVisible();
+    await expect(page.locator('#changelogList .changelog-item')).toHaveCount(3);
+    await expect(page.locator('#changelogGithubLink')).toHaveAttribute(
+        'href',
+        'https://github.com/Shik3i/KoalaSync/blob/main/docs/CHANGELOG.md'
+    );
+
+    // Dismissing marks the current version as read in storage.sync and prevents re-showing on reload.
+    await page.click('#changelogDismissBtn');
+    await expect(page.locator('#changelog-overlay')).toBeHidden();
+
+    const storedVersion = await page.evaluate(() => new Promise(resolve => {
+        chrome.storage.sync.get(['lastReadChangelogVersion'], data => resolve(data.lastReadChangelogVersion));
+    }));
+    const expectedMajorMinor = await page.evaluate(() => chrome.runtime.getManifest().version.split('.').slice(0, 2).join('.'));
+    expect(storedVersion).toBe(expectedMajorMinor);
+
+    await page.reload();
+    await expect(page.locator('#changelog-overlay')).toBeHidden();
+
+    // 3. Clicking the version number in the header reopens the changelog anytime.
+    await page.click('#popupVersionBtn');
+    await expect(page.locator('#changelog-overlay')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#changelog-overlay')).toBeHidden();
+});

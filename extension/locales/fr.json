@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Remplacer l’onglet sélectionné par {host} ?",
   "PEER_LINK_CONFIRM_YES": "Ouvrir",
   "PEER_LINK_CONFIRM_NO": "Annuler",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Ce relais ne prend pas en charge le chat chiffré dont les liens vidéo ont besoin. Le partage est inactif ici."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Ce relais ne prend pas en charge le chat chiffré dont les liens vidéo ont besoin. Le partage est inactif ici.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Voir les nouveautés de cette version",
+  "CHANGELOG_MODAL_TITLE": "Nouveautés",
+  "CHANGELOG_MODAL_SUBTITLE": "Les changements clés de cette version",
+  "CHANGELOG_BADGE_NEW": "NOUVEAU",
+  "CHANGELOG_BADGE_IMPROVED": "AMÉLIORÉ",
+  "CHANGELOG_BADGE_FIX": "CORRIGÉ",
+  "CHANGELOG_GITHUB_LINK": "Changelog complet (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Compris",
+  "CHANGELOG_CLOSE_BTN": "Fermer les nouveautés",
+  "CHANGELOG_ITEM_1_TITLE": "Nouveautés directement dans le popup",
+  "CHANGELOG_ITEM_1_DESC": "Découvrez les principaux changements après une mise à jour ou à tout moment en cliquant sur le numéro de version.",
+  "CHANGELOG_ITEM_2_TITLE": "Badge non lu réservé aux vrais messages",
+  "CHANGELOG_ITEM_2_DESC": "Les actions lecture, pause et saut restent affichées dans le chat sans incrémenter le compteur de messages non lus.",
+  "CHANGELOG_ITEM_3_TITLE": "Délai du salon d’épisode porté à 5 minutes",
+  "CHANGELOG_ITEM_3_DESC": "Le salon d’épisode attend désormais jusqu’à 5 minutes lors du changement d’épisode si quelqu’un laisse défiler le générique."
 }

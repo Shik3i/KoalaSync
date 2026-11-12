@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "選択中のタブを {host} に置き換えますか？",
   "PEER_LINK_CONFIRM_YES": "開く",
   "PEER_LINK_CONFIRM_NO": "キャンセル",
-  "PEER_LINK_RELAY_UNSUPPORTED": "このリレーは、動画リンクに必要な暗号化チャットに対応していません。ここでは共有は無効です。"
+  "PEER_LINK_RELAY_UNSUPPORTED": "このリレーは、動画リンクに必要な暗号化チャットに対応していません。ここでは共有は無効です。",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "このバージョンの新機能を表示",
+  "CHANGELOG_MODAL_TITLE": "新着情報",
+  "CHANGELOG_MODAL_SUBTITLE": "このバージョンの主な変更点",
+  "CHANGELOG_BADGE_NEW": "新機能",
+  "CHANGELOG_BADGE_IMPROVED": "改善",
+  "CHANGELOG_BADGE_FIX": "修正",
+  "CHANGELOG_GITHUB_LINK": "全変更履歴 (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "確認",
+  "CHANGELOG_CLOSE_BTN": "更新履歴を閉じる",
+  "CHANGELOG_ITEM_1_TITLE": "ポップアップ内の更新ハイライト",
+  "CHANGELOG_ITEM_1_DESC": "アップデート直後や、ヘッダーのバージョン番号をクリックしたときに最新の変更点を確認できます。",
+  "CHANGELOG_ITEM_2_TITLE": "未読バッジをチャットメッセージのみに限定",
+  "CHANGELOG_ITEM_2_DESC": "再生・一時停止・シークの履歴はチャット内に表示されたまま、未読バッジの件数には加算されなくなりました。",
+  "CHANGELOG_ITEM_3_TITLE": "エピソードロビーの待機時間を5分に延長",
+  "CHANGELOG_ITEM_3_DESC": "エンディングをスキップしない参加者がいてもタイムアウトしないよう、次の話への待機時間を最大5分に延長しました。"
 }

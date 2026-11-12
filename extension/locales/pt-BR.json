@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Substituir a aba selecionada por {host}?",
   "PEER_LINK_CONFIRM_YES": "Abrir",
   "PEER_LINK_CONFIRM_NO": "Cancelar",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay não oferece suporte ao chat criptografado de que os links de vídeo precisam. O compartilhamento está inativo aqui."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay não oferece suporte ao chat criptografado de que os links de vídeo precisam. O compartilhamento está inativo aqui.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Ver as novidades desta versão",
+  "CHANGELOG_MODAL_TITLE": "Novidades",
+  "CHANGELOG_MODAL_SUBTITLE": "Destaques desta versão do KoalaSync",
+  "CHANGELOG_BADGE_NEW": "NOVO",
+  "CHANGELOG_BADGE_IMPROVED": "MELHORADO",
+  "CHANGELOG_BADGE_FIX": "CORREÇÃO",
+  "CHANGELOG_GITHUB_LINK": "Changelog completo (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Entendi",
+  "CHANGELOG_CLOSE_BTN": "Fechar novidades",
+  "CHANGELOG_ITEM_1_TITLE": "Novidades da versão no popup",
+  "CHANGELOG_ITEM_1_DESC": "Veja as principais mudanças após atualizar ou a qualquer momento clicando no número da versão no topo.",
+  "CHANGELOG_ITEM_2_TITLE": "Contador de não lidas só para mensagens reais",
+  "CHANGELOG_ITEM_2_DESC": "Ações de play, pausa e avanço continuam no histórico do chat sem inflar o contador de mensagens não lidas.",
+  "CHANGELOG_ITEM_3_TITLE": "Limite de 5 minutos na sala de episódio",
+  "CHANGELOG_ITEM_3_DESC": "A sala de espera de episódio agora aguarda até 5 minutos na troca de episódio para não expirar se alguém não pular os créditos."
 }

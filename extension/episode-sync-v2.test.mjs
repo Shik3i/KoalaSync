@@ -80,8 +80,8 @@ describe('Episode Sync v2 extension contract', () => {
     });
 
     it('separates legacy and v2 loading timeouts and converts remaining duration locally', () => {
-        expect(EPISODE_LOBBY_TIMEOUT).toBe(60_000);
-        expect(EPISODE_SYNC_V2_LOAD_TIMEOUT).toBe(120_000);
+        expect(EPISODE_LOBBY_TIMEOUT).toBe(300_000);
+        expect(EPISODE_SYNC_V2_LOAD_TIMEOUT).toBe(300_000);
         expect(EPISODE_SYNC_V2_PREPARE_TIMEOUT).toBe(15_000);
         expect(EPISODE_SYNC_V2_EXECUTE_TIMEOUT).toBe(10_000);
         const normalize = between(

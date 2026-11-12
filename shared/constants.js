@@ -104,10 +104,9 @@ export const FORCE_SYNC_TIMEOUT = 8500; // 8.5s timeout for force sync ACKs (mus
 // Log unexpectedly delayed EXECUTE delivery after the normal ACK wait plus
 // transport grace. The target remains valid until newer room playback replaces it.
 export const FORCE_SYNC_TARGET_DELAY_WARNING = FORCE_SYNC_TIMEOUT + 2000;
-export const EPISODE_LOBBY_TIMEOUT = 60000; // 60s timeout for episode lobby
-// V2 has a relay-owned loading phase. Keep this separate from the bundled
-// legacy timer so rolling old/new rooms retain the legacy 60s wire contract.
-export const EPISODE_SYNC_V2_LOAD_TIMEOUT = 120000;
+export const EPISODE_LOBBY_TIMEOUT = 300000; // 5m timeout for episode lobby
+// V2 has a relay-owned loading phase (5m so peers who do not skip long outros can finish).
+export const EPISODE_SYNC_V2_LOAD_TIMEOUT = 300000;
 export const EPISODE_SYNC_V2_PREPARE_TIMEOUT = 15000; // pause, seek, buffer and 1s stable verification
 export const EPISODE_SYNC_V2_EXECUTE_TIMEOUT = 10000; // apply playback and acknowledge before commit
 export const EPISODE_SYNC_V2_STABILITY_MS = 1000;

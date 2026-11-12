@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "¿Reemplazar la pestaña seleccionada por {host}?",
   "PEER_LINK_CONFIRM_YES": "Abrir",
   "PEER_LINK_CONFIRM_NO": "Cancelar",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay no admite el chat cifrado que necesitan los enlaces de vídeo. Compartir está inactivo aquí."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay no admite el chat cifrado que necesitan los enlaces de vídeo. Compartir está inactivo aquí.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Ver las novedades de esta versión",
+  "CHANGELOG_MODAL_TITLE": "Novedades",
+  "CHANGELOG_MODAL_SUBTITLE": "Cambios destacados en esta versión",
+  "CHANGELOG_BADGE_NEW": "NUEVO",
+  "CHANGELOG_BADGE_IMPROVED": "MEJORADO",
+  "CHANGELOG_BADGE_FIX": "CORRECCIÓN",
+  "CHANGELOG_GITHUB_LINK": "Changelog completo (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Entendido",
+  "CHANGELOG_CLOSE_BTN": "Cerrar novedades",
+  "CHANGELOG_ITEM_1_TITLE": "Resumen de novedades en el popup",
+  "CHANGELOG_ITEM_1_DESC": "Consulta los cambios principales tras actualizar o en cualquier momento haciendo clic en el número de versión.",
+  "CHANGELOG_ITEM_2_TITLE": "Contador de no leídos solo para mensajes reales",
+  "CHANGELOG_ITEM_2_DESC": "Los eventos de reproducir, pausar y buscar siguen en el historial del chat sin aumentar el contador de no leídos.",
+  "CHANGELOG_ITEM_3_TITLE": "Tiempo de espera de sala de episodio de 5 minutos",
+  "CHANGELOG_ITEM_3_DESC": "La sala de espera entre episodios ahora aguarda hasta 5 minutos para no agotarse cuando alguien no salta los créditos."
 }

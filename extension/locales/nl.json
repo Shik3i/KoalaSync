@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Het geselecteerde tabblad vervangen door {host}?",
   "PEER_LINK_CONFIRM_YES": "Openen",
   "PEER_LINK_CONFIRM_NO": "Annuleren",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Deze relay ondersteunt de versleutelde chat niet die videolinks nodig hebben. Delen is hier inactief."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Deze relay ondersteunt de versleutelde chat niet die videolinks nodig hebben. Delen is hier inactief.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Bekijk wat er nieuw is in deze versie",
+  "CHANGELOG_MODAL_TITLE": "Wat is er nieuw",
+  "CHANGELOG_MODAL_SUBTITLE": "Belangrijkste wijzigingen in deze versie",
+  "CHANGELOG_BADGE_NEW": "NIEUW",
+  "CHANGELOG_BADGE_IMPROVED": "VERBETERD",
+  "CHANGELOG_BADGE_FIX": "OPGELOST",
+  "CHANGELOG_GITHUB_LINK": "Volledige changelog (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Begrepen",
+  "CHANGELOG_CLOSE_BTN": "Changelog sluiten",
+  "CHANGELOG_ITEM_1_TITLE": "Release-overzicht in de popup",
+  "CHANGELOG_ITEM_1_DESC": "Bekijk de belangrijkste vernieuwingen na een update of op elk moment door op het versienummer te klikken.",
+  "CHANGELOG_ITEM_2_TITLE": "Ongelezen-teller alleen voor echte berichten",
+  "CHANGELOG_ITEM_2_DESC": "Afspelen, pauzeren en spoelen blijven zichtbaar in de chat zonder de teller voor ongelezen berichten te verhogen.",
+  "CHANGELOG_ITEM_3_TITLE": "Afleveringslobby wacht nu tot 5 minuten",
+  "CHANGELOG_ITEM_3_DESC": "De afleveringslobby wacht bij een nieuwe aflevering nu tot 5 minuten zodat deze niet verloopt als iemand de aftiteling afkijkt."
 }

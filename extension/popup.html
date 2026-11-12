@@ -296,23 +296,201 @@
 
         .popup-version {
             margin-left: auto;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             gap: 4px;
+            width: auto;
+            margin-top: 0;
+            padding: 3px 8px;
+            font-family: inherit;
             font-size: 10px;
+            font-weight: 600;
             color: var(--text-muted);
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 999px;
             text-decoration: none;
-            opacity: 0.72;
-            transition: opacity 0.2s, color 0.2s;
+            cursor: pointer;
+            opacity: 0.78;
+            transition: opacity 0.2s, color 0.2s, border-color 0.2s, background-color 0.2s;
         }
         .popup-version:hover {
             opacity: 1;
             color: var(--accent);
+            background: var(--card);
+            border-color: var(--border-strong);
         }
         .popup-version svg {
             width: 12px;
             height: 12px;
             display: block;
+            flex-shrink: 0;
+        }
+
+        /* Changelog / What's New Modal */
+        #changelog-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 16, 12, 0.72);
+            backdrop-filter: blur(2px);
+            z-index: 980;
+            align-items: center;
+            justify-content: center;
+            padding: 14px;
+            box-sizing: border-box;
+        }
+        #changelog-overlay.open {
+            display: flex;
+        }
+        #changelog-modal {
+            width: 100%;
+            max-width: 328px;
+            max-height: calc(100vh - 28px);
+            display: flex;
+            flex-direction: column;
+            background: var(--card);
+            border: 1px solid var(--border-strong);
+            border-radius: 12px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.48);
+            overflow: hidden;
+            box-sizing: border-box;
+            animation: fadeIn 0.2s ease-out;
+        }
+        .changelog-hero {
+            padding: 14px 16px 12px;
+            background: linear-gradient(135deg, color-mix(in oklch, var(--accent), var(--surface-alt) 84%), var(--surface-alt));
+            border-bottom: 1px solid var(--border-soft);
+        }
+        .changelog-hero-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .changelog-version-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: var(--accent);
+            color: var(--text-on-green);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+        .changelog-close-btn {
+            width: 24px;
+            height: 24px;
+            margin: 0;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            transition: color 0.2s, background-color 0.2s, border-color 0.2s;
+        }
+        .changelog-close-btn:hover {
+            color: var(--text);
+            background: var(--surface-deep);
+            border-color: var(--border-soft);
+        }
+        .changelog-title {
+            margin: 0 0 3px;
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.25;
+        }
+        .changelog-subtitle {
+            margin: 0;
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.35;
+        }
+        .changelog-body {
+            padding: 12px 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            max-height: 230px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-strong) transparent;
+        }
+        .changelog-item {
+            background: var(--surface-deep);
+            border: 1px solid var(--border-soft);
+            border-radius: 8px;
+            padding: 9px 11px;
+        }
+        .changelog-item-header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+        .changelog-badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            background: color-mix(in oklch, var(--accent), transparent 82%);
+            color: var(--accent);
+            border: 1px solid color-mix(in oklch, var(--accent), transparent 65%);
+        }
+        .changelog-item-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.3;
+            overflow-wrap: anywhere;
+        }
+        .changelog-item-desc {
+            margin: 0;
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+        .changelog-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 16px 12px;
+            border-top: 1px solid var(--border-soft);
+            background: var(--surface-alt);
+        }
+        .changelog-github-link {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--accent);
+            text-decoration: none;
+            overflow-wrap: anywhere;
+        }
+        .changelog-github-link:hover {
+            text-decoration: underline;
+            color: var(--accent-hover);
+        }
+        .changelog-dismiss-btn {
+            width: auto !important;
+            margin: 0 !important;
+            padding: 7px 14px !important;
+            font-size: 11px;
+            flex-shrink: 0;
         }
 
         /* Tabs */
@@ -1420,12 +1598,13 @@
     <main>
     <div class="header-row">
                     <h1 data-i18n="APP_TITLE"><img src="icons/icon128.png" alt="KoalaSync Logo">KoalaSync</h1>
-                    <a href="https://github.com/Shik3i/KoalaSync" target="_blank" class="popup-version">
-                        <svg viewBox="0 0 16 16" fill="currentColor">
-                            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    <button type="button" id="popupVersionBtn" class="popup-version" title="Show what's new in this version" data-i18n-title="BTN_VERSION_CHANGELOG_TOOLTIP">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M8 1.5l1.4 3.4 3.4 1.4-3.4 1.4L8 11.1 6.6 7.7 3.2 6.3l3.4-1.4L8 1.5z"/>
+                            <path d="M12.5 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6.6-1.4z"/>
                         </svg>
                         <span id="popupVersion">v0.0.0</span>
-                    </a>
+                    </button>
                 </div>
 
     <div class="tabs" role="tablist" aria-label="KoalaSync sections">
@@ -1918,6 +2097,25 @@
             
             <!-- Tooltip pointer arrow -->
             <div id="onboarding-arrow" style="position:absolute; width:0; height:0; border:6px solid transparent; transition:all 0.3s ease;"></div>
+        </div>
+    </div>
+
+    <!-- Changelog / What's New Modal -->
+    <div id="changelog-overlay" aria-hidden="true">
+        <div id="changelog-modal" role="dialog" aria-modal="true" aria-labelledby="changelog-title">
+            <div class="changelog-hero">
+                <div class="changelog-hero-top">
+                    <span id="changelogVersionPill" class="changelog-version-pill">v0.0.0</span>
+                    <button type="button" id="changelogCloseBtn" class="changelog-close-btn" aria-label="Close changelog" title="Close changelog" data-i18n-title="CHANGELOG_CLOSE_BTN">×</button>
+                </div>
+                <h2 id="changelog-title" class="changelog-title" data-i18n="CHANGELOG_MODAL_TITLE">What’s New</h2>
+                <p id="changelog-subtitle" class="changelog-subtitle" data-i18n="CHANGELOG_MODAL_SUBTITLE">Highlights in this version of KoalaSync</p>
+            </div>
+            <div id="changelogList" class="changelog-body"></div>
+            <div class="changelog-footer">
+                <a id="changelogGithubLink" class="changelog-github-link" href="https://github.com/Shik3i/KoalaSync/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener noreferrer" data-i18n="CHANGELOG_GITHUB_LINK">Full changelog (EN) ↗</a>
+                <button type="button" id="changelogDismissBtn" class="primary changelog-dismiss-btn" title="Got it" data-i18n="CHANGELOG_DISMISS_BTN" data-i18n-title="CHANGELOG_DISMISS_BTN">Got it</button>
+            </div>
         </div>
     </div>
 </body>

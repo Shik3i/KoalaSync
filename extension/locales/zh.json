@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "用 {host} 替换所选标签页？",
   "PEER_LINK_CONFIRM_YES": "打开",
   "PEER_LINK_CONFIRM_NO": "取消",
-  "PEER_LINK_RELAY_UNSUPPORTED": "此中继不支持视频链接所需的加密聊天，因此这里无法分享。"
+  "PEER_LINK_RELAY_UNSUPPORTED": "此中继不支持视频链接所需的加密聊天，因此这里无法分享。",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "查看此版本的更新内容",
+  "CHANGELOG_MODAL_TITLE": "更新内容",
+  "CHANGELOG_MODAL_SUBTITLE": "此版本 KoalaSync 的主要更新",
+  "CHANGELOG_BADGE_NEW": "新增",
+  "CHANGELOG_BADGE_IMPROVED": "优化",
+  "CHANGELOG_BADGE_FIX": "修复",
+  "CHANGELOG_GITHUB_LINK": "完整更新日志 (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "知道了",
+  "CHANGELOG_CLOSE_BTN": "关闭更新日志",
+  "CHANGELOG_ITEM_1_TITLE": "弹窗内版本更新概览",
+  "CHANGELOG_ITEM_1_DESC": "更新后可立即查看重点变化，也可随时点击右上角的版本号重新打开。",
+  "CHANGELOG_ITEM_2_TITLE": "未读角标仅统计真实聊天消息",
+  "CHANGELOG_ITEM_2_DESC": "播放、暂停和跳转记录仍会显示在聊天时间线中，但不会再增加未读消息计数。",
+  "CHANGELOG_ITEM_3_TITLE": "剧集大厅等待超时延长至 5 分钟",
+  "CHANGELOG_ITEM_3_DESC": "切换下一集时大厅最多等待 5 分钟，避免因有人未跳过片尾而提前超时。"
 }
