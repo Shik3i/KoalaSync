@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "Sieh dir wichtige Neuerungen nach einem Update oder jederzeit per Klick auf die Versionsnummer oben rechts an.",
   "CHANGELOG_ITEM_2_TITLE": "Ungelesen-Zähler nur für echte Nachrichten",
   "CHANGELOG_ITEM_2_DESC": "Play-, Pause- und Sprung-Ereignisse bleiben im Chatverlauf sichtbar, erhöhen aber nicht mehr den Ungelesen-Zähler.",
-  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ Wiedergabe-Sync",
-  "CHANGELOG_ITEM_3_DESC": "Play-, Pause- und Zeitsprung-Befehle funktionieren jetzt zuverlässig auf Apple TV+."
+  "CHANGELOG_ITEM_3_TITLE": "5 Minuten Timeout für die Episoden-Lobby",
+  "CHANGELOG_ITEM_3_DESC": "Die Episoden-Lobby wartet beim Folgenwechsel jetzt bis zu 5 Minuten, damit sie nicht mehr abbricht, wenn jemand das Outro nicht überspringt."
 }

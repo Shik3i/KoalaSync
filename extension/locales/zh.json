@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "更新后可立即查看重点变化，也可随时点击右上角的版本号重新打开。",
   "CHANGELOG_ITEM_2_TITLE": "未读角标仅统计真实聊天消息",
   "CHANGELOG_ITEM_2_DESC": "播放、暂停和跳转记录仍会显示在聊天时间线中，但不会再增加未读消息计数。",
-  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ 播放同步",
-  "CHANGELOG_ITEM_3_DESC": "远程播放、暂停和进度跳转指令现在可以在 Apple TV+ 播放器上稳定运行。"
+  "CHANGELOG_ITEM_3_TITLE": "剧集大厅等待超时延长至 5 分钟",
+  "CHANGELOG_ITEM_3_DESC": "切换下一集时大厅最多等待 5 分钟，避免因有人未跳过片尾而提前超时。"
 }

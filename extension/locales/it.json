@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "Scopri le novità principali dopo un aggiornamento o in qualsiasi momento cliccando sul numero di versione.",
   "CHANGELOG_ITEM_2_TITLE": "Badge non letti solo per i messaggi reali",
   "CHANGELOG_ITEM_2_DESC": "Le azioni di riproduzione, pausa e ricerca restano nella cronologia chat senza aumentare il contatore dei non letti.",
-  "CHANGELOG_ITEM_3_TITLE": "Sincronizzazione Apple TV+",
-  "CHANGELOG_ITEM_3_DESC": "I comandi remoti di riproduzione, pausa e ricerca ora funzionano in modo affidabile su Apple TV+."
+  "CHANGELOG_ITEM_3_TITLE": "Timeout della lobby episodio esteso a 5 minuti",
+  "CHANGELOG_ITEM_3_DESC": "La lobby dell’episodio ora attende fino a 5 minuti durante il cambio puntata se qualcuno non salta la sigla finale."
 }

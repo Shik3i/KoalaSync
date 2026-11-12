@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "Découvrez les principaux changements après une mise à jour ou à tout moment en cliquant sur le numéro de version.",
   "CHANGELOG_ITEM_2_TITLE": "Badge non lu réservé aux vrais messages",
   "CHANGELOG_ITEM_2_DESC": "Les actions lecture, pause et saut restent affichées dans le chat sans incrémenter le compteur de messages non lus.",
-  "CHANGELOG_ITEM_3_TITLE": "Synchronisation Apple TV+",
-  "CHANGELOG_ITEM_3_DESC": "Les commandes de lecture, pause et navigation fonctionnent désormais de manière fiable sur Apple TV+."
+  "CHANGELOG_ITEM_3_TITLE": "Délai du salon d’épisode porté à 5 minutes",
+  "CHANGELOG_ITEM_3_DESC": "Le salon d’épisode attend désormais jusqu’à 5 minutes lors du changement d’épisode si quelqu’un laisse défiler le générique."
 }

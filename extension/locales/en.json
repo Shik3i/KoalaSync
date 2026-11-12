@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "See key updates right after a new release, or anytime by clicking the version number in the header.",
   "CHANGELOG_ITEM_2_TITLE": "Unread badge only for real chat messages",
   "CHANGELOG_ITEM_2_DESC": "Play, pause, and seek events stay in the chat timeline without inflating the unread notification badge.",
-  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ playback sync",
-  "CHANGELOG_ITEM_3_DESC": "Remote play, pause, and seek commands now work reliably on Apple TV+ video players."
+  "CHANGELOG_ITEM_3_TITLE": "5-minute Episode Lobby timeout",
+  "CHANGELOG_ITEM_3_DESC": "The episode lobby now waits up to 5 minutes during transitions so skipping an outro no longer times out while others finish the credits."
 }

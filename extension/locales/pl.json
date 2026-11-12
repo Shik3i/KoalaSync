@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "Sprawdź najważniejsze nowości po aktualizacji lub w dowolnej chwili, klikając numer wersji w nagłówku.",
   "CHANGELOG_ITEM_2_TITLE": "Licznik nieprzeczytanych tylko dla wiadomości",
   "CHANGELOG_ITEM_2_DESC": "Zdarzenia odtwarzania, pauzy i przewijania pozostają na czacie, ale nie zwiększają licznika nieprzeczytanych.",
-  "CHANGELOG_ITEM_3_TITLE": "Synchronizacja z Apple TV+",
-  "CHANGELOG_ITEM_3_DESC": "Zdalne polecenia odtwarzania, pauzy i przewijania działają teraz niezawodnie w serwisie Apple TV+."
+  "CHANGELOG_ITEM_3_TITLE": "5-minutowy limit czasu poczekalni odcinka",
+  "CHANGELOG_ITEM_3_DESC": "Poczekalnia odcinka czeka teraz do 5 minut przy zmianie odcinka, aby nie wygasała, gdy ktoś nie pominie napisów końcowych."
 }

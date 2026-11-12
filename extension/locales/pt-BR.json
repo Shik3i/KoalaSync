@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "Veja as principais mudanças após atualizar ou a qualquer momento clicando no número da versão no topo.",
   "CHANGELOG_ITEM_2_TITLE": "Contador de não lidas só para mensagens reais",
   "CHANGELOG_ITEM_2_DESC": "Ações de play, pausa e avanço continuam no histórico do chat sem inflar o contador de mensagens não lidas.",
-  "CHANGELOG_ITEM_3_TITLE": "Sincronização no Apple TV+",
-  "CHANGELOG_ITEM_3_DESC": "Comandos remotos de reprodução, pausa e busca agora funcionam com confiabilidade no Apple TV+."
+  "CHANGELOG_ITEM_3_TITLE": "Limite de 5 minutos na sala de episódio",
+  "CHANGELOG_ITEM_3_DESC": "A sala de espera de episódio agora aguarda até 5 minutos na troca de episódio para não expirar se alguém não pular os créditos."
 }

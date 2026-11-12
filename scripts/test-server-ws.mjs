@@ -238,8 +238,8 @@ try {
     assert.deepEqual(episodeLobbyA.loadedPeers, [], 'initiator is not pre-marked loaded');
     assert.equal(episodeLobbyA.expectedEpisodeId, 'S01E06');
     assert.ok(episodeLobbyA.remainingMs > 0 && episodeLobbyA.remainingMs <= EPISODE_SYNC_V2_LOAD_TIMEOUT);
-    assert.ok(episodeLobbyA.remainingMs > 119_000,
-        'v2 loading advertises the independent 120s deadline, not the 60s legacy deadline');
+    assert.ok(episodeLobbyA.remainingMs > 299_000,
+        'v2 loading advertises the 300s (5m) deadline');
     assert.equal(episodeLobbyA.deadlineAt, undefined, 'relay wall clock is not exposed to clients');
     const episodeTxId = episodeLobbyA.transactionId;
 

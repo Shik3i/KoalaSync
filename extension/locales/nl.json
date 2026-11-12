@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "Bekijk de belangrijkste vernieuwingen na een update of op elk moment door op het versienummer te klikken.",
   "CHANGELOG_ITEM_2_TITLE": "Ongelezen-teller alleen voor echte berichten",
   "CHANGELOG_ITEM_2_DESC": "Afspelen, pauzeren en spoelen blijven zichtbaar in de chat zonder de teller voor ongelezen berichten te verhogen.",
-  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ afspeelsynchronisatie",
-  "CHANGELOG_ITEM_3_DESC": "Opdrachten voor afspelen, pauzeren en spoelen werken nu betrouwbaar op Apple TV+."
+  "CHANGELOG_ITEM_3_TITLE": "Afleveringslobby wacht nu tot 5 minuten",
+  "CHANGELOG_ITEM_3_DESC": "De afleveringslobby wacht bij een nieuwe aflevering nu tot 5 minuten zodat deze niet verloopt als iemand de aftiteling afkijkt."
 }

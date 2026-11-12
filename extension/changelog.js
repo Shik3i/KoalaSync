@@ -19,7 +19,7 @@ export const RELEASE_CHANGELOG = Object.freeze({
             descKey: 'CHANGELOG_ITEM_2_DESC'
         }),
         Object.freeze({
-            badgeKey: 'CHANGELOG_BADGE_FIX',
+            badgeKey: 'CHANGELOG_BADGE_IMPROVED',
             titleKey: 'CHANGELOG_ITEM_3_TITLE',
             descKey: 'CHANGELOG_ITEM_3_DESC'
         })

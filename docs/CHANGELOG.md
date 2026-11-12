@@ -12,6 +12,7 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ### Changed
 - **Extension: Chat unread badge limited to real messages** — Room and playback activity events (`play`, `pause`, `seek`, `force_sync`, `joined`, `left`) remain visible in the chat timeline with timestamps but no longer increment the unread badge on the collapsed chat bubble.
+- **Extension & Relay: 5-minute Episode Lobby timeout** — Raised `EPISODE_SYNC_V2_LOAD_TIMEOUT` (from 120s) and `EPISODE_LOBBY_TIMEOUT` (from 60s) to 300 seconds (5 minutes) so episode transitions do not time out when one participant skips the outro while others let it play out.
 
 ---
 

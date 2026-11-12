@@ -341,6 +341,6 @@
   "CHANGELOG_ITEM_1_DESC": "Güncelleme sonrasında veya istediğiniz zaman üstteki sürüm numarasına tıklayarak son yenilikleri görün.",
   "CHANGELOG_ITEM_2_TITLE": "Okunmamış sayacı yalnızca gerçek mesajlar için",
   "CHANGELOG_ITEM_2_DESC": "Oynatma, duraklatma ve sarma hareketleri sohbet geçmişinde görünmeye devam eder ancak okunmamış sayacını artırmaz.",
-  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ oynatma senkronizasyonu",
-  "CHANGELOG_ITEM_3_DESC": "Uzaktan oynatma, duraklatma ve sarma komutları artık Apple TV+ oynatıcısında güvenilir şekilde çalışıyor."
+  "CHANGELOG_ITEM_3_TITLE": "Bölüm lobisi zaman aşımı 5 dakikaya çıkarıldı",
+  "CHANGELOG_ITEM_3_DESC": "Bölüm lobisi artık geçişlerde 5 dakikaya kadar bekler; böylece biri kapanış jeneriğini atlamadığında süre dolmaz."
 }
