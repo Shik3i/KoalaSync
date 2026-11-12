@@ -116,12 +116,18 @@ describe('chat overlay contract', () => {
         expect(backgroundSource).toContain('shouldShowChatNotification({ enabled, targetTabId, tab, windowInfo })');
     });
 
-    it('renders timestamped room activity and keeps activity notifications opt-in', () => {
+    it('renders timestamped room activity without incrementing the unread message badge', () => {
         expect(overlaySource).toContain("if (message?.type === 'CHAT_EVENT') appendEvent(message.event)");
         expect(overlaySource).toContain("const time = element('time', 'time')");
         expect(overlaySource).toContain("date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })");
-        expect(overlaySource).toContain('if (!opened && context.eventNotifications) setUnreadCount(unreadCount + 1)');
-        expect(backgroundSource).toContain("eventNotifications: localeData.browserNotifications === true");
+        const appendEventBlock = overlaySource.slice(
+            overlaySource.indexOf('function appendEvent(event)'),
+            overlaySource.indexOf('function clearMessages()')
+        );
+        expect(appendEventBlock).toContain("const wrapper = element('article', 'message event-message')");
+        expect(appendEventBlock).not.toContain('setUnreadCount');
+        expect(overlaySource).not.toContain('eventNotifications');
+        expect(backgroundSource).not.toContain('eventNotifications');
         expect(backgroundSource).toContain("sendChatActivity(message.action, peerId, timestamp)");
         expect(backgroundSource).toContain("sendChatActivity(event, data.senderId, data.actionTimestamp)");
         expect(backgroundSource).toContain("sendChatActivity('joined', data.peerId, Date.now())");

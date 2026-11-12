@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Заменить выбранную вкладку на {host}?",
   "PEER_LINK_CONFIRM_YES": "Открыть",
   "PEER_LINK_CONFIRM_NO": "Отмена",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Этот релей не поддерживает зашифрованный чат, необходимый для ссылок на видео. Передача здесь неактивна."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Этот релей не поддерживает зашифрованный чат, необходимый для ссылок на видео. Передача здесь неактивна.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Показать список изменений этой версии",
+  "CHANGELOG_MODAL_TITLE": "Что нового",
+  "CHANGELOG_MODAL_SUBTITLE": "Главные изменения в этой версии KoalaSync",
+  "CHANGELOG_BADGE_NEW": "НОВОЕ",
+  "CHANGELOG_BADGE_IMPROVED": "УЛУЧШЕНО",
+  "CHANGELOG_BADGE_FIX": "ИСПРАВЛЕНО",
+  "CHANGELOG_GITHUB_LINK": "Полный список изменений (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Понятно",
+  "CHANGELOG_CLOSE_BTN": "Закрыть список изменений",
+  "CHANGELOG_ITEM_1_TITLE": "Обзор обновлений прямо в окне расширения",
+  "CHANGELOG_ITEM_1_DESC": "Просматривайте ключевые новинки после обновления или в любой момент по нажатию на номер версии в шапке.",
+  "CHANGELOG_ITEM_2_TITLE": "Счётчик непрочитанных только для сообщений",
+  "CHANGELOG_ITEM_2_DESC": "События воспроизведения, паузы и перемотки остаются в ленте чата, но больше не увеличивают счётчик непрочитанных.",
+  "CHANGELOG_ITEM_3_TITLE": "Синхронизация на Apple TV+",
+  "CHANGELOG_ITEM_3_DESC": "Команды воспроизведения, паузы и перемотки теперь надёжно работают в плеере Apple TV+."
 }

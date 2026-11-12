@@ -7,6 +7,7 @@ export const VITEST_COVERAGE_INCLUDE = Object.freeze([
     'shared/invite-links.js',
     'shared/names.js',
     'extension/canonical-media-state.js',
+    'extension/changelog.js',
     'extension/chat-activity.js',
     'extension/chat-crypto.js',
     'extension/chat-format.js',

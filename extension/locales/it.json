@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Sostituire la scheda selezionata con {host}?",
   "PEER_LINK_CONFIRM_YES": "Apri",
   "PEER_LINK_CONFIRM_NO": "Annulla",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Questo relay non supporta la chat cifrata richiesta dai link video. La condivisione qui è inattiva."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Questo relay non supporta la chat cifrata richiesta dai link video. La condivisione qui è inattiva.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Mostra le novità di questa versione",
+  "CHANGELOG_MODAL_TITLE": "Novità",
+  "CHANGELOG_MODAL_SUBTITLE": "Le modifiche principali di questa versione",
+  "CHANGELOG_BADGE_NEW": "NUOVO",
+  "CHANGELOG_BADGE_IMPROVED": "MIGLIORATO",
+  "CHANGELOG_BADGE_FIX": "CORRETTO",
+  "CHANGELOG_GITHUB_LINK": "Changelog completo (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Ho capito",
+  "CHANGELOG_CLOSE_BTN": "Chiudi novità",
+  "CHANGELOG_ITEM_1_TITLE": "Novità della versione nel popup",
+  "CHANGELOG_ITEM_1_DESC": "Scopri le novità principali dopo un aggiornamento o in qualsiasi momento cliccando sul numero di versione.",
+  "CHANGELOG_ITEM_2_TITLE": "Badge non letti solo per i messaggi reali",
+  "CHANGELOG_ITEM_2_DESC": "Le azioni di riproduzione, pausa e ricerca restano nella cronologia chat senza aumentare il contatore dei non letti.",
+  "CHANGELOG_ITEM_3_TITLE": "Sincronizzazione Apple TV+",
+  "CHANGELOG_ITEM_3_DESC": "I comandi remoti di riproduzione, pausa e ricerca ora funzionano in modo affidabile su Apple TV+."
 }

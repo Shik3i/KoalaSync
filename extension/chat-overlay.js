@@ -681,7 +681,6 @@
         }
 
         if (empty.isConnected) empty.remove();
-        if (!opened && context.eventNotifications) setUnreadCount(unreadCount + 1);
         const wrapper = element('article', 'message event-message');
         const body = element('span', 'event-text', eventText);
         const time = element('time', 'time');

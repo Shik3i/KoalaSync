@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Den ausgewählten Tab durch {host} ersetzen?",
   "PEER_LINK_CONFIRM_YES": "Öffnen",
   "PEER_LINK_CONFIRM_NO": "Abbrechen",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Dieses Relay unterstützt keinen verschlüsselten Chat, den Video-Links benötigen. Das Teilen ist hier inaktiv."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Dieses Relay unterstützt keinen verschlüsselten Chat, den Video-Links benötigen. Das Teilen ist hier inaktiv.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Neuerungen dieser Version anzeigen",
+  "CHANGELOG_MODAL_TITLE": "Was ist neu",
+  "CHANGELOG_MODAL_SUBTITLE": "Die wichtigsten Änderungen in dieser Version",
+  "CHANGELOG_BADGE_NEW": "NEU",
+  "CHANGELOG_BADGE_IMPROVED": "VERBESSERT",
+  "CHANGELOG_BADGE_FIX": "FIX",
+  "CHANGELOG_GITHUB_LINK": "Kompletter Changelog (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Verstanden",
+  "CHANGELOG_CLOSE_BTN": "Changelog schließen",
+  "CHANGELOG_ITEM_1_TITLE": "Release-Highlights direkt im Popup",
+  "CHANGELOG_ITEM_1_DESC": "Sieh dir wichtige Neuerungen nach einem Update oder jederzeit per Klick auf die Versionsnummer oben rechts an.",
+  "CHANGELOG_ITEM_2_TITLE": "Ungelesen-Zähler nur für echte Nachrichten",
+  "CHANGELOG_ITEM_2_DESC": "Play-, Pause- und Sprung-Ereignisse bleiben im Chatverlauf sichtbar, erhöhen aber nicht mehr den Ungelesen-Zähler.",
+  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ Wiedergabe-Sync",
+  "CHANGELOG_ITEM_3_DESC": "Play-, Pause- und Zeitsprung-Befehle funktionieren jetzt zuverlässig auf Apple TV+."
 }

@@ -11,7 +11,10 @@ const link = async (page, name) => (await status(page)).peers.find(p => p.userna
 const setSharing = (page, value) => page.evaluate(shareVideoUrl => chrome.storage.local.set({ shareVideoUrl }), value);
 async function connect(page, serverUrl, username, chatKey) {
     await page.evaluate(async settings => {
-        await chrome.storage.sync.set({ onboardingComplete: true });
+        await chrome.storage.sync.set({
+            onboardingComplete: true,
+            lastReadChangelogVersion: chrome.runtime.getManifest().version
+        });
         await chrome.storage.local.set({ ...settings, roomId: 'peer-links-lifecycle', password: '', useCustomServer: true, chatEnabled: !!settings.chatKey, chatStartMode: 'open', locale: 'en' });
         await chrome.runtime.sendMessage({ type: 'CONNECT' });
     }, { serverUrl, username, chatKey });

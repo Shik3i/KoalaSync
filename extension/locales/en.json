@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Replace the selected tab with {host}?",
   "PEER_LINK_CONFIRM_YES": "Open",
   "PEER_LINK_CONFIRM_NO": "Cancel",
-  "PEER_LINK_RELAY_UNSUPPORTED": "This relay does not support encrypted chat, which video links need. Sharing is inactive on it."
+  "PEER_LINK_RELAY_UNSUPPORTED": "This relay does not support encrypted chat, which video links need. Sharing is inactive on it.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Show what's new in this version",
+  "CHANGELOG_MODAL_TITLE": "What’s New",
+  "CHANGELOG_MODAL_SUBTITLE": "Highlights in this version of KoalaSync",
+  "CHANGELOG_BADGE_NEW": "NEW",
+  "CHANGELOG_BADGE_IMPROVED": "IMPROVED",
+  "CHANGELOG_BADGE_FIX": "FIX",
+  "CHANGELOG_GITHUB_LINK": "Full changelog (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Got it",
+  "CHANGELOG_CLOSE_BTN": "Close changelog",
+  "CHANGELOG_ITEM_1_TITLE": "In-popup release highlights",
+  "CHANGELOG_ITEM_1_DESC": "See key updates right after a new release, or anytime by clicking the version number in the header.",
+  "CHANGELOG_ITEM_2_TITLE": "Unread badge only for real chat messages",
+  "CHANGELOG_ITEM_2_DESC": "Play, pause, and seek events stay in the chat timeline without inflating the unread notification badge.",
+  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ playback sync",
+  "CHANGELOG_ITEM_3_DESC": "Remote play, pause, and seek commands now work reliably on Apple TV+ video players."
 }

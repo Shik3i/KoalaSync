@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Substituir o separador selecionado por {host}?",
   "PEER_LINK_CONFIRM_YES": "Abrir",
   "PEER_LINK_CONFIRM_NO": "Cancelar",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay não suporta o chat encriptado de que as ligações de vídeo precisam. A partilha está inativa aqui."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Este relay não suporta o chat encriptado de que as ligações de vídeo precisam. A partilha está inativa aqui.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Ver as novidades desta versão",
+  "CHANGELOG_MODAL_TITLE": "Novidades",
+  "CHANGELOG_MODAL_SUBTITLE": "Destaques desta versão do KoalaSync",
+  "CHANGELOG_BADGE_NEW": "NOVO",
+  "CHANGELOG_BADGE_IMPROVED": "MELHORADO",
+  "CHANGELOG_BADGE_FIX": "CORRIGIDO",
+  "CHANGELOG_GITHUB_LINK": "Changelog completo (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Percebido",
+  "CHANGELOG_CLOSE_BTN": "Fechar novidades",
+  "CHANGELOG_ITEM_1_TITLE": "Destaques da versão no popup",
+  "CHANGELOG_ITEM_1_DESC": "Veja as principais novidades após uma atualização ou a qualquer momento clicando no número da versão.",
+  "CHANGELOG_ITEM_2_TITLE": "Contador de não lidas apenas para mensagens reais",
+  "CHANGELOG_ITEM_2_DESC": "Eventos de reprodução, pausa e avanço permanecem no histórico do chat sem aumentar as notificações por ler.",
+  "CHANGELOG_ITEM_3_TITLE": "Sincronização na Apple TV+",
+  "CHANGELOG_ITEM_3_DESC": "Os comandos remotos de reprodução, pausa e avanço funcionam agora de forma fiável na Apple TV+."
 }

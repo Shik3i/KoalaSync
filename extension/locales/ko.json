@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "선택한 탭을 {host}(으)로 바꾸시겠습니까?",
   "PEER_LINK_CONFIRM_YES": "열기",
   "PEER_LINK_CONFIRM_NO": "취소",
-  "PEER_LINK_RELAY_UNSUPPORTED": "이 릴레이는 동영상 링크에 필요한 암호화 채팅을 지원하지 않습니다. 여기서는 공유가 비활성 상태입니다."
+  "PEER_LINK_RELAY_UNSUPPORTED": "이 릴레이는 동영상 링크에 필요한 암호화 채팅을 지원하지 않습니다. 여기서는 공유가 비활성 상태입니다.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "이 버전의 새로운 기능 보기",
+  "CHANGELOG_MODAL_TITLE": "새로운 기능",
+  "CHANGELOG_MODAL_SUBTITLE": "이번 KoalaSync 업데이트의 주요 변경 사항",
+  "CHANGELOG_BADGE_NEW": "신규",
+  "CHANGELOG_BADGE_IMPROVED": "개선",
+  "CHANGELOG_BADGE_FIX": "수정",
+  "CHANGELOG_GITHUB_LINK": "전체 변경 내역 (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "확인",
+  "CHANGELOG_CLOSE_BTN": "변경 내역 닫기",
+  "CHANGELOG_ITEM_1_TITLE": "팝업 내 업데이트 요약",
+  "CHANGELOG_ITEM_1_DESC": "업데이트 후 또는 상단의 버전 번호를 클릭해 언제든지 최신 변경 사항을 확인할 수 있습니다.",
+  "CHANGELOG_ITEM_2_TITLE": "실제 채팅 메시지에만 읽지 않음 배지 표시",
+  "CHANGELOG_ITEM_2_DESC": "재생, 일시정지, 탐색 기록은 채팅 타임라인에 남지만 읽지 않은 메시지 수는 증가시키지 않습니다.",
+  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ 재생 동기화",
+  "CHANGELOG_ITEM_3_DESC": "이제 Apple TV+ 플레이어에서 원격 재생, 일시정지, 탐색 명령이 안정적으로 작동합니다."
 }

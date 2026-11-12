@@ -327,5 +327,20 @@
   "PEER_LINK_CONFIRM": "Seçili sekme {host} ile değiştirilsin mi?",
   "PEER_LINK_CONFIRM_YES": "Aç",
   "PEER_LINK_CONFIRM_NO": "İptal",
-  "PEER_LINK_RELAY_UNSUPPORTED": "Bu röle, video bağlantılarının ihtiyaç duyduğu şifreli sohbeti desteklemiyor. Paylaşım burada etkin değil."
+  "PEER_LINK_RELAY_UNSUPPORTED": "Bu röle, video bağlantılarının ihtiyaç duyduğu şifreli sohbeti desteklemiyor. Paylaşım burada etkin değil.",
+  "BTN_VERSION_CHANGELOG_TOOLTIP": "Bu sürümdeki yenilikleri göster",
+  "CHANGELOG_MODAL_TITLE": "Yenilikler",
+  "CHANGELOG_MODAL_SUBTITLE": "Bu KoalaSync sürümündeki öne çıkan değişiklikler",
+  "CHANGELOG_BADGE_NEW": "YENİ",
+  "CHANGELOG_BADGE_IMPROVED": "GELİŞTİRİLDİ",
+  "CHANGELOG_BADGE_FIX": "DÜZELTME",
+  "CHANGELOG_GITHUB_LINK": "Tam değişiklik günlüğü (EN) ↗",
+  "CHANGELOG_DISMISS_BTN": "Anladım",
+  "CHANGELOG_CLOSE_BTN": "Değişiklik günlüğünü kapat",
+  "CHANGELOG_ITEM_1_TITLE": "Açılır pencerede sürüm özeti",
+  "CHANGELOG_ITEM_1_DESC": "Güncelleme sonrasında veya istediğiniz zaman üstteki sürüm numarasına tıklayarak son yenilikleri görün.",
+  "CHANGELOG_ITEM_2_TITLE": "Okunmamış sayacı yalnızca gerçek mesajlar için",
+  "CHANGELOG_ITEM_2_DESC": "Oynatma, duraklatma ve sarma hareketleri sohbet geçmişinde görünmeye devam eder ancak okunmamış sayacını artırmaz.",
+  "CHANGELOG_ITEM_3_TITLE": "Apple TV+ oynatma senkronizasyonu",
+  "CHANGELOG_ITEM_3_DESC": "Uzaktan oynatma, duraklatma ve sarma komutları artık Apple TV+ oynatıcısında güvenilir şekilde çalışıyor."
 }

@@ -112,9 +112,12 @@ export async function openPopup(context, extensionId, { openEditor = true } = {}
     // A fresh profile has never seen onboarding, and its overlay sits on top of
     // the whole popup. Dismiss it the same way the tour's last step does.
     await page.evaluate(() => new Promise(resolve => {
-        chrome.storage.sync.set({ onboardingComplete: true }, () => {
+        const version = chrome.runtime.getManifest().version;
+        chrome.storage.sync.set({ onboardingComplete: true, lastReadChangelogVersion: version }, () => {
             const overlay = document.getElementById('onboarding-overlay');
             if (overlay) overlay.style.display = 'none';
+            const changelogOverlay = document.getElementById('changelog-overlay');
+            if (changelogOverlay) changelogOverlay.classList.remove('open');
             resolve();
         });
     }));

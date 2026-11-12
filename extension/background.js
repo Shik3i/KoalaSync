@@ -962,10 +962,11 @@ function emitEpisodeLobbyForCurrentPrivacy() {
     });
 }
 
-// Privacy + correctness: only onboardingComplete and dismissedHints belong in
-// storage.sync. Everything else is per-device local storage. This actively
-// removes legacy keys that older versions wrote to sync (and that would
-// otherwise be redistributed across devices and resurrected on reinstall).
+// Privacy + correctness: only onboardingComplete, dismissedHints, and
+// lastReadChangelogVersion belong in storage.sync. Everything else is
+// per-device local storage. This actively removes legacy keys that older
+// versions wrote to sync (and that would otherwise be redistributed across
+// devices and resurrected on reinstall).
 const LEGACY_SYNC_KEYS = [
     'serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey',
     'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username',
@@ -5129,9 +5130,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.browserNotifications && currentTabId) {
-        sendMessageToChatOverlay({ type: 'CHAT_CONTEXT_UPDATE' }).catch(() => {});
-    }
     if (changes.shareVideoUrl) {
         linkSharingGeneration++;
         if (changes.shareVideoUrl.newValue !== true) revokeLocalPeerUrl({ keepDocument: true });
@@ -5307,7 +5305,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             && Number(currentTabId) === tabId
             && isCurrentChatSender(sender);
         const settings = await getSettings();
-        const localeData = await chrome.storage.local.get(['locale', 'browserNotifications']);
+        const localeData = await chrome.storage.local.get(['locale']);
         await loadLocale(localeData.locale || getSystemLanguage());
         if (!isCurrentSession() || settings.roomId !== roomId) {
             sendResponse({ supported: false, hasKey: false, status: 'session_changed' });
@@ -5322,7 +5320,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             enabled: settings.chatEnabled,
             hasKey: !!settings.chatKey,
             connected: !!(socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined),
-            eventNotifications: localeData.browserNotifications === true,
             peerId,
             roomId,
             activity: chatActivityStore.snapshot(),
