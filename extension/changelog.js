@@ -2,9 +2,8 @@ export const CHANGELOG_SYNC_KEY = 'lastReadChangelogVersion';
 export const CHANGELOG_URL = 'https://github.com/Shik3i/KoalaSync/blob/main/docs/CHANGELOG.md';
 
 // Hardcoded per-release changelog configuration.
-// Set `autoShow: true` for releases that should open the modal once after update,
-// or `autoShow: false` for minor patch releases where it should only open when
-// clicking the version number in the popup header.
+// Only MAJOR.MINOR is tracked in storage.sync so PATCH bugfix releases (x.y.z)
+// never re-trigger the modal automatically.
 export const RELEASE_CHANGELOG = Object.freeze({
     autoShow: true,
     items: Object.freeze([
@@ -26,14 +25,19 @@ export const RELEASE_CHANGELOG = Object.freeze({
     ])
 });
 
+export function toMajorMinorVersion(version) {
+    if (typeof version !== 'string') return '';
+    const trimmed = version.trim().replace(/^v/i, '');
+    const match = /^(\d+)\.(\d+)(?:\.\d+)?$/.exec(trimmed);
+    if (!match) return '';
+    return `${match[1]}.${match[2]}`;
+}
+
 export function resolveChangelogVersion(currentVersion, release = RELEASE_CHANGELOG) {
     if (release && typeof release.id === 'string' && release.id.trim()) {
-        return release.id.trim();
+        return toMajorMinorVersion(release.id) || release.id.trim();
     }
-    if (typeof currentVersion === 'string' && currentVersion.trim()) {
-        return currentVersion.trim().replace(/^v/i, '');
-    }
-    return '';
+    return toMajorMinorVersion(currentVersion);
 }
 
 export function shouldAutoShowChangelog({
@@ -47,8 +51,7 @@ export function shouldAutoShowChangelog({
     if (!Array.isArray(release.items) || release.items.length === 0) return false;
     const targetVersion = resolveChangelogVersion(currentVersion, release);
     if (!targetVersion) return false;
-    const normalizedRead = typeof lastReadChangelogVersion === 'string'
-        ? lastReadChangelogVersion.trim().replace(/^v/i, '')
-        : '';
+    const normalizedRead = toMajorMinorVersion(lastReadChangelogVersion)
+        || (typeof lastReadChangelogVersion === 'string' ? lastReadChangelogVersion.trim() : '');
     return normalizedRead !== targetVersion;
 }

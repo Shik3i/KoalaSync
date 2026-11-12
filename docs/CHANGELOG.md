@@ -8,7 +8,7 @@ All notable changes to the KoalaSync browser extension and relay server.
 ## [v3.5.0] — 2026-11-12
 
 ### Added
-- **Extension: Localized What's New dialog** — Shows a localized release-highlights modal once per new version after onboarding is complete (tracked via `lastReadChangelogVersion` in `chrome.storage.sync`), and reopens anytime when clicking the version pill in the popup header, with a direct link to the full `docs/CHANGELOG.md` on GitHub.
+- **Extension: Localized What's New dialog** — Shows a localized release-highlights modal once per `MAJOR.MINOR` version after onboarding is complete (tracked via `lastReadChangelogVersion` in `chrome.storage.sync`, automatically ignoring `.PATCH` bugfix releases), and reopens anytime when clicking the version pill in the popup header, with a direct link to the full `docs/CHANGELOG.md` on GitHub.
 
 ### Changed
 - **Extension: Chat unread badge limited to real messages** — Room and playback activity events (`play`, `pause`, `seek`, `force_sync`, `joined`, `left`) remain visible in the chat timeline with timestamps but no longer increment the unread badge on the collapsed chat bubble.

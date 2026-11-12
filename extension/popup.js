@@ -3565,9 +3565,8 @@ function completeOnboarding() {
 
 function renderChangelogModalContent() {
     const manifestVersion = chrome.runtime.getManifest().version;
-    const resolvedVersion = resolveChangelogVersion(manifestVersion) || manifestVersion;
     const pillEl = document.getElementById('changelogVersionPill');
-    if (pillEl) pillEl.textContent = `v${resolvedVersion}`;
+    if (pillEl) pillEl.textContent = `v${manifestVersion}`;
 
     const githubLink = document.getElementById('changelogGithubLink');
     if (githubLink) githubLink.href = CHANGELOG_URL;

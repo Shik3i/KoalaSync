@@ -84,8 +84,8 @@ test('changelog modal stays suppressed during onboarding, opens once on version 
     const storedVersion = await page.evaluate(() => new Promise(resolve => {
         chrome.storage.sync.get(['lastReadChangelogVersion'], data => resolve(data.lastReadChangelogVersion));
     }));
-    const manifestVersion = await page.evaluate(() => chrome.runtime.getManifest().version);
-    expect(storedVersion).toBe(manifestVersion);
+    const expectedMajorMinor = await page.evaluate(() => chrome.runtime.getManifest().version.split('.').slice(0, 2).join('.'));
+    expect(storedVersion).toBe(expectedMajorMinor);
 
     await page.reload();
     await expect(page.locator('#changelog-overlay')).toBeHidden();
