@@ -3640,7 +3640,7 @@ async function simulateRemoteSeek(delta, explicitTargetTime = null) {
 
 async function devRemoteToolsAllowed() {
     const data = await chrome.storage.local.get(['username']);
-    return data.username === 'KoalaDev';
+    return typeof data.username === 'string' && data.username.toLowerCase().includes('dev');
 }
 
 function shouldUsePageApiPlayer(url) {

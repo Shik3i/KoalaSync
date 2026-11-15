@@ -28,7 +28,7 @@ This directory contains the Manifest V3 browser extension for Chrome and Firefox
 2. **Sync**: Select the video tab, send play/pause/seek/force-sync actions, and view episode lobby state.
 3. **Settings**: Configure username, title sharing, noise filtering, auto episode sync, notifications, language, and audio options.
 4. **Status**: Inspect connection state, latency, video debug info, history, and logs for bug reports.
-5. **Dev**: Hidden developer-only controls shown for the `KoalaDev` username.
+5. **Dev**: Hidden developer-only controls shown when the username contains `Dev` (case-insensitive).
 
 ## Privacy & Permissions
 

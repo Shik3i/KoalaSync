@@ -147,7 +147,7 @@ let connectionErrorTimer = null;
 let pendingConnectionErrorMsg = null;
 
 function devToolsEnabled() {
-    return elements.username && elements.username.value.trim() === 'KoalaDev';
+    return !!elements.username && elements.username.value.trim().toLowerCase().includes('dev');
 }
 
 function syncDevToolsVisibility() {
