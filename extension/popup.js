@@ -3652,6 +3652,12 @@ document.getElementById('popupVersionBtn')?.addEventListener('click', () => {
     showChangelogModal({ manual: true });
 });
 
+document.getElementById('resetChangelogBtn')?.addEventListener('click', () => {
+    chrome.storage.sync.remove(CHANGELOG_SYNC_KEY, () => {
+        showToast('Changelog read state reset', 'info');
+    });
+});
+
 document.getElementById('changelogDismissBtn')?.addEventListener('click', () => {
     closeChangelogModal({ restoreFocus: true });
 });
