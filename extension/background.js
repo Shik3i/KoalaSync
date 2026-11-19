@@ -1534,6 +1534,12 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
     // any stale guest-side HCM state (dialog/badge/desync) — H-2.
     broadcastControlMode();
     roomIdleSince = null;
+    chatSecretGuard = '';
+    invalidateChatSession();
+    // Clear persisted room credentials BEFORE awaiting target-tab teardown so a
+    // fast Leave -> Join in the popup can never have its newly written roomId
+    // overwritten by the finishing teardown.
+    await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
     await clearTargetSelectionForLifecycle();
 
     isForceSyncInitiator = false;
@@ -1564,9 +1570,6 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
         reconnectAttempts: 0,
         reconnectStartTime: null
     }).catch(() => {});
-    chatSecretGuard = '';
-    invalidateChatSession();
-    await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
     forceDisconnect();
     addLog(reason, 'info');
@@ -5196,6 +5199,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             if (desiredUrl !== currentServerUrl) forceDisconnect();
             if (settings.roomId) connect();
         } else if (settings.roomId) {
+            awaitingRoomData = true;
+            pendingRoomDataRoomId = settings.roomId;
+            canonicalMediaStateTracker.beginRecovery(settings.roomId);
+            persistCanonicalMediaRecovery();
             const sharedTitles = getSharedTitleFields(settings);
             emit(EVENTS.JOIN_ROOM, { 
                 roomId: settings.roomId, 
@@ -5584,6 +5591,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     if (desiredUrl !== currentServerUrl) forceDisconnect();
                     connect();
                 } else if (roomId) {
+                    awaitingRoomData = true;
+                    pendingRoomDataRoomId = roomId;
+                    canonicalMediaStateTracker.beginRecovery(roomId);
+                    persistCanonicalMediaRecovery();
                     const sharedTitles = getSharedTitleFields(settings);
                     emit(EVENTS.JOIN_ROOM, {
                         roomId,

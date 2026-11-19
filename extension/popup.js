@@ -121,7 +121,6 @@ const elements = {
     audioSettingsLink: document.getElementById('audioSettingsLink'),
     settingsSupportLink: document.getElementById('settingsSupportLink'),
     settingsReviewLink: document.getElementById('settingsReviewLink'),
-    settingsVersion: document.getElementById('settingsVersion'),
     devSupportLink: document.getElementById('devSupportLink'),
     devReviewLink: document.getElementById('devReviewLink'),
     syncTabCopyInvite: document.getElementById('syncTabCopyInvite'),
@@ -426,11 +425,9 @@ async function init() {
     
     // Set Version Info
     const versionTxt = `v${chrome.runtime.getManifest().version}`;
-    const versionEl = document.getElementById('appVersion');
-    if (versionEl) versionEl.textContent = versionTxt;
     const popupVerEl = document.getElementById('popupVersion');
     if (popupVerEl) popupVerEl.textContent = versionTxt;
-    if (elements.settingsVersion) elements.settingsVersion.textContent = versionTxt;
+    refreshDevChangelogStatus();
     configureFooterLinks();
     await updateFeatureHints();
 
@@ -2244,14 +2241,22 @@ elements.joinBtn.addEventListener('click', async () => {
 elements.leaveBtn.addEventListener('click', async () => {
     if (isProcessingConnection) return;
     isProcessingConnection = true;
+    elements.leaveBtn.disabled = true;
     clearConnectionErrorTimer();
-    chrome.runtime.sendMessage({ type: 'LEAVE_ROOM' });
-    await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' });
-    elements.roomId.value = '';
-    elements.password.value = '';
-    lastKnownPeers = [];
-    updateUI(null, null);
-    isProcessingConnection = false;
+    try {
+        await Promise.race([
+            new Promise(resolve => chrome.runtime.sendMessage({ type: 'LEAVE_ROOM' }, () => resolve())),
+            new Promise(resolve => setTimeout(resolve, 3000))
+        ]);
+        await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' });
+        elements.roomId.value = '';
+        elements.password.value = '';
+        lastKnownPeers = [];
+        updateUI(null, null);
+    } finally {
+        elements.leaveBtn.disabled = false;
+        isProcessingConnection = false;
+    }
 });
 
 function generateRoomId() {
@@ -3556,11 +3561,20 @@ function completeOnboarding() {
         const currentVersion = resolveChangelogVersion(chrome.runtime.getManifest().version);
         const syncPayload = { onboardingComplete: true };
         if (currentVersion) syncPayload[CHANGELOG_SYNC_KEY] = currentVersion;
-        chrome.storage.sync.set(syncPayload);
+        chrome.storage.sync.set(syncPayload, () => refreshDevChangelogStatus());
         
         const inRoom = elements.sectionActive && elements.sectionActive.style.display === 'block';
         toggleUIState(inRoom);
     }, 300);
+}
+
+function refreshDevChangelogStatus() {
+    const statusEl = document.getElementById('devChangelogStatus');
+    if (!statusEl) return;
+    chrome.storage.sync.get([CHANGELOG_SYNC_KEY], (data) => {
+        const val = data?.[CHANGELOG_SYNC_KEY];
+        statusEl.textContent = `Read: ${val ? String(val) : 'none'}`;
+    });
 }
 
 function renderChangelogModalContent() {
@@ -3640,7 +3654,7 @@ function closeChangelogModal({ restoreFocus = false } = {}) {
 
     const currentVersion = resolveChangelogVersion(chrome.runtime.getManifest().version);
     if (currentVersion) {
-        chrome.storage.sync.set({ [CHANGELOG_SYNC_KEY]: currentVersion });
+        chrome.storage.sync.set({ [CHANGELOG_SYNC_KEY]: currentVersion }, () => refreshDevChangelogStatus());
     }
 
     if (restoreFocus) {
@@ -3654,6 +3668,7 @@ document.getElementById('popupVersionBtn')?.addEventListener('click', () => {
 
 document.getElementById('resetChangelogBtn')?.addEventListener('click', () => {
     chrome.storage.sync.remove(CHANGELOG_SYNC_KEY, () => {
+        refreshDevChangelogStatus();
         showToast('Changelog read state reset', 'info');
     });
 });

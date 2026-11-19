@@ -568,11 +568,29 @@ io.on('connection', (socket) => {
             // Cleanup old room if re-joining
             const oldMapping = socketToRoom.get(socket.id);
             if (oldMapping && oldMapping.roomId === roomId && oldMapping.peerId === peerId) {
-                if (rooms.get(roomId)?.episodeSyncV2) {
-                    cancelEpisodeSyncV2(roomId, rooms.get(roomId), 'membership_changed', peerId);
+                const existingRoom = rooms.get(roomId);
+                if (existingRoom?.episodeSyncV2) {
+                    cancelEpisodeSyncV2(roomId, existingRoom, 'membership_changed', peerId);
                 }
                 socket.data.clientCapabilities = clientCapabilities;
-                return; // Already in this room with same peerId, ignore to prevent spam
+                if (existingRoom) {
+                    const snapshotAt = Date.now();
+                    socket.emit(EVENTS.ROOM_DATA, {
+                        roomId,
+                        peers: Array.from(existingRoom.peers).map(sid => existingRoom.peerData.get(sid)),
+                        activeLobby: existingRoom.activeLobby || null,
+                        hostPeerId: existingRoom.hostPeerId || null,
+                        controlMode: existingRoom.controlMode || CONTROL_MODES.EVERYONE,
+                        controllers: existingRoom.controllers ? Array.from(existingRoom.controllers) : [],
+                        mediaState: snapshotMediaState(existingRoom.mediaState, snapshotAt),
+                        episodeSyncV2: existingRoom.episodeSyncV2?.participants.includes(peerId)
+                            && clientSupportsEpisodeSyncV2(socket)
+                            ? publicEpisodeSyncV2(existingRoom.episodeSyncV2)
+                            : null,
+                        capabilities: SERVER_CAPABILITIES
+                    });
+                }
+                return;
             }
             if (oldMapping && oldMapping.roomId !== roomId) {
                 socket.leave(oldMapping.roomId);

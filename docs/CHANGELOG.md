@@ -14,6 +14,9 @@ All notable changes to the KoalaSync browser extension and relay server.
 - **Extension: Chat unread badge limited to real messages** — Room and playback activity events (`play`, `pause`, `seek`, `force_sync`, `joined`, `left`) remain visible in the chat timeline with timestamps but no longer increment the unread badge on the collapsed chat bubble.
 - **Extension & Relay: 5-minute Episode Lobby timeout** — Raised `EPISODE_SYNC_V2_LOAD_TIMEOUT` (from 120s) and `EPISODE_LOBBY_TIMEOUT` (from 60s) to 300 seconds (5 minutes) so episode transitions do not time out when one participant skips the outro while others let it play out.
 
+### Fixed
+- **Extension & Relay: Join/leave race and same-socket rejoin recovery ([#59](https://github.com/Shik3i/KoalaSync/issues/59))** — Awaits `LEAVE_ROOM` completion in the popup, clears persisted room credentials before target-tab teardown so rapid Leave → Join cannot overwrite the newly joined room, initializes canonical media recovery when joining over an already-open socket, and re-emits `ROOM_DATA` on same-socket same-room `JOIN_ROOM` instead of ignoring it silently.
+
 ---
 
 ## [v3.4.0] — 2026-11-07

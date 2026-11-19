@@ -236,4 +236,13 @@ describe('target tab lifecycle', () => {
         expect(contentSource).toMatch(/function handlePageShow\(event\)[\s\S]*if \(!event\.persisted\) return;[\s\S]*pageSuspended = false/);
         expect(contentSource).toMatch(/function handlePageShow\(event\)[\s\S]*observer\.observe\(document\.documentElement[\s\S]*setupListeners\(\)[\s\S]*connectKeepAlivePort\(\)/);
     });
+
+    it('clears persisted room credentials before target teardown and awaits leave completion in popup', () => {
+        const teardownStart = backgroundSource.indexOf('async function performRoomSessionTeardown');
+        const teardownEnd = backgroundSource.indexOf('async function endRoomSession', teardownStart);
+        const teardownSource = backgroundSource.slice(teardownStart, teardownEnd);
+        expect(teardownSource.indexOf("chrome.storage.local.set({ roomId: '', password: '', chatKey: '' })"))
+            .toBeLessThan(teardownSource.indexOf('await clearTargetSelectionForLifecycle()'));
+        expect(popupSource).toMatch(/elements\.leaveBtn\.addEventListener\('click',[\s\S]*elements\.leaveBtn\.disabled = true[\s\S]*chrome\.runtime\.sendMessage\(\{ type: 'LEAVE_ROOM' \}[\s\S]*finally \{[\s\S]*elements\.leaveBtn\.disabled = false/);
+    });
 });

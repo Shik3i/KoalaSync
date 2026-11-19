@@ -1447,6 +1447,16 @@ try {
     assert.equal((await a(d2))[0],'room_data','dedup');
     close();
 
+    // Same-socket same-room re-join returns a fresh ROOM_DATA snapshot instead of hanging
+    const srid = 'same-sock-' + Date.now();
+    const sr1 = await c();
+    await j(sr1, srid, 'rejoin-peer');
+    sr1._m.length = 0;
+    s(sr1, 'join_room', { roomId: srid, peerId: 'rejoin-peer', protocolVersion: '1.0.0' });
+    const reEmit = await w(sr1, 'room_data');
+    assert.equal(reEmit.roomId, srid, 'same-socket rejoin returns room_data');
+    close();
+
     // Health HTTP (no conn needed)
     const [st,body] = await new Promise(r => http.get(`http://127.0.0.1:${port}/`, res => {
         let d=''; res.on('data',c=>d+=c); res.on('end',()=>r([res.statusCode,JSON.parse(d)])); }));
