@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Badge non letti solo per i messaggi reali",
   "CHANGELOG_ITEM_2_DESC": "Le azioni di riproduzione, pausa e ricerca restano nella cronologia chat senza aumentare il contatore dei non letti.",
   "CHANGELOG_ITEM_3_TITLE": "Timeout della lobby episodio esteso a 5 minuti",
-  "CHANGELOG_ITEM_3_DESC": "La lobby dell’episodio ora attende fino a 5 minuti durante il cambio puntata se qualcuno non salta la sigla finale."
+  "CHANGELOG_ITEM_3_DESC": "La lobby dell’episodio ora attende fino a 5 minuti durante il cambio puntata se qualcuno non salta la sigla finale.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Fuori sincrono rilevato — clicca per sincronizzare tutti"
 }

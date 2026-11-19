@@ -1147,6 +1147,22 @@
         #forceSyncBtn:hover {
             background: color-mix(in oklch, var(--accent), transparent 88%);
         }
+        #forceSyncBtn.needs-sync {
+            border-color: var(--warning);
+            background: color-mix(in oklch, var(--warning), transparent 86%);
+            color: var(--status-warning-text);
+            animation: syncDriftPulse 2.2s ease-in-out infinite;
+        }
+        #forceSyncBtn.needs-sync:hover {
+            background: color-mix(in oklch, var(--warning), transparent 76%);
+        }
+        @keyframes syncDriftPulse {
+            0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--warning), transparent 45%); }
+            50% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--warning), transparent 88%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #forceSyncBtn.needs-sync { animation: none !important; }
+        }
         .action-icon::before {
             content: "";
             width: 13px;

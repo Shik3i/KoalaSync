@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Ungelesen-Zähler nur für echte Nachrichten",
   "CHANGELOG_ITEM_2_DESC": "Play-, Pause- und Sprung-Ereignisse bleiben im Chatverlauf sichtbar, erhöhen aber nicht mehr den Ungelesen-Zähler.",
   "CHANGELOG_ITEM_3_TITLE": "5 Minuten Timeout für die Episoden-Lobby",
-  "CHANGELOG_ITEM_3_DESC": "Die Episoden-Lobby wartet beim Folgenwechsel jetzt bis zu 5 Minuten, damit sie nicht mehr abbricht, wenn jemand das Outro nicht überspringt."
+  "CHANGELOG_ITEM_3_DESC": "Die Episoden-Lobby wartet beim Folgenwechsel jetzt bis zu 5 Minuten, damit sie nicht mehr abbricht, wenn jemand das Outro nicht überspringt.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Asynchron erkannt — klicken, um alle zu synchronisieren"
 }

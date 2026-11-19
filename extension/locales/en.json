@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Unread badge only for real chat messages",
   "CHANGELOG_ITEM_2_DESC": "Play, pause, and seek events stay in the chat timeline without inflating the unread notification badge.",
   "CHANGELOG_ITEM_3_TITLE": "5-minute Episode Lobby timeout",
-  "CHANGELOG_ITEM_3_DESC": "The episode lobby now waits up to 5 minutes during transitions so skipping an outro no longer times out while others finish the credits."
+  "CHANGELOG_ITEM_3_DESC": "The episode lobby now waits up to 5 minutes during transitions so skipping an outro no longer times out while others finish the credits.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Out of sync detected — click to sync everyone"
 }

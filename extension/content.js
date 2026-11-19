@@ -18,6 +18,7 @@
     const seekPollTimers = new Set();
     const attachedVideos = new Set();
     let activeVideo = null;
+    let videoKnownPlaying = false;
 
     function scheduleLifecycleTimeout(callback, delay) {
         const timer = setTimeout(() => {
@@ -1947,6 +1948,8 @@
         }
 
         _setSuppress(action === EVENTS.PLAY ? 'playing' : 'paused');
+        if (action === EVENTS.PLAY) videoKnownPlaying = true;
+        else if (action === EVENTS.PAUSE) videoKnownPlaying = false;
         button.click();
         // A dispatched play on a separate-button player only counts as applied
         // once the watchdog confirms playback actually stuck (issue #51).
@@ -1975,6 +1978,9 @@
             }
             data = { ...data, targetTime: target };
         }
+
+        if (action === EVENTS.PLAY) videoKnownPlaying = true;
+        else if (action === EVENTS.PAUSE) videoKnownPlaying = false;
 
         try {
             if (pageApiActionRequired(action)) {
@@ -2010,6 +2016,7 @@
                     return playResult.then(() => true).catch((e) => {
                         reportLog(`Playback prevented: ${e.message}`, 'warn');
                         _clearSuppress('playing');
+                        videoKnownPlaying = false;
                         return false;
                     });
                 }
@@ -2703,6 +2710,9 @@
         const current = getSyncCurrentTime(video);
         if (current === null) return;
 
+        if (action === EVENTS.PLAY) videoKnownPlaying = true;
+        else if (action === EVENTS.PAUSE) videoKnownPlaying = false;
+
         const mediaTitle = (navigator.mediaSession && navigator.mediaSession.metadata) ? navigator.mediaSession.metadata.title : null;
 
         const episodeSyncIntent = episodeSyncV2State?.phase === 'lobby'
@@ -2869,6 +2879,9 @@
         const current = getSyncCurrentTime(video);
         if (current === null) return;
 
+        if (action === EVENTS.PLAY) videoKnownPlaying = true;
+        else if (action === EVENTS.PAUSE) videoKnownPlaying = false;
+
         const eventState = action === EVENTS.PLAY ? 'playing' : (action === EVENTS.PAUSE ? 'paused' : (action === EVENTS.SEEK ? 'seek' : null));
 
         // Echo-suppression for remotely-applied commands. MUST stay synchronous
@@ -3021,15 +3034,30 @@
 
     const handlePlay = event => {
         if (!isCurrentVideoEvent(event)) return;
-        if (consumeApplePlayEcho(event.currentTarget)) return;
+        if (consumeApplePlayEcho(event.currentTarget)) {
+            videoKnownPlaying = true;
+            return;
+        }
         reportEvent(EVENTS.PLAY);
     };
     const handlePlaying = event => {
         if (!isCurrentVideoEvent(event)) return;
-        noteApplePlayEvent(event.currentTarget);
+        const video = event.currentTarget;
+        noteApplePlayEvent(video);
+        if (!videoKnownPlaying
+            && !video.paused
+            && !video.ended
+            && !applePlayWatchdog
+            && !episodeSyncV2State
+            && !hcmDesynced
+            && !hcmIsGuestGated()
+            && getSyncCurrentTime(video) !== null) {
+            reportEvent(EVENTS.PLAY);
+        }
     };
     const handlePause = event => {
         if (!isCurrentVideoEvent(event)) return;
+        videoKnownPlaying = false;
         if (consumeApplePlayRejection(event.currentTarget)) return;
         reportEvent(EVENTS.PAUSE);
     };
@@ -3127,10 +3155,12 @@
     };
     const handleEmptied = event => {
         if (!isCurrentVideoEvent(event)) return;
+        videoKnownPlaying = false;
         cancelPlayPauseCoalesce();
         checkEpisodeTransition('emptied');
     };
     const handleEnded = event => {
+        if (isCurrentVideoEvent(event)) videoKnownPlaying = false;
         if (!isCurrentVideoEvent(event) || !_autoSyncEnabled) return;
         const video = event.currentTarget;
         ensureEpisodeTransitionCandidate(video, 'ended', {
@@ -3186,7 +3216,10 @@
         const video = findVideo();
         const previousVideo = activeVideo;
         const playerChanged = !!previousVideo && previousVideo !== video;
-        if (activeVideo !== video) cancelPendingVideoEvents();
+        if (activeVideo !== video) {
+            videoKnownPlaying = false;
+            cancelPendingVideoEvents();
+        }
         for (const attached of [...attachedVideos]) {
             if (attached !== video) detachVideoListeners(attached);
         }

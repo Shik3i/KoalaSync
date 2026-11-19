@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Licznik nieprzeczytanych tylko dla wiadomości",
   "CHANGELOG_ITEM_2_DESC": "Zdarzenia odtwarzania, pauzy i przewijania pozostają na czacie, ale nie zwiększają licznika nieprzeczytanych.",
   "CHANGELOG_ITEM_3_TITLE": "5-minutowy limit czasu poczekalni odcinka",
-  "CHANGELOG_ITEM_3_DESC": "Poczekalnia odcinka czeka teraz do 5 minut przy zmianie odcinka, aby nie wygasała, gdy ktoś nie pominie napisów końcowych."
+  "CHANGELOG_ITEM_3_DESC": "Poczekalnia odcinka czeka teraz do 5 minut przy zmianie odcinka, aby nie wygasała, gdy ktoś nie pominie napisów końcowych.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Wykryto rozsynchronizowanie — kliknij, aby zsynchronizować wszystkich"
 }

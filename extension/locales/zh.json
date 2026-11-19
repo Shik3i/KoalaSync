@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "未读角标仅统计真实聊天消息",
   "CHANGELOG_ITEM_2_DESC": "播放、暂停和跳转记录仍会显示在聊天时间线中，但不会再增加未读消息计数。",
   "CHANGELOG_ITEM_3_TITLE": "剧集大厅等待超时延长至 5 分钟",
-  "CHANGELOG_ITEM_3_DESC": "切换下一集时大厅最多等待 5 分钟，避免因有人未跳过片尾而提前超时。"
+  "CHANGELOG_ITEM_3_DESC": "切换下一集时大厅最多等待 5 分钟，避免因有人未跳过片尾而提前超时。",
+  "BTN_SYNC_DRIFT_TOOLTIP": "检测到不同步 — 点击同步所有成员"
 }

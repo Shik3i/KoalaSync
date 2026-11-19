@@ -16,6 +16,7 @@ All notable changes to the KoalaSync browser extension and relay server.
 
 ### Fixed
 - **Extension & Relay: Join/leave race and same-socket rejoin recovery ([#59](https://github.com/Shik3i/KoalaSync/issues/59))** — Awaits `LEAVE_ROOM` completion in the popup, clears persisted room credentials before target-tab teardown so rapid Leave → Join cannot overwrite the newly joined room, initializes canonical media recovery when joining over an already-open socket, and re-emits `ROOM_DATA` on same-socket same-room `JOIN_ROOM` instead of ignoring it silently.
+- **Extension: Autoplay initial `PLAY` detection & out-of-sync indicator** — Emits `PLAY` via `playing` when a video starts autoplaying before `currentTime` was ready or before listeners attached (without echoing remote commands or buffering resumes), and highlights the popup Sync button whenever peers on the same video diverge by playback state or more than 5 seconds.
 
 ---
 

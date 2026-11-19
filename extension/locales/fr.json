@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Badge non lu réservé aux vrais messages",
   "CHANGELOG_ITEM_2_DESC": "Les actions lecture, pause et saut restent affichées dans le chat sans incrémenter le compteur de messages non lus.",
   "CHANGELOG_ITEM_3_TITLE": "Délai du salon d’épisode porté à 5 minutes",
-  "CHANGELOG_ITEM_3_DESC": "Le salon d’épisode attend désormais jusqu’à 5 minutes lors du changement d’épisode si quelqu’un laisse défiler le générique."
+  "CHANGELOG_ITEM_3_DESC": "Le salon d’épisode attend désormais jusqu’à 5 minutes lors du changement d’épisode si quelqu’un laisse défiler le générique.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Désynchronisation détectée — cliquez pour synchroniser tout le monde"
 }

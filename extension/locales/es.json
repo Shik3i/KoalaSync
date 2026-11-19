@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Contador de no leídos solo para mensajes reales",
   "CHANGELOG_ITEM_2_DESC": "Los eventos de reproducir, pausar y buscar siguen en el historial del chat sin aumentar el contador de no leídos.",
   "CHANGELOG_ITEM_3_TITLE": "Tiempo de espera de sala de episodio de 5 minutos",
-  "CHANGELOG_ITEM_3_DESC": "La sala de espera entre episodios ahora aguarda hasta 5 minutos para no agotarse cuando alguien no salta los créditos."
+  "CHANGELOG_ITEM_3_DESC": "La sala de espera entre episodios ahora aguarda hasta 5 minutos para no agotarse cuando alguien no salta los créditos.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Desfase detectado — haz clic para sincronizar a todos"
 }

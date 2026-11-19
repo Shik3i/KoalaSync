@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Ongelezen-teller alleen voor echte berichten",
   "CHANGELOG_ITEM_2_DESC": "Afspelen, pauzeren en spoelen blijven zichtbaar in de chat zonder de teller voor ongelezen berichten te verhogen.",
   "CHANGELOG_ITEM_3_TITLE": "Afleveringslobby wacht nu tot 5 minuten",
-  "CHANGELOG_ITEM_3_DESC": "De afleveringslobby wacht bij een nieuwe aflevering nu tot 5 minuten zodat deze niet verloopt als iemand de aftiteling afkijkt."
+  "CHANGELOG_ITEM_3_DESC": "De afleveringslobby wacht bij een nieuwe aflevering nu tot 5 minuten zodat deze niet verloopt als iemand de aftiteling afkijkt.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Niet synchroon — klik om iedereen te synchroniseren"
 }

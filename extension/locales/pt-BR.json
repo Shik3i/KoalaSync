@@ -342,5 +342,6 @@
   "CHANGELOG_ITEM_2_TITLE": "Contador de não lidas só para mensagens reais",
   "CHANGELOG_ITEM_2_DESC": "Ações de play, pausa e avanço continuam no histórico do chat sem inflar o contador de mensagens não lidas.",
   "CHANGELOG_ITEM_3_TITLE": "Limite de 5 minutos na sala de episódio",
-  "CHANGELOG_ITEM_3_DESC": "A sala de espera de episódio agora aguarda até 5 minutos na troca de episódio para não expirar se alguém não pular os créditos."
+  "CHANGELOG_ITEM_3_DESC": "A sala de espera de episódio agora aguarda até 5 minutos na troca de episódio para não expirar se alguém não pular os créditos.",
+  "BTN_SYNC_DRIFT_TOOLTIP": "Fora de sincronia — clique para sincronizar todos"
 }

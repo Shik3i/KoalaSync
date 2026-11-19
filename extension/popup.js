@@ -539,6 +539,7 @@ function toggleUIState(inRoom) {
     const syncInactive = document.getElementById('sync-inactive');
     if (syncActive) syncActive.style.display = inRoom ? 'block' : 'none';
     if (syncInactive) syncInactive.style.display = inRoom ? 'none' : 'block';
+    if (!inRoom) clearSyncDriftHighlight();
 }
 
 // --- Host Control Mode UI ---
@@ -630,6 +631,7 @@ function setRemoteControlsLocked(locked) {
 
 function showSiteAccessNotice(host, originPattern = null, tabId = null) {
     siteAccessBlocked = true;
+    clearSyncDriftHighlight();
     siteAccessHost = typeof host === 'string' && host.length > 0 ? host : 'website';
     siteAccessOriginPattern = typeof originPattern === 'string' && originPattern.length > 0
         ? originPattern
@@ -894,7 +896,62 @@ function startInterpolation() {
                 }
             }
         });
+        updateSyncDriftHighlight(activePeers);
     }, 1000);
+}
+
+function projectedPeerTime(peer) {
+    if (!peer || typeof peer !== 'object' || !Number.isFinite(peer.currentTime)) return null;
+    if (peer.playbackState === 'playing' && Number.isFinite(peer.lastHeartbeat)) {
+        const elapsed = (Date.now() - peer.lastHeartbeat) / 1000;
+        if (elapsed >= 0 && elapsed < 45) return peer.currentTime + elapsed;
+    }
+    return peer.currentTime;
+}
+
+function clearSyncDriftHighlight() {
+    if (!elements.forceSyncBtn) return;
+    elements.forceSyncBtn.classList.remove('needs-sync');
+    elements.forceSyncBtn.title = getMessage('BTN_SYNC_TOOLTIP');
+}
+
+function updateSyncDriftHighlight(peers) {
+    if (!elements.forceSyncBtn) return;
+    const lobbyActive = elements.episodeLobbyCard && elements.episodeLobbyCard.style.display !== 'none';
+    if (!Array.isArray(peers) || peers.length < 2 || hcmGuestLocked || siteAccessBlocked || elements.forceSyncBtn.disabled || lobbyActive) {
+        clearSyncDriftHighlight();
+        return;
+    }
+
+    const me = peers.find(p => p && typeof p === 'object' && p.peerId === localPeerId);
+    if (!me || me.desynced || (me.playbackState !== 'playing' && me.playbackState !== 'paused')) {
+        clearSyncDriftHighlight();
+        return;
+    }
+
+    const myTime = projectedPeerTime(me);
+    if (myTime === null) {
+        clearSyncDriftHighlight();
+        return;
+    }
+
+    const myTitle = typeof me.mediaTitle === 'string' ? me.mediaTitle.trim().toLowerCase() : '';
+    const hasDrift = peers.some(other => {
+        if (!other || typeof other !== 'object' || other.peerId === localPeerId || other.desynced) return false;
+        if (other.playbackState !== 'playing' && other.playbackState !== 'paused') return false;
+        const otherTime = projectedPeerTime(other);
+        if (otherTime === null) return false;
+        const otherTitle = typeof other.mediaTitle === 'string' ? other.mediaTitle.trim().toLowerCase() : '';
+        if (myTitle && otherTitle && !myTitle.includes(otherTitle) && !otherTitle.includes(myTitle)) return false;
+        return me.playbackState !== other.playbackState || Math.abs(myTime - otherTime) > 5;
+    });
+
+    if (hasDrift) {
+        elements.forceSyncBtn.classList.add('needs-sync');
+        elements.forceSyncBtn.title = getMessage('BTN_SYNC_DRIFT_TOOLTIP');
+    } else {
+        clearSyncDriftHighlight();
+    }
 }
 
 function renderEmpty(container, type) {
@@ -1032,6 +1089,7 @@ function createPeerLinkConfirmation(peerId, url) {
 function updatePeerList(peers) {
     if (!peers) return;
     activePeers = peers;
+    updateSyncDriftHighlight(peers);
     if (peerLinkConfirm && !peers.some(p => p.peerId === peerLinkConfirm.peerId && p.tabUrl === peerLinkConfirm.url)) peerLinkConfirm = null;
     if (peers.length === 0) {
         stopInterpolation();
@@ -1531,6 +1589,7 @@ function applyConnectionStatus(status) {
     }
     if (!connected) {
         updatePingDisplay(null);
+        clearSyncDriftHighlight();
     }
     if (elements.retryBtn) {
         elements.retryBtn.style.display = reconnecting && reconnectSlowMode ? 'block' : 'none';
@@ -2352,6 +2411,7 @@ elements.forceSyncBtn.addEventListener('click', async () => {
     if (elements.forceSyncBtn.disabled) return;
     
     const originalText = elements.forceSyncBtn.textContent;
+    clearSyncDriftHighlight();
     elements.forceSyncBtn.disabled = true;
 
     const status = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_STATUS' }, r));
@@ -3290,10 +3350,12 @@ function updateLobbyUI(lobby, peers) {
     if (!lobby) {
         elements.episodeLobbyCard.style.display = 'none';
         if (countdownEl) countdownEl.textContent = '';
+        updateSyncDriftHighlight(activePeers);
         return;
     }
 
     elements.episodeLobbyCard.style.display = 'block';
+    clearSyncDriftHighlight();
     elements.lobbyTitle.textContent = getMessage('LOBBY_WAITING_FOR', { title: lobby.expectedTitle });
 
     // Build peer readiness list. Peer usernames are remote-controlled input, so
