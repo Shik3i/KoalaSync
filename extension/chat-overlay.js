@@ -33,6 +33,7 @@
     let opened = false;
     let destroyed = false;
     let saveTimer = null;
+    let launcherPulseTimer = null;
     let applyingLayout = false;
     let preferencesLoaded = false;
     let startStateApplied = false;
@@ -209,10 +210,17 @@
             12% { opacity: 1; }
             100% { transform: translate3d(var(--reaction-drift), 116vh, 0) rotate(var(--reaction-end-rotation)); opacity: .92; }
         }
+        @keyframes launcher-pulse {
+            0% { transform: scale(1); box-shadow: 0 10px 28px rgb(0 0 0 / .32), 0 0 0 0 color-mix(in oklch, var(--accent), transparent 20%); }
+            45% { transform: scale(1.07); box-shadow: 0 10px 28px rgb(0 0 0 / .32), 0 0 0 8px color-mix(in oklch, var(--accent), transparent 82%); }
+            100% { transform: scale(1); box-shadow: 0 10px 28px rgb(0 0 0 / .32), 0 0 0 12px color-mix(in oklch, var(--accent), transparent 100%); }
+        }
+        .launcher.pulse { animation: launcher-pulse 0.8s ease-out; }
         .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
         @media (max-width: 520px) { .panel { max-width: calc(100vw - 12px); } }
         @media (prefers-reduced-motion: reduce) {
             * { transition: none !important; }
+            .launcher.pulse { animation: none !important; }
             .reaction-particle { animation: none !important; display: none !important; }
         }
     `;
@@ -478,6 +486,25 @@
         applyUnreadCount();
     }
 
+    function clearLauncherPulse() {
+        if (launcherPulseTimer) {
+            clearTimeout(launcherPulseTimer);
+            launcherPulseTimer = null;
+        }
+        launcher.classList.remove('pulse');
+    }
+
+    function triggerLauncherPulse() {
+        if (destroyed || opened || reducedMotion.matches) return;
+        clearLauncherPulse();
+        void launcher.offsetWidth;
+        launcher.classList.add('pulse');
+        launcherPulseTimer = setTimeout(() => {
+            launcherPulseTimer = null;
+            launcher.classList.remove('pulse');
+        }, 900);
+    }
+
     function clampDetached() {
         const viewport = viewportBounds();
         const maxWidth = Math.max(1, Math.min(600, viewport.width - 16));
@@ -582,6 +609,7 @@
         launcher.style.display = opened ? 'none' : '';
         if (opened) {
             setUnreadCount(0);
+            clearLauncherPulse();
             textarea.focus();
             messages.scrollTop = messages.scrollHeight;
         }
@@ -631,6 +659,7 @@
         const meta = element('div', 'meta');
         const own = message.senderId === context.peerId;
         if (!opened && !own) setUnreadCount(unreadCount + 1);
+        if (!opened && !own) triggerLauncherPulse();
         const sender = element('span', 'sender', own ? (strings().you || '') : (message.username || message.senderId || ''));
         const time = element('time', 'time');
         const date = new Date(message.timestamp);
@@ -946,6 +975,7 @@
         refreshGeneration++;
         sendGeneration++;
         if (saveTimer) clearTimeout(saveTimer);
+        clearLauncherPulse();
         resizeObserver.disconnect();
         clearPageDock();
         pageDockStyle.remove();

@@ -3260,14 +3260,36 @@ window.addEventListener('unload', () => {
         clearInterval(roomListRefreshInterval);
         roomListRefreshInterval = null;
     }
+    clearLobbyCountdown();
 });
 
 // --- Episode Lobby UI ---
+let lobbyCountdownTimer = null;
+
+function clearLobbyCountdown() {
+    if (lobbyCountdownTimer) {
+        clearInterval(lobbyCountdownTimer);
+        lobbyCountdownTimer = null;
+    }
+}
+
+function formatLobbyCountdown(deadlineAt) {
+    if (!Number.isFinite(deadlineAt)) return '';
+    const remainingSec = Math.max(0, Math.ceil((deadlineAt - Date.now()) / 1000));
+    const mins = Math.floor(remainingSec / 60);
+    const secs = remainingSec % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
 function updateLobbyUI(lobby, peers) {
     if (!elements.episodeLobbyCard) return;
 
+    clearLobbyCountdown();
+    const countdownEl = document.getElementById('lobbyCountdown');
+
     if (!lobby) {
         elements.episodeLobbyCard.style.display = 'none';
+        if (countdownEl) countdownEl.textContent = '';
         return;
     }
 
@@ -3312,13 +3334,21 @@ function updateLobbyUI(lobby, peers) {
         elements.lobbyPeerStatus.textContent = getMessage('LOBBY_WAITING_PEERS');
     }
 
-    // Show elapsed time
-    if (lobby.createdAt && elements.lobbyPeerStatus) {
-        const elapsed = Math.floor((Date.now() - lobby.createdAt) / 1000);
-        const timerSpan = document.createElement('span');
-        timerSpan.style.cssText = 'font-size: 10px; color: var(--text-muted); margin-left: 6px; display: inline-block; vertical-align: middle;';
-        timerSpan.textContent = `(${elapsed}s)`;
-        elements.lobbyPeerStatus.appendChild(timerSpan);
+    // Live countdown until the lobby deadline
+    if (countdownEl) {
+        if (Number.isFinite(lobby.deadlineAt)) {
+            const tick = () => {
+                const text = formatLobbyCountdown(lobby.deadlineAt);
+                countdownEl.textContent = text;
+                if (lobby.deadlineAt <= Date.now()) clearLobbyCountdown();
+            };
+            tick();
+            if (lobby.deadlineAt > Date.now()) {
+                lobbyCountdownTimer = setInterval(tick, 1000);
+            }
+        } else {
+            countdownEl.textContent = '';
+        }
     }
 }
 

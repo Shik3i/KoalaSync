@@ -3247,7 +3247,15 @@ function persistEpisodeLobby() {
 }
 
 function episodeLobbyForUi() {
-    if (!episodeSyncV2) return episodeLobby;
+    if (!episodeSyncV2) {
+        if (!episodeLobby) return null;
+        return {
+            ...episodeLobby,
+            deadlineAt: Number.isFinite(episodeLobby.createdAt)
+                ? episodeLobby.createdAt + EPISODE_LOBBY_TIMEOUT
+                : null
+        };
+    }
     return {
         expectedTitle: episodeSyncV2.expectedTitle,
         initiatorPeerId: episodeSyncV2.initiatorPeerId,
@@ -3255,6 +3263,7 @@ function episodeLobbyForUi() {
             ? [...episodeSyncV2.preparedPeers]
             : [...episodeSyncV2.loadedPeers],
         createdAt: episodeSyncV2.createdAt,
+        deadlineAt: Number.isFinite(episodeSyncV2.deadlineAt) ? episodeSyncV2.deadlineAt : null,
         mode: 'v2',
         phase: episodeSyncV2.phase,
         transactionId: episodeSyncV2.transactionId
