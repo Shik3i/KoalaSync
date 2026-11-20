@@ -962,10 +962,11 @@ function emitEpisodeLobbyForCurrentPrivacy() {
     });
 }
 
-// Privacy + correctness: only onboardingComplete and dismissedHints belong in
-// storage.sync. Everything else is per-device local storage. This actively
-// removes legacy keys that older versions wrote to sync (and that would
-// otherwise be redistributed across devices and resurrected on reinstall).
+// Privacy + correctness: only onboardingComplete, dismissedHints, and
+// lastReadChangelogVersion belong in storage.sync. Everything else is
+// per-device local storage. This actively removes legacy keys that older
+// versions wrote to sync (and that would otherwise be redistributed across
+// devices and resurrected on reinstall).
 const LEGACY_SYNC_KEYS = [
     'serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey',
     'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username',
@@ -1533,6 +1534,12 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
     // any stale guest-side HCM state (dialog/badge/desync) — H-2.
     broadcastControlMode();
     roomIdleSince = null;
+    chatSecretGuard = '';
+    invalidateChatSession();
+    // Clear persisted room credentials BEFORE awaiting target-tab teardown so a
+    // fast Leave -> Join in the popup can never have its newly written roomId
+    // overwritten by the finishing teardown.
+    await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
     await clearTargetSelectionForLifecycle();
 
     isForceSyncInitiator = false;
@@ -1563,9 +1570,6 @@ async function performRoomSessionTeardown({ notifyServer = false, reason = 'Left
         reconnectAttempts: 0,
         reconnectStartTime: null
     }).catch(() => {});
-    chatSecretGuard = '';
-    invalidateChatSession();
-    await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' }).catch(() => {});
     chrome.runtime.sendMessage({ type: 'PEER_UPDATE', peers: [] }).catch(() => {});
     forceDisconnect();
     addLog(reason, 'info');
@@ -3243,7 +3247,15 @@ function persistEpisodeLobby() {
 }
 
 function episodeLobbyForUi() {
-    if (!episodeSyncV2) return episodeLobby;
+    if (!episodeSyncV2) {
+        if (!episodeLobby) return null;
+        return {
+            ...episodeLobby,
+            deadlineAt: Number.isFinite(episodeLobby.createdAt)
+                ? episodeLobby.createdAt + EPISODE_LOBBY_TIMEOUT
+                : null
+        };
+    }
     return {
         expectedTitle: episodeSyncV2.expectedTitle,
         initiatorPeerId: episodeSyncV2.initiatorPeerId,
@@ -3251,6 +3263,7 @@ function episodeLobbyForUi() {
             ? [...episodeSyncV2.preparedPeers]
             : [...episodeSyncV2.loadedPeers],
         createdAt: episodeSyncV2.createdAt,
+        deadlineAt: Number.isFinite(episodeSyncV2.deadlineAt) ? episodeSyncV2.deadlineAt : null,
         mode: 'v2',
         phase: episodeSyncV2.phase,
         transactionId: episodeSyncV2.transactionId
@@ -3639,7 +3652,7 @@ async function simulateRemoteSeek(delta, explicitTargetTime = null) {
 
 async function devRemoteToolsAllowed() {
     const data = await chrome.storage.local.get(['username']);
-    return data.username === 'KoalaDev';
+    return typeof data.username === 'string' && data.username.toLowerCase().includes('dev');
 }
 
 function shouldUsePageApiPlayer(url) {
@@ -5129,9 +5142,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.browserNotifications && currentTabId) {
-        sendMessageToChatOverlay({ type: 'CHAT_CONTEXT_UPDATE' }).catch(() => {});
-    }
     if (changes.shareVideoUrl) {
         linkSharingGeneration++;
         if (changes.shareVideoUrl.newValue !== true) revokeLocalPeerUrl({ keepDocument: true });
@@ -5198,6 +5208,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             if (desiredUrl !== currentServerUrl) forceDisconnect();
             if (settings.roomId) connect();
         } else if (settings.roomId) {
+            awaitingRoomData = true;
+            pendingRoomDataRoomId = settings.roomId;
+            canonicalMediaStateTracker.beginRecovery(settings.roomId);
+            persistCanonicalMediaRecovery();
             const sharedTitles = getSharedTitleFields(settings);
             emit(EVENTS.JOIN_ROOM, { 
                 roomId: settings.roomId, 
@@ -5307,7 +5321,7 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             && Number(currentTabId) === tabId
             && isCurrentChatSender(sender);
         const settings = await getSettings();
-        const localeData = await chrome.storage.local.get(['locale', 'browserNotifications']);
+        const localeData = await chrome.storage.local.get(['locale']);
         await loadLocale(localeData.locale || getSystemLanguage());
         if (!isCurrentSession() || settings.roomId !== roomId) {
             sendResponse({ supported: false, hasKey: false, status: 'session_changed' });
@@ -5322,7 +5336,6 @@ async function handleAsyncMessage(message, sender, sendResponse) {
             enabled: settings.chatEnabled,
             hasKey: !!settings.chatKey,
             connected: !!(socket && socket.readyState === WebSocket.OPEN && isNamespaceJoined),
-            eventNotifications: localeData.browserNotifications === true,
             peerId,
             roomId,
             activity: chatActivityStore.snapshot(),
@@ -5587,6 +5600,10 @@ async function handleAsyncMessage(message, sender, sendResponse) {
                     if (desiredUrl !== currentServerUrl) forceDisconnect();
                     connect();
                 } else if (roomId) {
+                    awaitingRoomData = true;
+                    pendingRoomDataRoomId = roomId;
+                    canonicalMediaStateTracker.beginRecovery(roomId);
+                    persistCanonicalMediaRecovery();
                     const sharedTitles = getSharedTitleFields(settings);
                     emit(EVENTS.JOIN_ROOM, {
                         roomId,

@@ -6,9 +6,12 @@ const INVITE = 'Join: https://sync.my-server.example/join#j2:r=SILENT-EAGLE-90&p
 async function openJoinView(context, extensionId) {
     const page = await openPopup(context, extensionId, { openEditor: false });
     await page.evaluate(() => new Promise(resolve => {
-        chrome.storage.sync.set({ onboardingComplete: true }, () => {
+        const version = chrome.runtime.getManifest().version;
+        chrome.storage.sync.set({ onboardingComplete: true, lastReadChangelogVersion: version }, () => {
             const overlay = document.getElementById('onboarding-overlay');
             if (overlay) overlay.style.display = 'none';
+            const changelogOverlay = document.getElementById('changelog-overlay');
+            if (changelogOverlay) changelogOverlay.classList.remove('open');
             resolve();
         });
     }));

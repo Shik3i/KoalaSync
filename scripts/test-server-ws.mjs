@@ -238,8 +238,8 @@ try {
     assert.deepEqual(episodeLobbyA.loadedPeers, [], 'initiator is not pre-marked loaded');
     assert.equal(episodeLobbyA.expectedEpisodeId, 'S01E06');
     assert.ok(episodeLobbyA.remainingMs > 0 && episodeLobbyA.remainingMs <= EPISODE_SYNC_V2_LOAD_TIMEOUT);
-    assert.ok(episodeLobbyA.remainingMs > 119_000,
-        'v2 loading advertises the independent 120s deadline, not the 60s legacy deadline');
+    assert.ok(episodeLobbyA.remainingMs > 299_000,
+        'v2 loading advertises the 300s (5m) deadline');
     assert.equal(episodeLobbyA.deadlineAt, undefined, 'relay wall clock is not exposed to clients');
     const episodeTxId = episodeLobbyA.transactionId;
 
@@ -1445,6 +1445,16 @@ try {
     await j(d1, did, 'dup'); d1._m.length = 0;
     s(d2,'join_room',{roomId:did,peerId:'dup',protocolVersion:'1.0.0'});
     assert.equal((await a(d2))[0],'room_data','dedup');
+    close();
+
+    // Same-socket same-room re-join returns a fresh ROOM_DATA snapshot instead of hanging
+    const srid = 'same-sock-' + Date.now();
+    const sr1 = await c();
+    await j(sr1, srid, 'rejoin-peer');
+    sr1._m.length = 0;
+    s(sr1, 'join_room', { roomId: srid, peerId: 'rejoin-peer', protocolVersion: '1.0.0' });
+    const reEmit = await w(sr1, 'room_data');
+    assert.equal(reEmit.roomId, srid, 'same-socket rejoin returns room_data');
     close();
 
     // Health HTTP (no conn needed)

@@ -9,7 +9,10 @@ async function control(context, extensionId) {
 const status = page => page.evaluate(() => chrome.runtime.sendMessage({ type: 'GET_STATUS' }));
 async function connect(page, serverUrl, username, chatKey = '') {
     await page.evaluate(async settings => {
-        await chrome.storage.sync.set({ onboardingComplete: true });
+        await chrome.storage.sync.set({
+            onboardingComplete: true,
+            lastReadChangelogVersion: chrome.runtime.getManifest().version
+        });
         // Created rooms always carry a password; the popup's invite link needs one with a chat key.
         await chrome.storage.local.set({ ...settings, roomId: 'peer-links-e2e', password: 'PW1234', useCustomServer: true, shareVideoUrl: true, chatEnabled: !!settings.chatKey, chatStartMode: 'open', locale: 'en' });
         await chrome.runtime.sendMessage({ type: 'CONNECT' });
@@ -25,7 +28,10 @@ async function select(page, url) {
 
 test('video-link privacy setting defaults off and persists through popup reopening', async ({ context, extensionId }) => {
     const page = await control(context, extensionId);
-    await page.evaluate(() => chrome.storage.sync.set({ onboardingComplete: true }));
+    await page.evaluate(() => chrome.storage.sync.set({
+        onboardingComplete: true,
+        lastReadChangelogVersion: chrome.runtime.getManifest().version
+    }));
     await page.goto(`chrome-extension://${extensionId}/popup.html`);
     await page.locator('#tab-settings-button').click();
     await page.locator('summary[data-i18n="LABEL_PRIVACY_SETTINGS"]').click();

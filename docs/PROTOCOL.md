@@ -585,9 +585,9 @@ canonical paused state. Clients retain transaction state until `complete` or
 `cancel`, allowing that terminal settlement to reach peers that already started
 playback.
 
-The independent deadlines are 120 seconds for v2 loading, 15 seconds for
-prepare, and 10 seconds for execute acknowledgements. The released legacy lobby
-keeps its 60-second client-side deadline for old/new compatibility.
+The independent deadlines are 300 seconds (5 minutes) for v2 loading, 15 seconds for
+prepare, and 10 seconds for execute acknowledgements. The legacy lobby also uses a
+300-second client-side deadline.
 
 Legacy episode events remain accepted with their released origin/main wire
 semantics. The relay does not globally bind legacy PREPARE, EXECUTE, or CANCEL

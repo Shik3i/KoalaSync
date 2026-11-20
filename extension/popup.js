@@ -20,6 +20,13 @@ import { TITLE_PRIVACY_MODES, normalizeSendTabTitle, normalizeTabTitle } from '.
 import { normalizeRoomId } from './chat-session.js';
 import './shared/invite-links.js';
 import { normalizeTabId, requestOriginPermission } from './host-access.js';
+import {
+    CHANGELOG_SYNC_KEY,
+    CHANGELOG_URL,
+    RELEASE_CHANGELOG,
+    resolveChangelogVersion,
+    shouldAutoShowChangelog
+} from './changelog.js';
 
 let pendingInviteRoomId = '';
 let pendingInviteChatKey = '';
@@ -114,7 +121,6 @@ const elements = {
     audioSettingsLink: document.getElementById('audioSettingsLink'),
     settingsSupportLink: document.getElementById('settingsSupportLink'),
     settingsReviewLink: document.getElementById('settingsReviewLink'),
-    settingsVersion: document.getElementById('settingsVersion'),
     devSupportLink: document.getElementById('devSupportLink'),
     devReviewLink: document.getElementById('devReviewLink'),
     syncTabCopyInvite: document.getElementById('syncTabCopyInvite'),
@@ -140,7 +146,7 @@ let connectionErrorTimer = null;
 let pendingConnectionErrorMsg = null;
 
 function devToolsEnabled() {
-    return elements.username && elements.username.value.trim() === 'KoalaDev';
+    return !!elements.username && elements.username.value.trim().toLowerCase().includes('dev');
 }
 
 function syncDevToolsVisibility() {
@@ -367,7 +373,7 @@ function setRoomRefreshCooldown() {
 // --- Initialization ---
 async function init() {
     // Local-only by design — settings and room credentials never come from
-    // storage.sync (only onboardingComplete + dismissedHints live there).
+    // storage.sync (only onboardingComplete, dismissedHints, and lastReadChangelogVersion live there).
     const localData = await chrome.storage.local.get(['serverUrl', 'useCustomServer', 'roomId', 'password', 'chatKey', 'chatEnabled', 'chatNotifications', 'chatPosition', 'chatSize', 'chatStartMode', 'chatReactionDisplay', 'username', 'filterNoise', 'autoSyncNextEpisode', 'sendTabTitle', 'shareVideoUrl', 'mediaTitlePrivacyMode', 'titlePrivacyMode', 'forceSyncMode', 'browserNotifications', 'autoCopyInvite', 'locale', 'audioSettings', 'activeTab', 'themeMode', 'themePalette']);
 
     let activeLang = localData.locale;
@@ -378,6 +384,7 @@ async function init() {
 
     await loadLocale(activeLang);
     translateDOM();
+    renderChangelogModalContent();
     localizeThemeSelector(activeLang);
     
     if (elements.langSelector) elements.langSelector.value = activeLang;
@@ -418,11 +425,9 @@ async function init() {
     
     // Set Version Info
     const versionTxt = `v${chrome.runtime.getManifest().version}`;
-    const versionEl = document.getElementById('appVersion');
-    if (versionEl) versionEl.textContent = versionTxt;
     const popupVerEl = document.getElementById('popupVersion');
     if (popupVerEl) popupVerEl.textContent = versionTxt;
-    if (elements.settingsVersion) elements.settingsVersion.textContent = versionTxt;
+    refreshDevChangelogStatus();
     configureFooterLinks();
     await updateFeatureHints();
 
@@ -507,9 +512,20 @@ async function init() {
     // Debug Info Refresh
     popupIntervals.push(setInterval(refreshDebugInfo, 2000));
 
-    // Show onboarding on first visit
-    chrome.storage.sync.get(['onboardingComplete'], (data) => {
-        if (!data.onboardingComplete) showOnboarding();
+    // Show onboarding on first visit; otherwise show release changelog once per version
+    chrome.storage.sync.get(['onboardingComplete', CHANGELOG_SYNC_KEY], (data) => {
+        if (!data.onboardingComplete) {
+            showOnboarding();
+            return;
+        }
+        const currentVersion = chrome.runtime.getManifest().version;
+        if (shouldAutoShowChangelog({
+            onboardingComplete: true,
+            lastReadChangelogVersion: data[CHANGELOG_SYNC_KEY],
+            currentVersion
+        })) {
+            showChangelogModal();
+        }
     });
 }
 
@@ -523,6 +539,7 @@ function toggleUIState(inRoom) {
     const syncInactive = document.getElementById('sync-inactive');
     if (syncActive) syncActive.style.display = inRoom ? 'block' : 'none';
     if (syncInactive) syncInactive.style.display = inRoom ? 'none' : 'block';
+    if (!inRoom) clearSyncDriftHighlight();
 }
 
 // --- Host Control Mode UI ---
@@ -614,6 +631,7 @@ function setRemoteControlsLocked(locked) {
 
 function showSiteAccessNotice(host, originPattern = null, tabId = null) {
     siteAccessBlocked = true;
+    clearSyncDriftHighlight();
     siteAccessHost = typeof host === 'string' && host.length > 0 ? host : 'website';
     siteAccessOriginPattern = typeof originPattern === 'string' && originPattern.length > 0
         ? originPattern
@@ -878,7 +896,62 @@ function startInterpolation() {
                 }
             }
         });
+        updateSyncDriftHighlight(activePeers);
     }, 1000);
+}
+
+function projectedPeerTime(peer) {
+    if (!peer || typeof peer !== 'object' || !Number.isFinite(peer.currentTime)) return null;
+    if (peer.playbackState === 'playing' && Number.isFinite(peer.lastHeartbeat)) {
+        const elapsed = (Date.now() - peer.lastHeartbeat) / 1000;
+        if (elapsed >= 0 && elapsed < 45) return peer.currentTime + elapsed;
+    }
+    return peer.currentTime;
+}
+
+function clearSyncDriftHighlight() {
+    if (!elements.forceSyncBtn) return;
+    elements.forceSyncBtn.classList.remove('needs-sync');
+    elements.forceSyncBtn.title = getMessage('BTN_SYNC_TOOLTIP');
+}
+
+function updateSyncDriftHighlight(peers) {
+    if (!elements.forceSyncBtn) return;
+    const lobbyActive = elements.episodeLobbyCard && elements.episodeLobbyCard.style.display !== 'none';
+    if (!Array.isArray(peers) || peers.length < 2 || hcmGuestLocked || siteAccessBlocked || elements.forceSyncBtn.disabled || lobbyActive) {
+        clearSyncDriftHighlight();
+        return;
+    }
+
+    const me = peers.find(p => p && typeof p === 'object' && p.peerId === localPeerId);
+    if (!me || me.desynced || (me.playbackState !== 'playing' && me.playbackState !== 'paused')) {
+        clearSyncDriftHighlight();
+        return;
+    }
+
+    const myTime = projectedPeerTime(me);
+    if (myTime === null) {
+        clearSyncDriftHighlight();
+        return;
+    }
+
+    const myTitle = typeof me.mediaTitle === 'string' ? me.mediaTitle.trim().toLowerCase() : '';
+    const hasDrift = peers.some(other => {
+        if (!other || typeof other !== 'object' || other.peerId === localPeerId || other.desynced) return false;
+        if (other.playbackState !== 'playing' && other.playbackState !== 'paused') return false;
+        const otherTime = projectedPeerTime(other);
+        if (otherTime === null) return false;
+        const otherTitle = typeof other.mediaTitle === 'string' ? other.mediaTitle.trim().toLowerCase() : '';
+        if (myTitle && otherTitle && !myTitle.includes(otherTitle) && !otherTitle.includes(myTitle)) return false;
+        return me.playbackState !== other.playbackState || Math.abs(myTime - otherTime) > 5;
+    });
+
+    if (hasDrift) {
+        elements.forceSyncBtn.classList.add('needs-sync');
+        elements.forceSyncBtn.title = getMessage('BTN_SYNC_DRIFT_TOOLTIP');
+    } else {
+        clearSyncDriftHighlight();
+    }
 }
 
 function renderEmpty(container, type) {
@@ -1016,6 +1089,7 @@ function createPeerLinkConfirmation(peerId, url) {
 function updatePeerList(peers) {
     if (!peers) return;
     activePeers = peers;
+    updateSyncDriftHighlight(peers);
     if (peerLinkConfirm && !peers.some(p => p.peerId === peerLinkConfirm.peerId && p.tabUrl === peerLinkConfirm.url)) peerLinkConfirm = null;
     if (peers.length === 0) {
         stopInterpolation();
@@ -1515,6 +1589,7 @@ function applyConnectionStatus(status) {
     }
     if (!connected) {
         updatePingDisplay(null);
+        clearSyncDriftHighlight();
     }
     if (elements.retryBtn) {
         elements.retryBtn.style.display = reconnecting && reconnectSlowMode ? 'block' : 'none';
@@ -1696,6 +1771,8 @@ function checkInviteLink() {
 function handleInvitePaste(event) {
     const overlay = document.getElementById('onboarding-overlay');
     if (overlay && overlay.offsetParent !== null) return;
+    const changelogOverlay = document.getElementById('changelog-overlay');
+    if (changelogOverlay && changelogOverlay.offsetParent !== null) return;
     const target = event.target;
     const editable = !!target && typeof target.matches === 'function'
         && (target.isContentEditable || target.matches('input, textarea, select'));
@@ -1923,6 +2000,7 @@ if (elements.langSelector) {
         await chrome.storage.local.set({ locale: selectedLang });
         await loadLocale(selectedLang);
         translateDOM();
+        renderChangelogModalContent();
         localizeThemeSelector(selectedLang);
         configureFooterLinks();
         await updateFeatureHints();
@@ -2222,14 +2300,22 @@ elements.joinBtn.addEventListener('click', async () => {
 elements.leaveBtn.addEventListener('click', async () => {
     if (isProcessingConnection) return;
     isProcessingConnection = true;
+    elements.leaveBtn.disabled = true;
     clearConnectionErrorTimer();
-    chrome.runtime.sendMessage({ type: 'LEAVE_ROOM' });
-    await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' });
-    elements.roomId.value = '';
-    elements.password.value = '';
-    lastKnownPeers = [];
-    updateUI(null, null);
-    isProcessingConnection = false;
+    try {
+        await Promise.race([
+            new Promise(resolve => chrome.runtime.sendMessage({ type: 'LEAVE_ROOM' }, () => resolve())),
+            new Promise(resolve => setTimeout(resolve, 3000))
+        ]);
+        await chrome.storage.local.set({ roomId: '', password: '', chatKey: '' });
+        elements.roomId.value = '';
+        elements.password.value = '';
+        lastKnownPeers = [];
+        updateUI(null, null);
+    } finally {
+        elements.leaveBtn.disabled = false;
+        isProcessingConnection = false;
+    }
 });
 
 function generateRoomId() {
@@ -2325,6 +2411,7 @@ elements.forceSyncBtn.addEventListener('click', async () => {
     if (elements.forceSyncBtn.disabled) return;
     
     const originalText = elements.forceSyncBtn.textContent;
+    clearSyncDriftHighlight();
     elements.forceSyncBtn.disabled = true;
 
     const status = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_STATUS' }, r));
@@ -3233,18 +3320,42 @@ window.addEventListener('unload', () => {
         clearInterval(roomListRefreshInterval);
         roomListRefreshInterval = null;
     }
+    clearLobbyCountdown();
 });
 
 // --- Episode Lobby UI ---
+let lobbyCountdownTimer = null;
+
+function clearLobbyCountdown() {
+    if (lobbyCountdownTimer) {
+        clearInterval(lobbyCountdownTimer);
+        lobbyCountdownTimer = null;
+    }
+}
+
+function formatLobbyCountdown(deadlineAt) {
+    if (!Number.isFinite(deadlineAt)) return '';
+    const remainingSec = Math.max(0, Math.ceil((deadlineAt - Date.now()) / 1000));
+    const mins = Math.floor(remainingSec / 60);
+    const secs = remainingSec % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
 function updateLobbyUI(lobby, peers) {
     if (!elements.episodeLobbyCard) return;
 
+    clearLobbyCountdown();
+    const countdownEl = document.getElementById('lobbyCountdown');
+
     if (!lobby) {
         elements.episodeLobbyCard.style.display = 'none';
+        if (countdownEl) countdownEl.textContent = '';
+        updateSyncDriftHighlight(activePeers);
         return;
     }
 
     elements.episodeLobbyCard.style.display = 'block';
+    clearSyncDriftHighlight();
     elements.lobbyTitle.textContent = getMessage('LOBBY_WAITING_FOR', { title: lobby.expectedTitle });
 
     // Build peer readiness list. Peer usernames are remote-controlled input, so
@@ -3285,13 +3396,21 @@ function updateLobbyUI(lobby, peers) {
         elements.lobbyPeerStatus.textContent = getMessage('LOBBY_WAITING_PEERS');
     }
 
-    // Show elapsed time
-    if (lobby.createdAt && elements.lobbyPeerStatus) {
-        const elapsed = Math.floor((Date.now() - lobby.createdAt) / 1000);
-        const timerSpan = document.createElement('span');
-        timerSpan.style.cssText = 'font-size: 10px; color: var(--text-muted); margin-left: 6px; display: inline-block; vertical-align: middle;';
-        timerSpan.textContent = `(${elapsed}s)`;
-        elements.lobbyPeerStatus.appendChild(timerSpan);
+    // Live countdown until the lobby deadline
+    if (countdownEl) {
+        if (Number.isFinite(lobby.deadlineAt)) {
+            const tick = () => {
+                const text = formatLobbyCountdown(lobby.deadlineAt);
+                countdownEl.textContent = text;
+                if (lobby.deadlineAt <= Date.now()) clearLobbyCountdown();
+            };
+            tick();
+            if (lobby.deadlineAt > Date.now()) {
+                lobbyCountdownTimer = setInterval(tick, 1000);
+            }
+        } else {
+            countdownEl.textContent = '';
+        }
     }
 }
 
@@ -3531,12 +3650,144 @@ function completeOnboarding() {
     setTimeout(() => {
         if (overlay) overlay.style.display = 'none';
         document.body.style.minHeight = '';
-        chrome.storage.sync.set({ onboardingComplete: true });
+        const currentVersion = resolveChangelogVersion(chrome.runtime.getManifest().version);
+        const syncPayload = { onboardingComplete: true };
+        if (currentVersion) syncPayload[CHANGELOG_SYNC_KEY] = currentVersion;
+        chrome.storage.sync.set(syncPayload, () => refreshDevChangelogStatus());
         
         const inRoom = elements.sectionActive && elements.sectionActive.style.display === 'block';
         toggleUIState(inRoom);
     }, 300);
 }
+
+function refreshDevChangelogStatus() {
+    const statusEl = document.getElementById('devChangelogStatus');
+    if (!statusEl) return;
+    chrome.storage.sync.get([CHANGELOG_SYNC_KEY], (data) => {
+        const val = data?.[CHANGELOG_SYNC_KEY];
+        statusEl.textContent = `Read: ${val ? String(val) : 'none'}`;
+    });
+}
+
+function renderChangelogModalContent() {
+    const manifestVersion = chrome.runtime.getManifest().version;
+    const pillEl = document.getElementById('changelogVersionPill');
+    if (pillEl) pillEl.textContent = `v${manifestVersion}`;
+
+    const githubLink = document.getElementById('changelogGithubLink');
+    if (githubLink) githubLink.href = CHANGELOG_URL;
+
+    const closeBtn = document.getElementById('changelogCloseBtn');
+    if (closeBtn) {
+        const closeLabel = getMessage('CHANGELOG_CLOSE_BTN');
+        closeBtn.setAttribute('aria-label', closeLabel);
+        closeBtn.setAttribute('title', closeLabel);
+    }
+
+    const listEl = document.getElementById('changelogList');
+    if (!listEl) return;
+    listEl.replaceChildren();
+
+    for (const item of RELEASE_CHANGELOG.items) {
+        const card = document.createElement('div');
+        card.className = 'changelog-item';
+
+        const header = document.createElement('div');
+        header.className = 'changelog-item-header';
+
+        if (item.badgeKey) {
+            const badge = document.createElement('span');
+            badge.className = 'changelog-badge';
+            badge.textContent = getMessage(item.badgeKey);
+            header.appendChild(badge);
+        }
+
+        const title = document.createElement('span');
+        title.className = 'changelog-item-title';
+        title.textContent = getMessage(item.titleKey);
+        header.appendChild(title);
+
+        const desc = document.createElement('p');
+        desc.className = 'changelog-item-desc';
+        desc.textContent = getMessage(item.descKey);
+
+        card.append(header, desc);
+        listEl.appendChild(card);
+    }
+}
+
+function showChangelogModal({ manual = false } = {}) {
+    const onboardingOverlay = document.getElementById('onboarding-overlay');
+    if (!manual && onboardingOverlay && onboardingOverlay.offsetParent !== null) return;
+
+    const overlay = document.getElementById('changelog-overlay');
+    if (!overlay) return;
+
+    renderChangelogModalContent();
+    document.body.style.minHeight = '420px';
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+
+    const dismissBtn = document.getElementById('changelogDismissBtn');
+    dismissBtn?.focus();
+}
+
+function closeChangelogModal({ restoreFocus = false } = {}) {
+    const overlay = document.getElementById('changelog-overlay');
+    if (!overlay || !overlay.classList.contains('open')) return;
+
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+
+    const onboardingOverlay = document.getElementById('onboarding-overlay');
+    if (!onboardingOverlay || onboardingOverlay.offsetParent === null) {
+        document.body.style.minHeight = '';
+    }
+
+    const currentVersion = resolveChangelogVersion(chrome.runtime.getManifest().version);
+    if (currentVersion) {
+        chrome.storage.sync.set({ [CHANGELOG_SYNC_KEY]: currentVersion }, () => refreshDevChangelogStatus());
+    }
+
+    if (restoreFocus) {
+        document.getElementById('popupVersionBtn')?.focus();
+    }
+}
+
+document.getElementById('popupVersionBtn')?.addEventListener('click', () => {
+    showChangelogModal({ manual: true });
+});
+
+document.getElementById('resetChangelogBtn')?.addEventListener('click', () => {
+    chrome.storage.sync.remove(CHANGELOG_SYNC_KEY, () => {
+        refreshDevChangelogStatus();
+        showToast('Changelog read state reset', 'info');
+    });
+});
+
+document.getElementById('changelogDismissBtn')?.addEventListener('click', () => {
+    closeChangelogModal({ restoreFocus: true });
+});
+
+document.getElementById('changelogCloseBtn')?.addEventListener('click', () => {
+    closeChangelogModal({ restoreFocus: true });
+});
+
+document.getElementById('changelog-overlay')?.addEventListener('click', (e) => {
+    if (e.target.id === 'changelog-overlay') {
+        closeChangelogModal({ restoreFocus: true });
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const changelogOverlay = document.getElementById('changelog-overlay');
+        if (changelogOverlay?.classList.contains('open')) {
+            e.stopPropagation();
+            closeChangelogModal({ restoreFocus: true });
+        }
+    }
+});
 
 document.getElementById('onboarding-next')?.addEventListener('click', () => {
     onboardingStep++;
@@ -3554,6 +3805,7 @@ document.getElementById('onboarding-overlay')?.addEventListener('click', (e) => 
 });
 
 elements.restartTourBtn?.addEventListener('click', () => {
+    closeChangelogModal();
     onboardingStep = 0;
     showOnboarding();
 });
